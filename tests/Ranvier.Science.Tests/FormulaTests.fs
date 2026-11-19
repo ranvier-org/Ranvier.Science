@@ -100,7 +100,7 @@ let tests =
                     let model = pageModel ()
                     let message = expectUnitError model "mean + temp_k"
                     Expect.stringContains message "mK" "names the first unit"
-                    Expect.stringContains message "K" "names the second unit"
+                    Expect.stringContains message "and K:" "names kelvin on its own as the second unit"
                     Expect.stringContains message "convert" "says the notation does not convert"
                     expectUnitError model "mean + rate" |> ignore
                     expectUnitError model "mean + 1" |> ignore
@@ -111,7 +111,7 @@ let tests =
                 withGraph (fun () ->
                     let model = pageModel ()
                     expectUnit model "2 * mean" Units.millikelvin.Info
-                    expectUnit model "mean^2" (UnitOf.squared Units.millikelvin).Info
+                    expectUnit model "mean^2" (model.TryFind "variance").Value.Unit
                     expectUnit model "sqrt(variance)" Units.millikelvin.Info
                     expectUnitError model "sqrt(mean)" |> ignore
                     expectUnit model "abs(mean)" Units.millikelvin.Info
@@ -177,6 +177,19 @@ let tests =
                     Expect.equal (valueOf row "mean") 99.0 "mean reads the row's entry"
                     Expect.equal (valueOf row "alpha") 0.05 "alpha reads the page's entry"
                     Expect.equal (valueOf page "mean") 7.3 "the page still reads its own")
+            }
+
+            test "an exponent has a range" {
+                Expect.equal (parsed "x^1000") (Power(Name "x", 1000)) "1000 is the largest exponent"
+                Expect.equal (parsed "x^-1000") (Power(Name "x", -1000)) "-1000 is the smallest exponent"
+                Expect.isTrue (isError (Formula.parse "x^1001")) "1001 is out of range"
+                Expect.isTrue (isError (Formula.parse "x^-1001")) "-1001 is out of range"
+
+                match Formula.parse "x^1001" with
+                | Result.Error message -> Expect.stringContains message "1000" "the message names the limit"
+                | Result.Ok e -> failtestf "expected an error, got %A" e
+
+                Expect.isTrue (isError (Formula.parse ("x^" + String('9', 40)))) "a 40-digit exponent is an error and raises nothing"
             }
 
             test "an unknown name raises when the evaluator is built" {

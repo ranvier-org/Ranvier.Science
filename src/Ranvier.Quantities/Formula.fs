@@ -11,6 +11,7 @@ type Expr =
     | Subtract of Expr * Expr
     | Multiply of Expr * Expr
     | Divide of Expr * Expr
+    /// The base to an integer exponent from -1000 to 1000.
     | Power of Expr * int
     | Call of string * Expr list
 
@@ -18,7 +19,7 @@ exception internal FormulaSyntax of string
 
 /// A one-line arithmetic notation over the identifiers of a `Model`: `+ - * /`, an integer power `^`, parentheses,
 /// the one-argument functions `sqrt abs exp ln log10` and the two-argument functions `min max`. `−`, `×`, `·` and
-/// `÷` read as `-`, `*`, `*` and `/`. Spaces are ignored.
+/// `÷` read as `-`, `*`, `*` and `/`. Spaces are ignored. A `^` takes an integer exponent from -1000 to 1000.
 module Formula =
     let private arity (name: string) : int voption =
         match name with
@@ -31,7 +32,7 @@ module Formula =
         | "max" -> ValueSome 2
         | _ -> ValueNone
 
-    /// The largest exponent magnitude read; a larger one is a syntax error.
+    /// The largest exponent magnitude of `^`; a larger one is a syntax error.
     let private maxExponent = 1000
 
     let private isDigit (c: char) = c >= '0' && c <= '9'
@@ -120,7 +121,7 @@ module Formula =
             let digits = text.Substring(start, pos.Value - start).TrimStart('0')
 
             if digits.Length > 4 || (digits.Length > 0 && int digits > maxExponent) then
-                fail start ("The exponent is larger than " + string maxExponent)
+                fail start ("An exponent must be from -" + string maxExponent + " to " + string maxExponent)
 
             let magnitude = if digits.Length = 0 then 0 else int digits
             if negative then -magnitude else magnitude
