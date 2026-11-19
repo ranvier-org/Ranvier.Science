@@ -80,12 +80,16 @@ type Feed() =
             start.Finished.Task :> Task)
 
     /// Delivers `rate * dt` deviates to the current start, carrying the fraction to the next call. Returns the number delivered.
+    /// A `rate * dt` that is negative, infinite or NaN delivers nothing and returns 0, with the fraction and `Delivered` kept.
     member _.EmitAtRate(rate: float, dt: float) : int =
+        let amount = rate * dt
+
         hold (fun () ->
             match current with
+            | _ when not (amount >= 0.0 && amount < infinity) -> 0
             | None -> 0
             | Some start ->
-                let due = carry + rate * dt
+                let due = carry + amount
                 let count = floor due
                 carry <- due - count
                 let n = int count

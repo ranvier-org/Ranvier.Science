@@ -41,6 +41,19 @@ let tests =
                 Expect.equal (Format.fixed' 2 -infinity) "-∞" "negative infinity"
             }
 
+            test "fixed takes 0 to 22 decimals" {
+                Expect.equal (Format.fixed' 22 0.0) ("0." + String.replicate 22 "0") "0 to 22 places"
+                Expect.equal (Format.fixed' 22 1e-22) "0.0000000000000000000001" "1e-22 to 22 places"
+
+                Expect.throwsT<System.ArgumentOutOfRangeException>
+                    (fun () -> Format.fixed' -1 1.0 |> ignore)
+                    "-1 decimals"
+
+                Expect.throwsT<System.ArgumentOutOfRangeException>
+                    (fun () -> Format.fixed' 23 1.0 |> ignore)
+                    "23 decimals"
+            }
+
             test "count groups thousands" {
                 Expect.equal (Format.count 999.0) "999" "999"
                 Expect.equal (Format.count 12400.0) "12,400" "12400"
@@ -162,6 +175,20 @@ let tests =
                     let delivered = [ for _ in 1..4 -> feed.EmitAtRate(96.0, 0.015625) ]
                     Expect.equal delivered [ 1; 2; 1; 2 ] "1.5 items a call"
                     Expect.equal (Moments.count fold.Value.Moments) 6.0 "the fold holds 6 items")
+            }
+
+            test "a feed ignores a rate or an interval that is not a count" {
+                withGraph (fun () ->
+                    let feed = Feed()
+                    let fold = createStreamFold Folded.zero Folded.add (fun _ -> feed.Source(0.0, 1.0, 7))
+                    fold.TryValue |> ignore
+
+                    for rate, dt in [ -1000.0, 0.1; nan, 0.1; 1000.0, nan; infinity, 0.1 ] do
+                        Expect.equal (feed.EmitAtRate(rate, dt)) 0 (sprintf "rate %g, dt %g delivers nothing" rate dt)
+                        Expect.equal feed.Delivered 0 (sprintf "rate %g, dt %g leaves Delivered" rate dt)
+
+                    let delivered = [ for _ in 1..4 -> feed.EmitAtRate(96.0, 0.015625) ]
+                    Expect.equal delivered [ 1; 2; 1; 2 ] "the fraction is carried as on a fresh feed")
             }
 
             testCaseAsync "a failed feed fails its fold"

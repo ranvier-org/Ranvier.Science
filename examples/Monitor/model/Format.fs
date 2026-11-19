@@ -44,13 +44,18 @@ module Format =
     /// is 0. "NaN", "∞" and "-∞" for the rest. The same text on .NET and in JavaScript.
     /// </summary>
     /// <remarks>
-    /// <c>decimals</c> runs from 0 to 22; another value raises ArgumentException. The rounding is exact, of the double's
-    /// own value, while |x|·10^decimals is below 2^53 (about 9.007e15). From 2^53 up, the digits after the first
-    /// sixteen or so are zeros.
+    /// <c>decimals</c> is from 0 to 22, the powers of ten a double holds exactly; raises ArgumentOutOfRangeException
+    /// for any other value. The rounding is exact, of the double's own value, while |x|·10^decimals is below 2^53
+    /// (about 9.007e15). From 2^53 up, the digits after the first sixteen or so are zeros.
     /// </remarks>
     let fixed' (decimals: int) (x: float) : string =
         if decimals < 0 || decimals > maxDecimals then
-            invalidArg (nameof decimals) ("The number of decimals must be from 0 to " + string maxDecimals + ".")
+            raise (
+                ArgumentOutOfRangeException(
+                    nameof decimals,
+                    "The number of decimals must be from 0 to " + string maxDecimals + "."
+                )
+            )
 
         if Double.IsNaN x then
             "NaN"
