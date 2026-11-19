@@ -121,6 +121,29 @@ let tests =
                 Expect.equal tally.Peek.Total 3 "the fold's total")
         }
 
+        test "a fold that returns a new equal record notifies its reader" {
+            withGraph (fun () ->
+                let feed = ManualStream<int>()
+
+                let tally =
+                    createStreamFold { Tally.Total = 0 } (fun s x -> { Tally.Total = s.Total + x }) (fun _ -> feed.Source)
+
+                let mutable runs = 0
+
+                createEffect (fun () ->
+                    tally.TryValue |> ignore
+                    runs <- runs + 1)
+
+                Expect.equal runs 1 "the effect runs once at creation"
+                feed.Push 1
+                Expect.equal runs 2 "a non-zero item re-runs the effect"
+                feed.Push 0
+                Expect.equal runs 3 "an equal rebuilt record compares by reference, so a zero item re-runs the effect"
+                feed.Push 2
+                Expect.equal runs 4 "a second non-zero item re-runs the effect"
+                Expect.equal tally.Peek.Total 3 "the fold's total")
+        }
+
         test "a fold that returns a new equal struct" {
             withGraph (fun () ->
                 let feed = ManualStream<int>()

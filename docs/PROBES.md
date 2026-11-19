@@ -27,9 +27,9 @@ below is *measured here* on 2026-11-19, with `Ranvier` 0.2.0 and Fickl 0.10.1 (F
 root:
 
 - .NET: `dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter-test-list "Probes"`, reporting
-  `5 tests run ... 5 passed, 0 ignored, 0 failed, 0 errored`.
+  `6 tests run ... 6 passed, 0 ignored, 0 failed, 0 errored` (E3 added in a later commit; the first run had 5).
 - JavaScript: `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release`, then
-  `npx mocha dist/tests/Main.fs.js`, reporting `7 passing` (the five probes and the two smoke tests).
+  `npx mocha dist/tests/Main.fs.js`, reporting `8 passing` (the six probes and the two smoke tests).
 
 Each test asserts the observed behaviour. Where the targets differ, the test asserts each target's behaviour behind
 `#if FABLE_COMPILER`.
@@ -109,43 +109,62 @@ differs by target.
 ## E
 
 Question: does an effect that reads a stream fold re-run when the fold returns state equal to the state it was given?
-The fold publishes under the graph's equality policy (`Ranvier/src/Ranvier/Streams.fs`, `Publish`: a publication
-notifies readers when the status changes or `equal.Equals (value, state)` is false; `equal` is
-`graph.Options.Equality.Comparer<'S>()`). The default policy is in `Ranvier/src/Ranvier/Types.fs:279-307`.
 
-Both tests count effect runs with a mutable counter in a `createEffect` that reads `tally.TryValue`. Pushes on the
-graph thread outside a batch flush the effect before `Push` returns, on both targets, as the core's test
-`an effect sees one run per item on the graph thread, and one per batch` relies on.
+Each test is a `createStreamFold` over a `ManualStream<int>` and a `createEffect` that reads `tally.TryValue` and
+counts its runs in a mutable counter. A push on the graph thread outside a batch flushes the effect before `Push`
+returns, on both targets (the core's test `an effect sees one run per item on the graph thread, and one per batch`
+relies on the same). Every zero item is followed by a non-zero item, and the count is read after each push.
 
-### E1
+### E1: the same instance
 
 Test: `a fold that returns its previous state notifies no reader`. State is a record `{ Total: int }`; the fold is
 `fun s x -> if x = 0 then s else { s with Total = s.Total + x }`. Items 1, 0, 2.
 
-- .NET (*measured here*): passes. Runs: 1 at creation, 2 after item 1, still 2 after item 0, 3 after item 2;
-  final `Total = 3`.
-- JavaScript (*measured here*): passes with the same counts.
+- .NET (*measured here*): runs 1 at creation, 2 after item 1, 2 after item 0, 3 after item 2; final `Total = 3`.
+- JavaScript (*measured here*): the same counts.
 
-Returning the very state the fold received notifies no reader on either target.
-
-### E2
+### E2: an equal rebuilt struct
 
 Test: `a fold that returns a new equal struct`. State is a `[<Struct>]` record `{ Total: int }`, rebuilt on every
 item by `fun s x -> { Total = s.Total + x }`. Items 1, 0.
 
-- .NET (*measured here*): runs 1 at creation, 2 after item 1, still 2 after item 0. A struct compares by value
-  (`EqualityComparer<'T>.Default`), so the equal struct notifies no reader.
-- JavaScript (*measured here*): runs 1 at creation, 2 after item 1, 3 after item 0. Fickl compiles the struct record
-  to a class (`class StructTally extends Record`), and the policy compares it by reference (`===`), so each rebuilt
-  struct is a change.
-- Final `Total = 1` on both targets.
+- .NET (*measured here*): runs 1, 2, then 2 after item 0. The zero item does not re-run the effect.
+- JavaScript (*measured here*): runs 1, 2, then 3 after item 0. The zero item re-runs the effect. Fickl compiles the
+  struct record to a class (`class StructTally extends Record` in the emitted `Probes.fs.js`).
+- Final `Total = 1` on both targets. The test asserts 3 under `FABLE_COMPILER` and 2 otherwise.
 
-The test asserts 3 under `FABLE_COMPILER` and 2 otherwise.
+### E3: an equal rebuilt record
 
-Consequence: a stream fold that should skip an unchanged item returns the state it received, not an equal copy, in
-every state type that compiles to an object under Fable (records and struct records here; the doc comment in
-`Types.fs:279-307` adds struct tuples, `DateTime`, `decimal` and `KeyValuePair`). The core 0.2.0 has no
-comparer overload of `createStreamFold`; the comparer comes from the graph's `GraphOptions.Equality`. This bounds the
-fold functions of Tasks 9 and 10 and of the later plans' stream-fed quantities.
+Test: `a fold that returns a new equal record notifies its reader`. State is the record `{ Total: int }` of E1,
+rebuilt on every item by `fun s x -> { Total = s.Total + x }`. Items 1, 0, 2.
+
+- .NET (*measured here*): runs 1, 2, 3 after item 0, 4 after item 2; final `Total = 3`. The zero item re-runs the
+  effect, although the new record is equal to the old one under F# structural equality.
+- JavaScript (*measured here*): the same counts.
+
+### The rule
+
+A fold publication notifies readers when the status changes or `equal.Equals (value, state)` is false, where
+`equal` is `graph.Options.Equality.Comparer<'S>()` (*from documentation*: `Ranvier/src/Ranvier/Streams.fs`,
+`Publish`). The default `Equality` is `JsIdentityPolicy` (`Types.fs:539`), whose comparer comes from
+`ComparerResolution.resolve` (*from documentation*: `Ranvier/src/Ranvier/Types.fs`):
+
+- .NET (`Types.fs:290-307`): `float` and `float32` compare by IEEE value; other value types (structs) and `string`
+  compare with `EqualityComparer<'T>.Default`, by value; every other type, records and classes included, compares by
+  reference (`ReferenceComparer`).
+- Fable (`Types.fs:279-289`): `===` at every type. Primitives compare by value; everything else compares by
+  reference, including structs, struct tuples, `DateTime`, `decimal` and `KeyValuePair`.
+
+| State returned by the fold | .NET | JavaScript | Known by |
+|---|---|---|---|
+| the same instance it received (record) | no notification | no notification | E1, *measured here* |
+| an equal rebuilt struct | no notification | notification | E2, *measured here* |
+| an equal rebuilt record | notification | notification | E3, *measured here* |
+
+Consequence: on both targets, a stream fold skips an unchanged item only when it returns the state it received, for
+a record state and for a struct state alike. A rebuilt record notifies readers on both targets; a rebuilt equal
+struct is skipped on .NET only. `createStreamFold` in 0.2.0 has no comparer overload; the only other lever is the
+graph's `GraphOptions.Equality`. This bounds the fold functions of Tasks 9 and 10 and of the later plans'
+stream-fed quantities.
 
 ## Workarounds
