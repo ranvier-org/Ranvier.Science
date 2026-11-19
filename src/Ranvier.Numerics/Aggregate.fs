@@ -8,7 +8,8 @@ type Maintained<'T> =
     {
         Value: Memo<'T>
         /// The re-folds since creation: each time a row's removal raised, by the policy's request on a non-finite state
-        /// or on removals reaching the row count, or by an exception out of the accumulator's removal. Read it after `Value`.
+        /// or on removals reaching the larger of the row count and the policy's `RefoldFloor`, or by an exception out
+        /// of the accumulator's removal. Read it after `Value`.
         Refolds: unit -> int
     }
 
@@ -29,8 +30,8 @@ module Aggregate =
         || (isFinite (Moments.mean m) && isFinite (Moments.variance m))
 
     /// A `foldGroupBy` whose `subtract` raises, and so requests a re-fold from the cached row values, when the
-    /// accumulator is not finite or, under `RefoldAfterRemovals`, when the removals including this one reach the row
-    /// count before it.
+    /// accumulator is not finite or, under `RefoldAfterRemovals`, when the removals including this one reach the larger
+    /// of the row count before it and the policy's `RefoldFloor`.
     let private maintain
         (policy: FloatPolicy)
         (finite: 'A -> bool)
@@ -55,7 +56,7 @@ module Aggregate =
 
             if
                 not (finite s.Accumulator)
-                || (policy.RefoldAfterRemovals && removals >= s.Rows)
+                || (policy.RefoldAfterRemovals && removals >= max s.Rows policy.RefoldFloor)
             then
                 refolds.Value <- refolds.Value + 1
                 raise (ArithmeticException "Re-fold the aggregate from its cached rows.")

@@ -274,8 +274,8 @@ times under JavaScript, where each republish is an edit.
 What the slice does: `Aggregate.sumBy` and `Aggregate.momentsBy` (`src/Ranvier.Numerics/Aggregate.fs`) keep their
 state, an accumulator with the row count and the removals since the last re-fold, in a `Projection.foldGroupBy`.
 Their `subtract` raises `ArithmeticException` when the state it is given is not finite, or, under
-`RefoldAfterRemovals`, when the removals including this one reach the row count before it. `Refolds` counts these
-raises, and an exception raised by the accumulator's own removal, in a counter the closure owns.
+`RefoldAfterRemovals`, when the removals including this one reach the larger of the row count before it and the
+policy's `RefoldFloor`. `Refolds` counts these raises, and an exception raised by the accumulator's own removal, in a counter the closure owns.
 
 Core lines it relies on (*from documentation*: `Ranvier/src/Ranvier/Combinators.fs`, package 0.2.0 source):
 
@@ -306,7 +306,7 @@ scratch script (the final reviewer's check, re-run) against the Release build of
 FloatPolicy.standard` over four rows: 400 edits, each followed by a read, gave 100 re-folds; 100 batches of four
 edits, one per row, each followed by one read, gave 100 more. The cost of the raise per read was not measured.
 Whether a small aggregate keeps this threshold is for the later page to decide; this slice keeps the policy as
-designed.
+designed. `FloatPolicy.withRefoldFloor` later added a floor on the removals, which is 0 under `standard` and `fast`.
 
 ### `Tolerance.hold` inside the memo's computation
 
@@ -541,6 +541,18 @@ the same script gives 0.0415 from t ≥ 30 (*measured here*, 2026-11-19, .NET: `
 against the Release build of `Ranvier.Statistics`, the coverage test's loop with the first checked t as a
 parameter). At t = 1 the interval has zero width at the observation, and the theorem's guarantee is asymptotic
 only. Consequence for the later page: it applies a burn-in before showing or acting on the sequence.
+
+At the page's setting (test `the sequence covers at the page's setting`): α = 0.05 / 4, ρ = `rhoTightestAt (0.05 / 4.0)
+1000.0`, read through `ofMomentsAfter 30.0`, the same 2,000 streams (seeds 1 to 2,000) of 10,000 standard normal
+observations, a stream missing when its interval excludes 0 at any count.
+
+| Target | Confidence sequence miss fraction |
+|---|---|
+| .NET | 0.009 |
+| JavaScript | 0.009 |
+
+*Measured here*, 2026-11-19, with the commands above; each figure is the line the test prints. The test asserts
+a fraction of at most 0.0225.
 
 The 0.0415 is for one setting: α = 0.05, ρ tightest at 1,000 (`rhoTightestAt 0.05 1000.0`), read from t ≥ 30, on
 streams of 10,000 standard normal observations. The later page will not be running that setting, so the figure

@@ -348,6 +348,59 @@ let tests =
                     Expect.equal maintained.Value.Value scratch.Value ("removed with " + label))
         }
 
+        test "a floor delays the re-fold of a small aggregate" {
+            let refoldsUnder (policy: FloatPolicy) =
+                let mutable result = -1
+
+                withGraph (fun () ->
+                    let rows = rowsOf [| 1.0; 2.0; 3.0; 4.0 |]
+                    let sum = rows.Rows |> Aggregate.sumBy policy valueOf
+                    sum.Value.Value |> ignore
+
+                    for e in 1..256 do
+                        rows.AddOrUpdate (struct (e % 4, 10.0 + float e))
+                        sum.Value.Value |> ignore
+
+                    result <- sum.Refolds ())
+
+                result
+
+            Expect.equal (refoldsUnder (FloatPolicy.standard |> FloatPolicy.withRefoldFloor 64)) 4 "floor 64"
+            Expect.equal (refoldsUnder FloatPolicy.standard) 64 "no floor"
+        }
+
+        test "a floored aggregate equals the from-scratch one after each re-fold" {
+            withGraph (fun () ->
+                let policy = FloatPolicy.standard |> FloatPolicy.withRefoldFloor 64
+                let rows = rowsOf (Array.init 4 (momentsOf true))
+                let maintained = rows.Rows |> Aggregate.momentsBy policy valueOf
+                let scratch = rows.Rows |> Aggregate.momentsFromScratchBy policy valueOf
+                maintained.Value.Value |> ignore
+                let mutable refolds = maintained.Refolds ()
+                let mutable refoldReads = 0
+
+                for e in 1..256 do
+                    rows.AddOrUpdate (struct (e % 4, momentsOf true (100 + e)))
+                    let m = maintained.Value.Value
+                    let s = scratch.Value
+
+                    if maintained.Refolds () > refolds then
+                        refolds <- maintained.Refolds ()
+                        refoldReads <- refoldReads + 1
+                        Expect.equal m s (sprintf "bits after the re-fold at edit %d" e)
+                    else
+                        Expect.isLessThanOrEqual (relative (Moments.mean m) (Moments.mean s)) 1e-12 (sprintf "mean at edit %d" e)
+                        Expect.isLessThanOrEqual (relative (Moments.variance m) (Moments.variance s)) 1e-9 (sprintf "variance at edit %d" e)
+
+                Expect.equal refoldReads 4 "four re-folds")
+        }
+
+        test "a negative floor is rejected" {
+            Expect.throwsT<System.ArgumentOutOfRangeException>
+                (fun () -> FloatPolicy.standard |> FloatPolicy.withRefoldFloor -1 |> ignore)
+                "floor -1"
+        }
+
         test "removing the last row returns zero" {
             withGraph (fun () ->
                 let sums = rowsOf [| 2.5 |]
