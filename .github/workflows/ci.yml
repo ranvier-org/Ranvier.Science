@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, test and pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Restore tools
+        run: dotnet tool restore
+      - name: Install npm packages
+        run: npm ci
+      # The solution holds the libraries, the .NET tests, the benchmarks and the Monitor's model and native head. No step
+      # runs the Monitor or AstroTracked apps, which need a display and a GPU; AstroTracked is outside the solution.
+      - name: Build
+        run: dotnet build -c Release
+      - name: .NET tests
+        run: dotnet run -c Release --project tests/Ranvier.Science.Tests
+      - name: Compile the JavaScript tests
+        run: dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release
+      - name: JavaScript tests
+        run: npx mocha dist/tests/Main.fs.js
+      - name: Pack
+        run: |
+          dotnet pack src/Ranvier.Numerics -c Release -o artifacts/packages
+          dotnet pack src/Ranvier.Quantities -c Release -o artifacts/packages
+          dotnet pack src/Ranvier.Statistics -c Release -o artifacts/packages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error

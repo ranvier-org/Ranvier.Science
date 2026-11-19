@@ -1,0 +1,129 @@
+name: Publish NuGet
+
+# The NuGet trusted-publishing policy names this file, publish.yml.
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List the packages of the commit's CI run without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nuget-publish
+  cancel-in-progress: false
+
+jobs:
+  # The packages are the nuget-packages artifact of a successful CI run of this repository: the triggering run, or for a
+  # dispatch the latest successful push or dispatch run on the dispatched commit. A dispatch publishes from main only.
+  resolve:
+    name: Find and list the packages
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.find.outputs.run }}
+      publish: ${{ steps.find.outputs.publish }}
+    steps:
+      - name: Find the CI run
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          TRIGGER_RUN: ${{ github.event.workflow_run.id }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_run ]; then
+            run="$TRIGGER_RUN"
+            publish=true
+          else
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&status=success&per_page=100" \
+              | jq -r --arg repo "$GITHUB_REPOSITORY" --arg branch "$REF_NAME" \
+                '[.workflow_runs[] | select(.head_repository.full_name == $repo and .head_branch == $branch and (.event == "push" or .event == "workflow_dispatch"))][0].id // empty')
+            if [ -z "$run" ]; then
+              echo "::error::No successful CI run of $SHA on $REF_NAME; run CI first"
+              exit 1
+            fi
+            publish=false
+            if [ "$DRY_RUN" = false ]; then
+              if [ "$REF" != refs/heads/main ]; then
+                echo "::error::A dispatch with dry_run=false publishes from main only"
+                exit 1
+              fi
+              publish=true
+            fi
+          fi
+          echo "CI run $run, publish $publish"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: packages
+          run-id: ${{ steps.find.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: List the packages
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ls -l packages
+          for id in Ranvier.Numerics Ranvier.Quantities Ranvier.Statistics; do
+            files=(packages/"$id".[0-9]*.nupkg)
+            if [ "${#files[@]}" -ne 1 ]; then
+              echo "::error::Expected one $id package, found ${#files[@]}"
+              exit 1
+            fi
+          done
+
+  publish:
+    name: Publish to nuget.org
+    needs: resolve
+    if: needs.resolve.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: packages
+          run-id: ${{ needs.resolve.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Authenticate to NuGet with trusted publishing
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER || 'shayan.habibi' }}
+      # Ranvier.Numerics first: the other two depend on it. A push also sends a .snupkg beside its .nupkg; the packages
+      # embed their PDBs, so CI packs none.
+      - name: Publish in dependency order
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for id in Ranvier.Numerics Ranvier.Quantities Ranvier.Statistics; do
+            for package in packages/"$id".[0-9]*.nupkg; do
+              dotnet nuget push "$package" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+            done
+          done
