@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- The .NET suite in tests/Ranvier.Science.Tests, compiled with Fable and run under Mocha. Not in the solution. -->
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Expecto.fs" />
+    </ItemGroup>
+
+    <Import Project="..\Ranvier.Science.Tests\TestFiles.props" />
+
+    <ItemGroup>
+        <Compile Include="Main.fs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Ranvier.Numerics\Ranvier.Numerics.fsproj" />
+        <ProjectReference Include="..\..\src\Ranvier.Quantities\Ranvier.Quantities.fsproj" />
+        <ProjectReference Include="..\..\src\Ranvier.Statistics\Ranvier.Statistics.fsproj" />
+        <PackageReference Include="Fable.Core" Version="5.3.0" />
+        <PackageReference Include="Fable.Mocha" Version="2.17.0" />
+    </ItemGroup>
+
+</Project>

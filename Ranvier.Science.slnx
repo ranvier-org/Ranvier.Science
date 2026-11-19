@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Ranvier.Numerics/Ranvier.Numerics.fsproj" />
+    <Project Path="src/Ranvier.Quantities/Ranvier.Quantities.fsproj" />
+    <Project Path="src/Ranvier.Statistics/Ranvier.Statistics.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Ranvier.Science.Tests/Ranvier.Science.Tests.fsproj" />
+  </Folder>
+</Solution>
