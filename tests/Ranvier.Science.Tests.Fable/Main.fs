@@ -13,6 +13,7 @@ let all =
             testList "MomentsTests.fs" [ Ranvier.Science.Tests.MomentsTests.tests ]
             testList "AggregateTests.fs" [ Ranvier.Science.Tests.AggregateTests.tests ]
             testList "ToleranceTests.fs" [ Ranvier.Science.Tests.ToleranceTests.tests ]
+            testList "UnitsTests.fs" [ Ranvier.Science.Tests.UnitsTests.tests ]
         ]
 
 Mocha.runTests all |> ignore
