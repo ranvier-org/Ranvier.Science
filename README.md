@@ -133,6 +133,8 @@ Run from the repository root, in Release.
 
 ## Records
 
+- [`docs/FINDINGS.md`](docs/FINDINGS.md): the findings of the slice: the answers to its five questions, the core
+  proposals, the interfaces to change before widening, and what to widen first.
 - [`docs/PROBES.md`](docs/PROBES.md): what each probe ran and what it showed.
 - [`docs/measurements/node-cost.md`](docs/measurements/node-cost.md): the node-cost measurements.
 - [`docs/measurements/aggregates.md`](docs/measurements/aggregates.md): the aggregate and key-scaling measurements.
