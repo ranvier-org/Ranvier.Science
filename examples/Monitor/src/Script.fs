@@ -4,6 +4,7 @@ module SequentialMonitor.Script
 open Ranvier
 open Ranvier.D5
 open Ranvier.Dom
+open Ranvier.Numerics
 open SequentialMonitor.App
 
 /// The expectations of one script: each failed one is reported with its expected and observed value.
@@ -195,6 +196,108 @@ let private counts (props: Props) =
     else
         1
 
+/// The period of a 165 Hz display, in milliseconds: the budget of one frame's work.
+let private budget = 6.06
+
+/// The smallest non-zero difference between successive readings of the platform's clock over `reads` readings;
+/// infinity when every difference is 0.
+let private timerStep (platform: IPlatform) (reads: int) : float =
+    let mutable smallest = infinity
+    let mutable previous = platform.Now()
+
+    for _ in 2..reads do
+        let now = platform.Now()
+        let step = now - previous
+
+        if step > 0.0 && step < smallest then
+            smallest <- step
+
+        previous <- now
+
+    smallest
+
+/// The milliseconds of one frame of 1/60 s: the frame's batch, with its recomputation, chart scene and DOM writes,
+/// and then the style and layout computed for a read of `root`'s bounding box.
+let private frameTime (props: Props) (m: Monitor) (root: Ranvier.Dom.Element) : float =
+    let platform = props.Platform
+    let started = platform.Now()
+    inGraph props (fun () -> Monitor.frame m (1.0 / 60.0))
+    root.getBoundingClientRect () |> ignore
+    platform.Now() - started
+
+/// The mean of `times` and their 95th percentile, the element at index ceil (0.95 n) - 1 of the n sorted times.
+let private meanAndP95 (times: float[]) : struct (float * float) =
+    let sorted = Array.sort times
+    struct (Array.average times, sorted[int (ceil (0.95 * float sorted.Length)) - 1])
+
+/// <summary>
+/// Times the frame work of the default page, then of the page at 2,000 to 1,024,000 observations a second per channel,
+/// doubling, each rate from a restart. Returns 0 when the default page's mean and 95th percentile are both under
+/// <c>budget</c> and every channel folded the items due at its rate; 1 otherwise.
+/// </summary>
+/// <remarks>With no rate under the budget, the last line reports the figures of 2,000 a second.</remarks>
+let private frames (props: Props) =
+    let report = props.Platform.Report
+    let expect = Expectations(report, "frames")
+    let m = (pageOf props).Monitor
+    props.Session.Auto <- false
+    let root = (props.Platform.Document.getElementById "table").parentElement
+    let ms (x: float) = Format.fixed' 2 x
+    let under (mean: float) (p95: float) = mean < budget && p95 < budget
+
+    let reads = 100000
+    let step = timerStep props.Platform reads
+    let stepText = if step < infinity then Format.fixed' 6 step + " ms" else "none"
+    report $"frames | timer | smallest non-zero step {stepText} over {reads} reads"
+
+    // `unrecorded` frames, then the times of `timed` frames; each channel must fold every item due at the rate.
+    let measure (unrecorded: int) (timed: int) =
+        let rows, rate = inGraph props (fun () -> Monitor.rows m, float m.Rate.Value)
+        let before = rows |> Array.map (fun r -> r.Feed.Delivered)
+
+        for _ in 1..unrecorded do
+            frameTime props m root |> ignore
+
+        let times = Array.init timed (fun _ -> frameTime props m root)
+        let due = rate * float (unrecorded + timed) / 60.0
+
+        for r, start in Array.zip rows before do
+            let delivered = r.Feed.Delivered - start
+            let what = $"{r.Key}: items delivered within 1 of {Format.count due}"
+            expect.Equal what true (abs (float delivered - due) <= 1.0) |> ignore
+            expect.Equal (r.Key + ": items folded") (float delivered) (Moments.count r.Observations.Peek.Moments) |> ignore
+
+        meanAndP95 times
+
+    let channels, defaultRate = inGraph props (fun () -> (Monitor.rows m).Length, float m.Rate.Value)
+    let struct (mean, p95) = measure 60 600
+    report $"frames | {channels} channels at {int defaultRate} /s | mean {ms mean} ms | p95 {ms p95} ms | 600 frames | budget {ms budget} ms"
+    expect.Equal "the default page's mean and 95th percentile under the budget" true (under mean p95) |> ignore
+
+    let sweep =
+        [|
+            for k in 0..9 do
+                let rate = 2000 <<< k
+
+                inGraph props (fun () ->
+                    m.Rate.Set(LanguagePrimitives.FloatWithMeasure(float rate))
+                    Monitor.restart m)
+
+                let struct (mean, p95) = measure 20 120
+                report $"frames | sweep | {rate} /s per channel | mean {ms mean} ms | p95 {ms p95} ms | 120 frames"
+                yield (string rate, mean, p95)
+        |]
+
+    let highest, mean, p95 =
+        match sweep |> Array.filter (fun (_, mean, p95) -> under mean p95) |> Array.tryLast with
+        | Some found -> found
+        | None ->
+            let _, mean, p95 = sweep[0]
+            ("none", mean, p95)
+
+    report $"frames | highest rate under the budget | {highest} /s per channel | mean {ms mean} ms | p95 {ms p95} ms | 120 frames"
+    if expect.Failed = 0 then 0 else 1
+
 /// Runs the named script against the page mounted for `props` and returns its exit code.
 /// Its last line is `script done <code>`.
 let run (props: Props) (name: string) : int =
@@ -205,6 +308,7 @@ let run (props: Props) (name: string) : int =
             match name with
             | "table" -> table props
             | "counts" -> counts props
+            | "frames" -> frames props
             | "picture" ->
                 let code = table props
                 report (props.Platform.SavePicture "monitor")
