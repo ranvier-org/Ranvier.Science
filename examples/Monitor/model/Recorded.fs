@@ -1,4 +1,4 @@
-module Ranvier.Science.Tests.Recorded
+module SequentialMonitor.Recorded
 
 // DATA, not a test. 1,000 deviates made once on .NET on 2026-11-19 by
 // `Generator.normals 0.84 3.0 1000 (Generator.create 20261119)`, written with round-trip formatting.

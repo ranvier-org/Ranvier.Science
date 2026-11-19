@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- The sequential monitor's graph, with no view dependency, so both test suites can test it. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Recorded.fs" />
+        <Compile Include="Format.fs" />
+        <Compile Include="History.fs" />
+        <Compile Include="Feed.fs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Ranvier" Version="0.2.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\src\Ranvier.Numerics\Ranvier.Numerics.fsproj" />
+        <ProjectReference Include="..\..\..\src\Ranvier.Quantities\Ranvier.Quantities.fsproj" />
+        <ProjectReference Include="..\..\..\src\Ranvier.Statistics\Ranvier.Statistics.fsproj" />
+    </ItemGroup>
+
+</Project>

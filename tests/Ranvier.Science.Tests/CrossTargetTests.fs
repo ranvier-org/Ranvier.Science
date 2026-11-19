@@ -4,6 +4,7 @@ open System
 open Expecto
 open Ranvier.Numerics
 open Ranvier.Statistics
+open SequentialMonitor
 
 let private rel (actual: float) (expected: float) = abs (actual - expected) / abs expected
 

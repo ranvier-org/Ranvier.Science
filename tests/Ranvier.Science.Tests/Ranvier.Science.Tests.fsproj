@@ -22,6 +22,7 @@
         <ProjectReference Include="..\..\src\Ranvier.Numerics\Ranvier.Numerics.fsproj" />
         <ProjectReference Include="..\..\src\Ranvier.Quantities\Ranvier.Quantities.fsproj" />
         <ProjectReference Include="..\..\src\Ranvier.Statistics\Ranvier.Statistics.fsproj" />
+        <ProjectReference Include="..\..\examples\Monitor\model\Monitor.Model.fsproj" />
     </ItemGroup>
 
 </Project>
