@@ -59,7 +59,66 @@ by the commands above).
 
 ## B
 
-Not yet run. Probe B (an empty View page through Fickl) is the first task of Plan 2.
+Question: does one set of page sources, `examples/Monitor/src`, mount in a hidden native window and, compiled
+with Fickl, in a headless browser, on the package versions the native demo uses?
+
+Result: yes, on both heads, with no fallback. The commands below were run at the commit that adds this section,
+when the page was a placeholder: an element with id `probe` whose text is bound to a signal holding
+`probe page`, and one `Renderer.passive` scene with one text mark. The script `hello` reports that text and the
+number of `[data-d5-key]` elements. Later commits replace the placeholder page and its `hello` script; the build
+command stays.
+
+Commands (*measured here*, 2026-11-19), from the repository root:
+
+```
+dotnet build -c Release
+dotnet run -c Release --project examples/Monitor/native -- --script hello
+```
+
+```
+dotnet fickl examples/Monitor/web -e .fs.js -o examples/Monitor/web/dist -c Release
+node examples/Monitor/web/run.mjs hello
+```
+
+The browser build is the third command. It writes `examples/Monitor/web/dist/Browser.fs.js`, which
+`index.html` loads unbundled as a module.
+
+Output lines, the same on both heads (*measured here*), each run exiting with code 0:
+
+```
+hello | probe page | marks 1
+script done 0
+```
+
+`node examples/Monitor/web/run.mjs hello --picture <png>` printed the same two lines and wrote a 1280 x 900
+screenshot showing the text and the mark.
+
+Package versions each head ended on (*measured here*: the `libraries` of each head's `obj/project.assets.json`):
+
+- Native: `Ranvier` 0.2.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Ranvier.View.WebCore` 0.2.0,
+  `Ranvier.View.WebCore.Sdl` 0.2.1, `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1, and in Debug
+  `Ranvier.View.WebCore.Hmr` 0.1.3.
+- Browser: `Ranvier` 0.2.0, `Ranvier.Dom` 0.1.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Fable.Core` 5.3.0,
+  with Fickl 0.10.1 (Fable 5.27.0). `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1 are compiled from
+  the `Ranvier.D5` clone through the project reference; the clone asks for `Ranvier.View` 0.1.49, and the head
+  resolves 0.2.0.
+
+Fallbacks: none was needed. The plain build compiled and the page loaded unbundled, so `--noCache`, the `fickl`
+clone's compiler, `Ranvier.View` 0.1.50 and `rolldown` were not tried.
+
+Build time (*measured here*, the wall time of the browser build command): 1299 s for the first build that
+compiled, of which Fickl reported 873 s for compilation and 421 s for caching 121 package sources. The next run,
+with no source changed, took 0.7 s (`Skipped compilation because all generated files are up-to-date!`).
+
+State of the `Ranvier.D5` clone (*measured here*, `git -C ../Ranvier.D5 status --short` and `log --oneline -1`),
+the same before the first browser build and after the last:
+
+```
+ M .github/workflows/ci.yml
+ M src/Ranvier.D5/Ranvier.D5.fsproj
+?? tests/PackedFickl/
+08e5642 Prepare version 0.1.1 (#58)
+```
 
 ## C
 

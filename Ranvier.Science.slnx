@@ -7,6 +7,9 @@
   <Folder Name="/tests/">
     <Project Path="tests/Ranvier.Science.Tests/Ranvier.Science.Tests.fsproj" />
   </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/Monitor/native/Monitor.Native.fsproj" />
+  </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Ranvier.Science.Benchmarks/Ranvier.Science.Benchmarks.fsproj" />
   </Folder>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sequential monitor</title>
+  <link rel="icon" href="data:,">
+  <script>
+    // A script or module that fails to load or to run is reported to the server's log.
+    addEventListener("error", (event) => {
+      const what = event.message || ("could not load " + (event.target && event.target.src));
+      fetch("/log", { method: "POST", body: "page error: " + what }).catch(() => {});
+    }, true);
+  </script>
+</head>
+<body>
+  <div id="app">Starting...</div>
+  <script type="module" src="dist/Browser.fs.js"></script>
+</body>
+</html>

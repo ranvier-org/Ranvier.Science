@@ -3,3 +3,6 @@ obj/
 dist/
 node_modules/
 BenchmarkDotNet.Artifacts/
+examples/Monitor/web/.chrome-profile/
+examples/Monitor/web/probe.log
+examples/Monitor/out/
