@@ -124,12 +124,31 @@ let tests =
                     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.rhoTightestAt alpha 100.0 |> ignore) label
                     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> FixedSample.ofMoments alpha m |> ignore) label
 
-                for rho in [ 0.0; -1.0 ] do
+                for rho in [ 0.0; -1.0; infinity; nan ] do
                     let label = sprintf "rho %g" rho
                     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.radius 0.05 rho 10.0 1.0 |> ignore) label
                     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.ofMoments 0.05 rho m |> ignore) label
 
-                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.rhoTightestAt 0.05 0.0 |> ignore) "n 0"
+                for n in [ 0.0; infinity; nan ] do
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.rhoTightestAt 0.05 n |> ignore) (sprintf "n %g" n)
+
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.radius 0.05 1.0 10.0 -1.0 |> ignore) "sd -1"
+            }
+
+            test "radius with a NaN sd is NaN" {
+                Expect.isTrue (Double.IsNaN (ConfidenceSequence.radius 0.05 1.0 10.0 nan)) "radius"
+            }
+
+            test "a sample of one reached by removal gives a zero-width interval" {
+                let xs = Array.init 1000 (fun k -> sqrt (float k) + 0.1)
+                let mutable m = Array.fold (Moments.add true) Moments.zero xs
+
+                for k in 0..998 do
+                    m <- Moments.remove true m xs[k]
+
+                let s = ConfidenceSequence.ofMoments 0.05 1.0 m
+                Expect.equal s.Lower s.Upper "zero width"
+                Expect.equal s.Lower (Moments.mean m) "at the mean"
             }
 
             // Seeds 1 to 2,000, 10,000 deviates each.

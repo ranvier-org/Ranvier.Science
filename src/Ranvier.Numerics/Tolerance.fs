@@ -32,12 +32,14 @@ module Tolerance =
             abs (next - previous) <= limit
 
     /// `previous` when there is one and `next` is within the tolerance of it; `next` otherwise.
+    /// Applied inside a memo's computation, to the previous value the memo passes in.
     let hold (t: Tolerance) (previous: float voption) (next: float) : float =
         match previous with
         | ValueSome p when within t p next -> p
         | _ -> next
 
     /// The `previous` array instance when it has the length of `next` and every element is within the tolerance of its counterpart; `next` otherwise.
+    /// Applied inside a memo's computation, to the previous array the memo passes in.
     let holdSeries (t: Tolerance) (previous: float[] voption) (next: float[]) : float[] =
         match previous with
         | ValueSome p when p.Length = next.Length ->

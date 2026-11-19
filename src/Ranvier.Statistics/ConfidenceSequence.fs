@@ -11,9 +11,13 @@ module private Arguments =
         if not (alpha > 0.0 && alpha < 1.0) then
             raise (ArgumentOutOfRangeException(nameof alpha, "alpha must lie strictly between 0 and 1."))
 
-    let positive (name: string) (x: float) =
-        if not (x > 0.0) then
-            raise (ArgumentOutOfRangeException(name, name + " must be greater than 0."))
+    let finitePositive (name: string) (x: float) =
+        if not (x > 0.0 && x < infinity) then
+            raise (ArgumentOutOfRangeException(name, name + " must be finite and greater than 0."))
+
+    let notNegative (name: string) (x: float) =
+        if x < 0.0 then
+            raise (ArgumentOutOfRangeException(name, name + " must be zero or more."))
 
 /// <summary>
 /// The Gaussian-mixture asymptotic confidence sequence for a mean (Waudby-Smith, Arbour, Sinha, Kennedy and
@@ -32,7 +36,8 @@ module private Arguments =
 module ConfidenceSequence =
     /// <summary>
     /// The half-width sd · sqrt((2(tρ² + 1) / (t²ρ²)) · ln(sqrt(tρ² + 1) / α)) at t observations with standard
-    /// deviation sd. NaN when t ≤ 0. Raises ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1 and rho &gt; 0.
+    /// deviation sd. NaN when t ≤ 0 or sd is NaN. Raises ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1 and
+    /// rho is finite and greater than 0, and when sd is negative.
     /// </summary>
     /// <remarks>
     /// The coverage guarantee of the module is asymptotic, with no statement at any finite t; a monitor applies a
@@ -40,7 +45,8 @@ module ConfidenceSequence =
     /// </remarks>
     let radius (alpha: float) (rho: float) (t: float) (sd: float) : float =
         Arguments.alpha alpha
-        Arguments.positive (nameof rho) rho
+        Arguments.finitePositive (nameof rho) rho
+        Arguments.notNegative (nameof sd) sd
 
         if not (t > 0.0) then
             nan
@@ -52,7 +58,7 @@ module ConfidenceSequence =
     /// <summary>
     /// mean ± radius at the moments' count and population standard deviation. NaN bounds for an empty sample;
     /// a zero-width interval at the observation for a sample of one. Raises ArgumentOutOfRangeException unless
-    /// 0 &lt; alpha &lt; 1 and rho &gt; 0.
+    /// 0 &lt; alpha &lt; 1 and rho is finite and greater than 0.
     /// </summary>
     /// <remarks>
     /// The interval holds the mean only asymptotically, with no coverage statement at any finite count. At small
@@ -67,11 +73,11 @@ module ConfidenceSequence =
     /// <summary>
     /// The rho for which <c>radius</c> at t = n is smallest: sqrt(u / n), where u &gt; 0 solves
     /// α² · exp u = u + 1 (arXiv 2103.06476, appendix B.2, equation 302). Raises ArgumentOutOfRangeException unless
-    /// 0 &lt; alpha &lt; 1 and n &gt; 0.
+    /// 0 &lt; alpha &lt; 1 and n is finite and greater than 0.
     /// </summary>
     let rhoTightestAt (alpha: float) (n: float) : float =
         Arguments.alpha alpha
-        Arguments.positive (nameof n) n
+        Arguments.finitePositive (nameof n) n
         // Newton's method on h(u) = u − ln(u + 1) + 2 ln α, which is convex and increasing for u > 0, from the
         // closed-form approximation of equation 311.
         let twoLogAlpha = 2.0 * log alpha

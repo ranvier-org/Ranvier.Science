@@ -19,9 +19,9 @@ let private rowsOf (values: 'V[]) =
 let private plainFold compensated (values: float[]) =
     values |> Array.fold (Sum.add compensated) Sum.zero |> Sum.value
 
-let private momentsOf (seed: int) =
+let private momentsOf (compensated: bool) (seed: int) =
     Array.init 50 (fun j -> 100.0 + float ((seed * 31 + j * 17) % 1000) / 7.0)
-    |> Array.fold (Moments.add true) Moments.zero
+    |> Array.fold (Moments.add compensated) Moments.zero
 
 let private relative (a: float) (b: float) = abs (a - b) / abs b
 
@@ -183,7 +183,7 @@ let tests =
 
         test "maintained moments follow from-scratch moments" {
             withGraph (fun () ->
-                let rows = rowsOf (Array.init 100 momentsOf)
+                let rows = rowsOf (Array.init 100 (momentsOf true))
                 let maintained = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard valueOf
                 let scratch = rows.Rows |> Aggregate.momentsFromScratchBy FloatPolicy.standard valueOf
                 maintained.Value.Value |> ignore
@@ -192,7 +192,7 @@ let tests =
                 let mutable varianceDistance = 0.0
 
                 for e in 1..10_000 do
-                    rows.AddOrUpdate (struct (e % 100, momentsOf (100 + e)))
+                    rows.AddOrUpdate (struct (e % 100, momentsOf true (100 + e)))
                     let m = maintained.Value.Value
 
                     if e % 100 = 99 || e % 97 = 0 then
@@ -207,12 +207,106 @@ let tests =
                     (maintained.Refolds ())
 
                 Expect.isLessThanOrEqual meanDistance 1e-12 "mean"
-                Expect.isLessThanOrEqual varianceDistance 1e-9 "variance")
+                Expect.isLessThanOrEqual varianceDistance 1e-9 "variance"
+                Expect.equal (maintained.Refolds ()) (10_000 / 100) "one re-fold per 100 removals from 100 rows, and no other")
+        }
+
+        test "a momentsBy row republished with an equal Moments" {
+            withGraph (fun () ->
+                let instances = Array.init 4 (momentsOf true)
+                let rows = rowsOf instances
+                let maintained = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard valueOf
+                let first = maintained.Value.Value
+
+                for e in 1..8 do
+                    rows.AddOrUpdate (struct (e % 4, instances[e % 4]))
+                    maintained.Value.Value |> ignore
+
+                Expect.equal (maintained.Refolds ()) 0 "a republished instance is no edit"
+
+                for e in 1..8 do
+                    rows.AddOrUpdate (struct (e % 4, momentsOf true (e % 4)))
+                    maintained.Value.Value |> ignore
+
+#if FABLE_COMPILER
+                Expect.equal
+                    (maintained.Refolds ())
+                    2
+                    "under Fable an equal rebuilt Moments compares by reference, so each of the 8 republishes of 4 rows is an edit"
+#else
+                Expect.equal (maintained.Refolds ()) 0 "on .NET an equal rebuilt Moments compares by value, so no republish is an edit"
+                Expect.equal maintained.Value.Value first "the state keeps its bits"
+#endif
+                Expect.equal (Moments.mean maintained.Value.Value) (Moments.mean first) "the mean")
+        }
+
+        test "an infinite row reads NaN under standard and the infinity under fast until it is removed" {
+            for policy in [ FloatPolicy.standard; FloatPolicy.fast ] do
+                for bad in [ infinity; -infinity ] do
+                    withGraph (fun () ->
+                        let values = [| 0.1; 0.2; 0.3; 0.4 |]
+                        let rows = rowsOf values
+                        let sum = rows.Rows |> Aggregate.sumBy policy valueOf
+                        sum.Value.Value |> ignore
+                        let label = sprintf "row %g with Compensated = %b" bad policy.Compensated
+                        rows.AddOrUpdate (struct (4, bad))
+
+                        if policy.Compensated then
+                            Expect.isTrue (System.Double.IsNaN sum.Value.Value) ("NaN: " + label)
+                        else
+                            Expect.equal sum.Value.Value bad ("the infinity: " + label)
+
+                        let before = sum.Refolds ()
+                        rows.AddOrUpdate (struct (0, 0.15))
+                        sum.Value.Value |> ignore
+                        rows.AddOrUpdate (struct (0, 0.1))
+                        sum.Value.Value |> ignore
+                        Expect.equal (sum.Refolds () - before) 2 ("one re-fold per edit while the row is present: " + label)
+                        rows.Remove 4 |> ignore
+                        Expect.equal sum.Value.Value (plainFold policy.Compensated values) ("removed: " + label))
+        }
+
+        test "two rows of 1e308 read NaN under standard and +infinity under fast until one is removed" {
+            for policy in [ FloatPolicy.standard; FloatPolicy.fast ] do
+                withGraph (fun () ->
+                    let rows = rowsOf [| 1e308; 1e308 |]
+                    let sum = rows.Rows |> Aggregate.sumBy policy valueOf
+                    let label = sprintf "Compensated = %b" policy.Compensated
+
+                    if policy.Compensated then
+                        Expect.isTrue (System.Double.IsNaN sum.Value.Value) ("NaN with " + label)
+                    else
+                        Expect.equal sum.Value.Value infinity ("+infinity with " + label)
+
+                    rows.Remove 1 |> ignore
+                    Expect.equal sum.Value.Value (plainFold policy.Compensated [| 1e308 |]) ("removed with " + label))
+        }
+
+        test "a moments row ending in +infinity reads mean NaN under standard and mean +infinity under fast until it is removed" {
+            for policy in [ FloatPolicy.standard; FloatPolicy.fast ] do
+                withGraph (fun () ->
+                    let c = policy.Compensated
+                    let rows = rowsOf (Array.init 4 (momentsOf c))
+                    let maintained = rows.Rows |> Aggregate.momentsBy policy valueOf
+                    let scratch = rows.Rows |> Aggregate.momentsFromScratchBy policy valueOf
+                    maintained.Value.Value |> ignore
+                    rows.AddOrUpdate (struct (4, Moments.add c (momentsOf c 4) infinity))
+                    let label = sprintf "Compensated = %b" c
+                    let m = maintained.Value.Value
+
+                    if c then
+                        Expect.isTrue (System.Double.IsNaN (Moments.mean m)) ("NaN mean with " + label)
+                    else
+                        Expect.equal (Moments.mean m) infinity ("+infinity mean with " + label)
+
+                    Expect.isTrue (System.Double.IsNaN (Moments.variance m)) ("NaN variance with " + label)
+                    rows.Remove 4 |> ignore
+                    Expect.equal maintained.Value.Value scratch.Value ("removed with " + label))
         }
 
         test "after a re-fold the maintained moments have the from-scratch bits" {
             withGraph (fun () ->
-                let rows = rowsOf (Array.init 10 momentsOf)
+                let rows = rowsOf (Array.init 10 (momentsOf true))
                 let maintained = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard valueOf
                 let scratch = rows.Rows |> Aggregate.momentsFromScratchBy FloatPolicy.standard valueOf
                 maintained.Value.Value |> ignore
@@ -220,7 +314,7 @@ let tests =
 
                 while maintained.Refolds () = 0 do
                     i <- i + 1
-                    rows.AddOrUpdate (struct (i % 10, momentsOf (1000 * i)))
+                    rows.AddOrUpdate (struct (i % 10, momentsOf true (1000 * i)))
                     let m = maintained.Value.Value
 
                     if maintained.Refolds () = 1 then
@@ -243,11 +337,11 @@ let tests =
         test "a NaN row poisons the moments until it is removed" {
             for policy in [ FloatPolicy.standard; FloatPolicy.fast ] do
                 withGraph (fun () ->
-                    let rows = rowsOf (Array.init 4 momentsOf)
+                    let rows = rowsOf (Array.init 4 (momentsOf policy.Compensated))
                     let maintained = rows.Rows |> Aggregate.momentsBy policy valueOf
                     let scratch = rows.Rows |> Aggregate.momentsFromScratchBy policy valueOf
                     maintained.Value.Value |> ignore
-                    rows.AddOrUpdate (struct (4, Moments.add policy.Compensated (momentsOf 4) nan))
+                    rows.AddOrUpdate (struct (4, Moments.add policy.Compensated (momentsOf policy.Compensated 4) nan))
                     let label = sprintf "Compensated = %b" policy.Compensated
                     Expect.isTrue (System.Double.IsNaN (Moments.mean maintained.Value.Value)) ("NaN mean with " + label)
                     rows.Remove 4 |> ignore
@@ -261,7 +355,7 @@ let tests =
                 Expect.equal sum.Value.Value 2.5 "one row"
                 sums.Remove 0 |> ignore
                 Expect.equal sum.Value.Value 0.0 "sum"
-                let moments = rowsOf [| momentsOf 1 |]
+                let moments = rowsOf [| momentsOf true 1 |]
                 let m = moments.Rows |> Aggregate.momentsBy FloatPolicy.standard valueOf
                 Expect.equal (Moments.count m.Value.Value) 50.0 "one row of moments"
                 moments.Remove 0 |> ignore

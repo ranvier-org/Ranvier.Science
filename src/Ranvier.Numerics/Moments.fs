@@ -2,7 +2,11 @@ namespace Ranvier.Numerics
 
 open System
 
-/// Count, mean and spread of a set of observations. Immutable.
+/// <summary>Count, mean and spread of a set of observations. Immutable.</summary>
+/// <remarks>
+/// Every operation on one accumulator takes the same value of <c>compensated</c>. An operation with <c>false</c> on a
+/// state built with <c>true</c> drops the state's carries.
+/// </remarks>
 [<Struct; NoComparison>]
 type Moments =
     private
@@ -27,7 +31,10 @@ module Moments =
         let m2 = Sum.add compensated m.M2 (delta * (x - Sum.value mean))
         { N = n; Mean = mean; M2 = m2 }
 
-    /// Raises InvalidOperationException when the count is zero. Returns `zero` when the count reaches zero.
+    /// <summary>
+    /// Raises InvalidOperationException when the count is zero. Returns <c>zero</c> when the count reaches zero. At a
+    /// count of one the spread is exactly zero and the mean equals the remaining observation within rounding.
+    /// </summary>
     let remove (compensated: bool) (m: Moments) (x: float) : Moments =
         if m.N <= 0.0 then
             raise (InvalidOperationException "Cannot remove an observation from an empty set of moments.")
@@ -37,9 +44,16 @@ module Moments =
             let n = m.N - 1.0
             let oldMean = Sum.value m.Mean
             let mean = Sum.add compensated m.Mean (-((x - oldMean) / n))
-            let m2 = Sum.add compensated m.M2 (-((x - oldMean) * (x - Sum.value mean)))
+
+            let m2 =
+                if n = 1.0 then
+                    Sum.zero
+                else
+                    Sum.add compensated m.M2 (-((x - oldMean) * (x - Sum.value mean)))
+
             { N = n; Mean = mean; M2 = m2 }
 
+    /// Returns `b` itself when `a` is empty, and `a` itself when `b` is empty.
     let merge (compensated: bool) (a: Moments) (b: Moments) : Moments =
         if a.N = 0.0 then
             b
@@ -53,7 +67,8 @@ module Moments =
             { N = n; Mean = mean; M2 = m2 }
 
     /// `unmerge whole part` is the moments of the observations of `whole` outside `part`.
-    /// Raises InvalidOperationException when `part` has more observations than `whole`; returns `zero` when the counts are equal.
+    /// Raises InvalidOperationException when `part` has more observations than `whole`; returns `zero` when the counts are equal,
+    /// and `whole` itself when `part` is empty. At a remaining count of one the spread is exactly zero.
     let unmerge (compensated: bool) (whole: Moments) (part: Moments) : Moments =
         let n = whole.N - part.N
 
@@ -68,7 +83,13 @@ module Moments =
             let mean = Sum.add compensated whole.Mean (-((part.N / n) * (Sum.value part.Mean - wholeMean)))
             let delta = Sum.value part.Mean - Sum.value mean
             let between = delta * delta * (n * part.N / whole.N)
-            let m2 = Sum.add compensated (Sum.add compensated whole.M2 (-(Sum.value part.M2))) (-between)
+
+            let m2 =
+                if n = 1.0 then
+                    Sum.zero
+                else
+                    Sum.add compensated (Sum.add compensated whole.M2 (-(Sum.value part.M2))) (-between)
+
             { N = n; Mean = mean; M2 = m2 }
 
     /// A whole number, exact up to 2^53 (a float so the count has one representation on both targets).

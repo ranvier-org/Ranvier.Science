@@ -95,6 +95,46 @@ let tests =
                 Expect.equal (Moments.count m) 4294967296.0 "count"
             }
 
+            test "a sample of one reached by removal has zero spread" {
+                let mutable firstInFirstOut = ofArray true sample
+
+                for k in 0..998 do
+                    firstInFirstOut <- Moments.remove true firstInFirstOut sample[k]
+
+                let mutable lastInFirstOut = ofArray true sample
+
+                for k in 999 .. -1 .. 1 do
+                    lastInFirstOut <- Moments.remove true lastInFirstOut sample[k]
+
+                let unmerged = Moments.unmerge true (ofArray true sample) (ofArray true sample[1..])
+
+                for name, m, kept in
+                    [
+                        "first-in-first-out", firstInFirstOut, sample[999]
+                        "last-in-first-out", lastInFirstOut, sample[0]
+                        "unmerge", unmerged, sample[0]
+                    ] do
+                    Expect.equal (Moments.count m) 1.0 (name + ": count")
+                    Expect.equal (Moments.variance m) 0.0 (name + ": variance")
+                    Expect.equal (Moments.standardError m) 0.0 (name + ": standard error")
+                    Expect.isTrue (rel (Moments.mean m) kept <= 1e-11) (name + ": mean within relative 1e-11 of the remaining observation")
+            }
+
+            test "merge and unmerge with an empty side return the other side" {
+                let a = ofArray true sample
+                let left = Moments.merge true Moments.zero a
+                let right = Moments.merge true a Moments.zero
+                let unmerged = Moments.unmerge true a Moments.zero
+                Expect.equal left a "merge zero a"
+                Expect.equal right a "merge a zero"
+                Expect.equal unmerged a "unmerge a zero"
+#if FABLE_COMPILER
+                Expect.isTrue (obj.ReferenceEquals (box left, box a)) "merge zero a is the instance a"
+                Expect.isTrue (obj.ReferenceEquals (box right, box a)) "merge a zero is the instance a"
+                Expect.isTrue (obj.ReferenceEquals (box unmerged, box a)) "unmerge a zero is the instance a"
+#endif
+            }
+
             test "a NaN observation gives NaN and raises nothing" {
                 let m = Moments.add true (ofArray true [| 1.0; 2.0 |]) nan
                 Expect.isTrue (Double.IsNaN (Moments.mean m)) "mean"

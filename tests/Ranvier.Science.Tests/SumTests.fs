@@ -1,6 +1,7 @@
 module Ranvier.Science.Tests.SumTests
 
 open Expecto
+open Ranvier
 open Ranvier.Numerics
 
 let private total compensated (xs: float[]) =
@@ -31,4 +32,31 @@ let tests =
             Expect.isLessThanOrEqual (ulps (Sum.value left) (exactSum rest)) 2.0 ""
         }
         test "a NaN term gives NaN and raises nothing" { Expect.isTrue (System.Double.IsNaN (total true [| 1.0; nan; 2.0 |])) "" }
+        test "1e308 + 1e308 reads NaN compensated and +infinity plain, and raises nothing" {
+            Expect.isTrue (System.Double.IsNaN (total true [| 1e308; 1e308 |])) "compensated"
+            Expect.equal (total false [| 1e308; 1e308 |]) infinity "plain"
+        }
+        test "an item that leaves the sum unchanged notifies no reader of a stream fold" {
+            for compensated in [ true; false ] do
+                withGraph (fun () ->
+                    let feed = ManualStream<float>()
+                    let sum = createStreamFold Sum.zero (Sum.add compensated) (fun _ -> feed.Source)
+                    let mutable runs = 0
+
+                    createEffect (fun () ->
+                        sum.TryValue |> ignore
+                        runs <- runs + 1)
+
+                    feed.Push 1.5
+                    feed.Push 0.0
+                    let label = sprintf "Compensated = %b" compensated
+                    Expect.equal runs 2 ("the effect runs at creation and after 1.5, and not after 0.0, with " + label)
+                    Expect.equal (Sum.value sum.Peek) 1.5 ("the sum with " + label))
+        }
+        test "a zero total keeps its sign across an item of the other zero" {
+            let negative = { Total = -0.0; Carry = 0.0 }
+
+            for compensated in [ true; false ] do
+                Expect.equal (1.0 / (Sum.add compensated negative 0.0).Total) -infinity (sprintf "Compensated = %b" compensated)
+        }
     ]
