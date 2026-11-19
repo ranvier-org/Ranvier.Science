@@ -92,7 +92,7 @@ let tests =
                     let entry = g0.Entry
                     Expect.equal entry.Id "g0" "Id"
                     Expect.equal entry.Name "Standard gravity" "Name"
-                    Expect.equal entry.Kind Constant "Kind"
+                    Expect.equal entry.Kind QuantityKind.Constant "Kind"
                     Expect.equal entry.Source "CGPM 1901" "Source"
                     Expect.equal (UnitInfo.symbol entry.Unit) "m/s^2" "the unit's symbol"
                     Expect.equal (entry.Read ()) 9.80665 "Read"
@@ -134,6 +134,68 @@ let tests =
                         Expect.throwsT<ArgumentException>
                             (fun () -> Quantity.input model id "Malformed" Units.one 1.0 |> ignore)
                             ("the identifier \"" + id + "\""))
+            }
+
+            test "an identifier held by a quantity or a block is rejected for every declaration" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    Quantity.input model "alpha" "Alpha" Units.one 1.0 |> ignore
+                    Quantity.block model "series" "Series" (fun () -> [| 1.0 |]) |> ignore
+                    let ids () = model.Entries |> List.map (fun e -> e.Id)
+
+                    let declarations: (string * (string -> unit)) list =
+                        [
+                            "input", (fun id -> Quantity.input model id "Again" Units.one 2.0 |> ignore)
+                            "constant", (fun id -> Quantity.constant model id "Again" Units.one 2.0 "source" |> ignore)
+                            "derive", (fun id -> Quantity.derive model id "Again" Units.one (fun () -> 2.0) |> ignore)
+                            "block", (fun id -> Quantity.block model id "Again" (fun () -> 2.0) |> ignore)
+                        ]
+
+                    for kind, declare in declarations do
+                        for held in [ "alpha"; "series" ] do
+                            Expect.throwsT<ArgumentException> (fun () -> declare held) (sprintf "a %s named %s" kind held)
+                            Expect.equal (ids ()) [ "alpha" ] (sprintf "the entries after a rejected %s named %s" kind held))
+            }
+
+            test "a child's block does not shadow its parent's quantity" {
+                withGraph (fun () ->
+                    let parent = Model.create "parent"
+                    let child = Model.child parent "child"
+                    Quantity.input parent "alpha" "Parent alpha" Units.one 1.0 |> ignore
+                    Quantity.block child "alpha" "Child block alpha" (fun () -> [| 1.0 |]) |> ignore
+
+                    match child.TryFind "alpha" with
+                    | ValueSome entry -> Expect.equal entry.Name "Parent alpha" "the child finds the parent's entry"
+                    | ValueNone -> failtest "expected the parent's entry"
+
+                    Expect.throwsT<ArgumentException>
+                        (fun () -> Quantity.input child "alpha" "Child alpha" Units.one 2.0 |> ignore)
+                        "the child's block holds the identifier in the child")
+            }
+
+            test "a block built with blockFrom holds a series within a tolerance" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.input model "a" "A" Units.one 1.0
+
+                    let series =
+                        Quantity.blockFrom model "series" "Series" (fun previous ->
+                            Tolerance.holdSeries (Tolerance.absolute 0.1) previous (Array.init 3 (fun i -> a.Value * float i)))
+
+                    let first = series.Value
+                    let mutable runs = 0
+
+                    createEffect (fun () ->
+                        series.Value |> ignore
+                        runs <- runs + 1)
+
+                    a.Set 1.04
+                    Expect.isTrue (obj.ReferenceEquals (series.Value, first)) "every element within 0.1: the same array instance"
+                    Expect.equal runs 1 "every element within 0.1: the reader is not notified"
+                    a.Set 1.06
+                    Expect.isFalse (obj.ReferenceEquals (series.Value, first)) "one element past 0.1: a new array"
+                    Expect.equal series.Value [| 0.0; 1.06; 2.12 |] "one element past 0.1: the new values"
+                    Expect.equal runs 2 "one element past 0.1: the reader is notified")
             }
 
             test "a body that raises fails its quantity alone" {

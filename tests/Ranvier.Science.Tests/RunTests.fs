@@ -136,6 +136,75 @@ let tests =
                     Expect.equal rig.Starts 3 "two writes in one batch: start ran again")
             }
 
+            test "a control read through a derived quantity does not restart the run when written away and back" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let x0 = createSignal 4.0
+                    let x0Value = createMemo (fun _ -> x0.Value)
+                    let model = Model.create "page"
+                    let tilt = Quantity.input model "tilt" "Tilt" Units.one 4.0
+                    let tiltValue = Quantity.derive model "tilt_value" "Tilt value" Units.one (fun () -> tilt.Value)
+                    let mutable memoStarts = 0
+                    let mutable derivedStarts = 0
+
+                    let advance (s: Sim) (dt: float) =
+                        s.X <- s.X + dt
+                        s.Steps <- s.Steps + 1
+
+                    let throughMemo =
+                        Run.create
+                            (fun () -> clock.Value)
+                            (fun () ->
+                                memoStarts <- memoStarts + 1
+                                { X = x0Value.Value; Steps = 0 })
+                            advance
+
+                    let throughDerived =
+                        Run.create
+                            (fun () -> clock.Value)
+                            (fun () ->
+                                derivedStarts <- derivedStarts + 1
+                                { X = float tiltValue.Value; Steps = 0 })
+                            advance
+
+                    let memoFirst = throughMemo.State
+                    let derivedFirst = throughDerived.State
+
+                    let expect (label: string) (sameObject: bool) (steps: int) (x: float) (starts: int) =
+                        for route, s, first, count in
+                            [
+                                "memo", throughMemo.State, memoFirst, memoStarts
+                                "derived quantity", throughDerived.State, derivedFirst, derivedStarts
+                            ] do
+                            let at = route + ", " + label
+                            Expect.equal (obj.ReferenceEquals (s, first)) sameObject (at + ": the same state object")
+                            Expect.equal s.Steps steps (at + ": Steps")
+                            Expect.equal s.X x (at + ": X")
+                            Expect.equal count starts (at + ": starts")
+
+                    clock.Value <- 1.0
+                    expect "a first advance" true 1 5.0 1
+                    x0.Value <- 7.0
+                    x0.Value <- 4.0
+                    tilt.Set 7.0
+                    tilt.Set 4.0
+                    clock.Value <- 2.0
+                    expect "writes away and back between reads" true 2 6.0 1
+
+                    batch (fun () ->
+                        x0.Value <- 9.0
+                        x0.Value <- 4.0
+                        tilt.Set 9.0
+                        tilt.Set 4.0)
+
+                    clock.Value <- 3.0
+                    expect "two writes in one batch" true 3 7.0 1
+                    x0.Value <- 5.0
+                    tilt.Set 5.0
+                    clock.Value <- 4.0
+                    expect "a real change" false 0 5.0 2)
+            }
+
             test "a quantity read only by advance changes the course without a restart" {
                 withGraph (fun () ->
                     let rig = Rig (4.0, 2.0)
@@ -234,5 +303,93 @@ let tests =
                     let s = run.State
                     Expect.equal s.X 7.0 "X is the new start's x0"
                     Expect.equal s.Steps 0 "Steps is 0")
+            }
+
+            test "after a failed advance a clock change advances over the gap from the last recorded clock" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let gaps = ResizeArray<float>()
+                    let mutable failAfterMutation = false
+
+                    let run =
+                        Run.create
+                            (fun () -> clock.Value)
+                            (fun () -> { X = 0.0; Steps = 0 })
+                            (fun s dt ->
+                                gaps.Add dt
+                                s.X <- s.X + dt
+                                s.Steps <- s.Steps + 1
+
+                                if failAfterMutation then
+                                    failAfterMutation <- false
+                                    failwith "after mutation")
+
+                    let first = run.State
+                    clock.Value <- 1.0
+                    run.State |> ignore
+                    failAfterMutation <- true
+                    clock.Value <- 2.0
+                    Expect.throws (fun () -> run.State |> ignore) "the read at clock 2 raises"
+                    Expect.throws (fun () -> run.State |> ignore) "a second read at clock 2 raises again"
+                    Expect.equal (List.ofSeq gaps) [ 1.0; 1.0 ] "the failed advance ran once"
+                    clock.Value <- 4.0
+                    let s = run.State
+                    Expect.isTrue (obj.ReferenceEquals (s, first)) "the same state object"
+                    Expect.equal (List.ofSeq gaps) [ 1.0; 1.0; 3.0 ] "the retry advances over the gap from 1.0, the last recorded clock"
+                    Expect.equal s.Steps 3 "the failed call's step is kept"
+                    Expect.equal s.X 5.0 "X is 1 + 1, from the failed call, + 3")
+            }
+
+            test "a clock function that returns its last value after an input changes leaves the run" {
+                withGraph (fun () ->
+                    let rig = Rig (4.0, 2.0)
+                    let run = Run.create (fun () -> floor rig.Clock.Value) rig.Start rig.Advance
+                    let first = run.State
+                    let mutable runs = 0
+
+                    createEffect (fun () ->
+                        run.State |> ignore
+                        runs <- runs + 1)
+
+                    rig.Clock.Value <- 1.0
+                    run.State |> ignore
+                    rig.Clock.Value <- 1.5
+                    let s = run.State
+                    Expect.isTrue (obj.ReferenceEquals (s, first)) "the same state object"
+                    Expect.equal rig.Advances 1 "advance ran once, at clock 1"
+                    Expect.equal s.Steps 1 "Steps is 1"
+                    Expect.equal runs 2 "the reader ran at creation and after the advance, not after the equal clock")
+            }
+
+            test "a reader is notified after a start and after a backward restart" {
+                withGraph (fun () ->
+                    let rig = Rig (4.0, 2.0)
+                    let run = rig.Run ()
+                    let seen = ResizeArray<float * int>()
+                    createEffect (fun () -> seen.Add (run.State.X, run.State.Steps))
+                    rig.Clock.Value <- 1.0
+                    rig.X0.Value <- 9.0
+                    rig.Clock.Value <- 0.5
+
+                    Expect.equal
+                        (List.ofSeq seen)
+                        [ (4.0, 0); (6.0, 1); (9.0, 0); (9.0, 0) ]
+                        "the first start, an advance, a start for x0, and a start for the clock going back"
+
+                    Expect.equal rig.Starts 3 "start ran three times")
+            }
+
+            test "maxStep must be greater than 0" {
+                withGraph (fun () ->
+                    let rig = Rig (4.0, 2.0)
+
+                    for maxStep in [ 0.0; -0.5; nan ] do
+                        Expect.throwsT<System.ArgumentOutOfRangeException> (fun () -> rig.RunWith maxStep |> ignore) (sprintf "maxStep %g" maxStep)
+
+                    rig.Clock.Value <- 2.0
+                    let run = rig.RunWith infinity
+                    run.State |> ignore
+                    rig.Clock.Value <- 5.0
+                    Expect.equal run.State.X (4.0 + 2.0 * 3.0) "maxStep infinity takes the whole gap")
             }
         ]

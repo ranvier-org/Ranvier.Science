@@ -160,9 +160,12 @@ type UnitOf<[<Measure>] 'u> internal (info: UnitInfo) =
 
 module UnitOf =
     /// A unit of one factor, `symbol`. The caller's annotation fixes 'u. Factors are identified by their symbol, so
-    /// two units defined with one symbol are one factor in a product or quotient. Raises ArgumentOutOfRangeException
-    /// unless scale is positive and finite.
+    /// two units defined with one symbol are one factor in a product or quotient. Raises ArgumentException for a null
+    /// or empty symbol, and ArgumentOutOfRangeException unless scale is positive and finite.
     let define<[<Measure>] 'u> (symbol: string) (dimension: Dimension) (scale: float) : UnitOf<'u> =
+        if String.IsNullOrEmpty symbol then
+            raise (ArgumentException("A unit's symbol must have at least one character.", nameof symbol))
+
         if not (scale > 0.0) || Double.IsInfinity scale then
             raise (ArgumentOutOfRangeException(nameof scale, "A unit's scale must be positive and finite."))
 

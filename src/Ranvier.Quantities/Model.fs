@@ -3,11 +3,13 @@ namespace Ranvier.Quantities
 open System
 open System.Collections.Generic
 
+[<RequireQualifiedAccess>]
 type QuantityKind =
     | Input
     | Constant
     | Derived
 
+[<RequireQualifiedAccess>]
 type QuantityStatus =
     | Ready
     | Pending
@@ -59,7 +61,8 @@ type Model internal (name: string, parent: Model voption) =
     /// This model's own entries, in declaration order.
     member _.Entries: Entry list = List.ofSeq entries
 
-    /// This model's entry, else the nearest ancestor's.
+    /// This model's entry, else the nearest ancestor's. A block's identifier is reserved in its model and is not an
+    /// entry, so a child's block leaves an ancestor's entry of that identifier visible.
     member _.TryFind(id: string) : Entry voption =
         match byId.TryGetValue id with
         | true, entry -> ValueSome entry

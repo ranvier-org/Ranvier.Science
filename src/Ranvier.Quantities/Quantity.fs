@@ -87,10 +87,16 @@ module Quantity =
         model.Check id
         derived model id name unit (createMemo (fun previous -> Tolerance.hold tolerance previous (float (compute ()))))
 
-    /// The value of `compute`, over a memo owned by the current owner. Not entered in the model's entries: a block has
-    /// no single unit. Its identifier is checked against every declaration of the model, and raises as `input` does.
-    let block (model: Model) (id: string) (name: string) (compute: unit -> 'T) : Block<'T> =
+    /// The value of `compute`, which receives the block's last published value (`ValueNone` before the first), over a
+    /// memo owned by the current owner. Returning that value keeps the block's readers clean. Identifiers follow `block`.
+    let blockFrom (model: Model) (id: string) (name: string) (compute: 'T voption -> 'T) : Block<'T> =
         model.Check id
-        let memo = createMemo (fun _ -> compute ())
+        let memo = createMemo compute
         model.Reserve id
         Block<'T>(id, name, memo)
+
+    /// The value of `compute`, over a memo owned by the current owner. A block has no single unit and is not an entry
+    /// of its model: its identifier is reserved in the model, so a later declaration of it in the model raises as
+    /// `input` does, and `TryFind` of it from a child model finds an ancestor's entry. Raises as `input` does.
+    let block (model: Model) (id: string) (name: string) (compute: unit -> 'T) : Block<'T> =
+        blockFrom model id name (fun _ -> compute ())

@@ -52,6 +52,13 @@ let tests =
                         $"scale {scale}"
             }
 
+            test "a unit needs a symbol" {
+                for symbol in [ null; "" ] do
+                    Expect.throwsT<System.ArgumentException>
+                        (fun () -> UnitOf.define<m> symbol Dimension.length 1.0 |> ignore)
+                        (sprintf "symbol %A" symbol)
+            }
+
             test "symbols without a numerator or with several denominator factors" {
                 let perSecond = (Units.one / Units.second).Info
                 Expect.equal (UnitInfo.symbol perSecond) "1/s" "no numerator"

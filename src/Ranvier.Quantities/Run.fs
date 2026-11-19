@@ -20,9 +20,11 @@ type internal Stepped<'s>(origin: Started<'s>, state: 's, last: float) =
 type Run<'s> internal (stepped: Memo<Stepped<'s>>) =
     /// <summary>A tracked read that first brings the state up to the clock's current value.</summary>
     /// <remarks>
-    /// The read raises the exception of a failed <c>start</c> or <c>advance</c>, and raises it again on later reads
-    /// until the clock or a value read by <c>start</c> changes. A change to the clock after a failed advance retries
-    /// the advance on the state the failed call left, over the gap from the last value recorded before the failure.
+    /// The read raises the exception of a failed <c>start</c> or <c>advance</c>, and raises it again on later reads.
+    /// After a failed <c>start</c>, a change in a value <c>start</c> read runs <c>start</c> again; a clock change
+    /// re-raises. After a failed <c>advance</c>, a clock change retries the advance on the state the failed call left,
+    /// over the gap from the last value recorded before the failure, and a change in a value <c>start</c> read
+    /// restarts the run.
     /// </remarks>
     member _.State: 's = stepped.Value.State
 
@@ -32,11 +34,14 @@ module Run =
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>start</c> runs when the run is first read, when a quantity <c>start</c> read changes, and when the clock
+    /// <c>start</c> runs when the run is first read, when a value <c>start</c> read changes, and when the clock
     /// is below its last value by more than 1e-9. A start records the clock and does not advance.
-    /// A quantity <c>start</c> read has changed when it received a write of a different value since the last read of
-    /// <c>State</c>, including a write followed by a write back to the earlier value, and two such writes inside one
-    /// <c>batch</c>. A write of an equal value is ignored by the signal and leaves the run unchanged.
+    /// A signal read directly by <c>start</c> has changed when it received a write of a different value since the last
+    /// read of <c>State</c>, including a write followed by a write back to the earlier value, and two such writes inside
+    /// one <c>batch</c>. A memo or a derived quantity read by <c>start</c> has changed only when its value at the next
+    /// read of <c>State</c> differs, under the graph's equality, from the value <c>start</c> read; writes away and back
+    /// to its inputs between reads, or inside one <c>batch</c>, leave the run unchanged. A write of an equal value is
+    /// ignored by the signal and leaves the run unchanged.
     /// When the clock is above its last value, <c>advance state (min maxStep (clock − last))</c> runs once and the
     /// clock becomes the last value; the part of the gap beyond <c>maxStep</c> is dropped.
     /// A clock equal to the last value, within 1e-9 below it, or NaN leaves the run unchanged.
@@ -49,6 +54,7 @@ module Run =
     /// cause at most one advance, at the second read. A reader of <c>State</c> is notified after every start, every
     /// advance, and the first clock recorded after a start at a NaN clock.
     /// </para>
+    /// <para>Raises <c>ArgumentOutOfRangeException</c> unless <c>maxStep</c> is greater than 0; infinity is accepted.</para>
     /// </remarks>
     let createWith
         (maxStep: float)
@@ -56,6 +62,9 @@ module Run =
         (start: unit -> 's)
         (advance: 's -> float -> unit)
         : Run<'s> =
+        if not (maxStep > 0.0) then
+            raise (System.ArgumentOutOfRangeException(nameof maxStep, "maxStep must be greater than 0."))
+
         let started = createMemo (fun _ -> Started (start ()))
 
         let stepped =
