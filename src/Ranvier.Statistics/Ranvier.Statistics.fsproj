@@ -2,6 +2,8 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
+        <Description>Statistics over the moments of Ranvier.Numerics: the normal quantile, a time-uniform confidence sequence for a mean and the fixed-sample interval.</Description>
+        <PackageTags>statistics;normal-quantile;confidence-sequence;confidence-interval;ranvier;fsharp</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

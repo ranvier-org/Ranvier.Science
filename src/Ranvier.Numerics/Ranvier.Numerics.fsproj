@@ -2,6 +2,8 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
+        <Description>Numerics for the Ranvier reactive graph: compensated sums, moments, float policies and maintained aggregates, tolerances and a pseudo-random generator.</Description>
+        <PackageTags>numerics;compensated-summation;moments;aggregates;floating-point;ranvier;reactive;fsharp</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

@@ -2,6 +2,8 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
+        <Description>Units, quantities and models on the Ranvier reactive graph, with a one-line formula notation over a model's quantities and runs: simulations advanced with a clock.</Description>
+        <PackageTags>units;units-of-measure;quantities;formula;simulation;ranvier;reactive;fsharp</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

@@ -2,8 +2,32 @@
 
 Numerics, quantities and statistics libraries built on the Ranvier reactive graph.
 
-This is a local slice built to answer design questions. It has no remote, and nothing in it is published or
-released. It builds on the published `Ranvier` 0.2.0 package and is not a finished product or a stable API.
+This slice was built to answer design questions. It builds on the published `Ranvier` 0.2.0 package and is not a
+finished product or a stable API.
+
+## Packages
+
+Three packages, each at version 0.1.0:
+
+- `Ranvier.Numerics`: compensated sums, moments, float policies and maintained aggregates, tolerances, and a
+  pseudo-random generator.
+- `Ranvier.Quantities`: units, quantities and models, a one-line formula notation over a model's quantities, and runs.
+  Depends on `Ranvier.Numerics`.
+- `Ranvier.Statistics`: the normal quantile, the confidence sequence and the fixed-sample interval over the moments of
+  `Ranvier.Numerics`.
+
+```
+dotnet add package Ranvier.Numerics --version 0.1.0
+dotnet add package Ranvier.Quantities --version 0.1.0
+dotnet add package Ranvier.Statistics --version 0.1.0
+```
+
+Each package depends on `Ranvier` 0.2.0 and carries its F# sources under `fable/`, so a Fable project compiles it to
+JavaScript.
+
+The interfaces are a first slice and will change before 1.0. Section 3 of
+[the findings](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md#3-interfaces-to-change-before-widening)
+lists the changes.
 
 ## What it holds
 

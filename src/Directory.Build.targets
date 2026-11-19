@@ -1,0 +1,6 @@
+<Project>
+    <!-- Fable.Package.SDK adds fable and fable-library; a pack fails without a target tag. -->
+    <PropertyGroup Condition="'$(FablePackageType)' != 'none'">
+        <PackageTags>$(PackageTags);fable-javascript;fable-dotnet</PackageTags>
+    </PropertyGroup>
+</Project>

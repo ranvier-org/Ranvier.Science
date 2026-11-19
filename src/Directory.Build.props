@@ -1,0 +1,31 @@
+<Project>
+    <Import Project="../Directory.Build.props" />
+
+    <PropertyGroup>
+        <IsPackable>true</IsPackable>
+        <Version>0.1.0</Version>
+        <!-- The minimum FSharp.Core of the packages, the one Ranvier 0.2.0 depends on. -->
+        <FSharpCoreImplicitPackageVersion>8.0.100</FSharpCoreImplicitPackageVersion>
+        <FablePackageType>library</FablePackageType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageReleaseNotes>First release. The interfaces are a first slice and will change before 1.0.</PackageReleaseNotes>
+        <!-- Fable.Package.SDK sets DebugType=embedded: the PDB (with SourceLink) lives in each dll, so no .snupkg is produced. nuget.org rejects an empty one. -->
+        <IncludeSymbols>false</IncludeSymbols>
+    </PropertyGroup>
+
+    <!-- A CI build maps source paths to /_/. -->
+    <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+    <!-- A traced build's creation sites skip frames from an assembly with this marker. -->
+    <ItemGroup>
+        <AssemblyMetadata Include="RanvierLibrary" Value="true" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="\" Visible="false" />
+        <PackageReference Include="Fable.Package.SDK" Version="1.4.1" PrivateAssets="all"
+                          IncludeAssets="runtime;build;native;contentfiles;analyzers;buildtransitive" />
+    </ItemGroup>
+</Project>

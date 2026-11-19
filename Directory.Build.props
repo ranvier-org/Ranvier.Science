@@ -2,7 +2,16 @@
 
     <PropertyGroup>
         <LangVersion>latest</LangVersion>
+        <!-- src/Directory.Build.props turns packing on for the three libraries. -->
         <IsPackable>false</IsPackable>
+        <RepositoryUrl>https://github.com/ranvier-org/Ranvier.Science</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageProjectUrl>https://github.com/ranvier-org/Ranvier.Science</PackageProjectUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <Authors>shayanhabibi</Authors>
+        <Copyright>Copyright (c) 2026 Shayan Habibi</Copyright>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
     </PropertyGroup>
 
 </Project>
