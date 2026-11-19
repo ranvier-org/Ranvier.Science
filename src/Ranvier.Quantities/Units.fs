@@ -95,7 +95,8 @@ module UnitInfo =
             Scale = a.Scale / b.Scale
         }
 
-    /// `u` to the power `n`; any integer, and `power u 0` is dimensionless with scale 1.
+    /// `u` to the power `n`; any integer, and `power u 0` is dimensionless with scale 1. The scale is the
+    /// floating-point product of `n` factors (its reciprocal for negative `n`).
     let power (u: UnitInfo) (n: int) : UnitInfo =
         {
             Factors = merge (u.Factors |> List.map (fun (name, e) -> name, e * n))
@@ -107,7 +108,8 @@ module UnitInfo =
 
     /// The numerator factors joined by `·`, then `/` and the denominator factors with positive exponents:
     /// "km/s", "mK^2", "kg·m/s^2". A unit with no numerator factor has numerator "1" ("1/s"); several
-    /// denominator factors are parenthesised ("kg/(m·s^2)"). "" for a dimensionless unit.
+    /// denominator factors are parenthesised ("kg/(m·s^2)", "1/(m·s)"). "" for a unit with no factors; a
+    /// dimensionless unit with factors keeps them ("km/m").
     let symbol (u: UnitInfo) : string =
         let numerator = u.Factors |> List.filter (fun (_, e) -> e > 0) |> List.map format
 
@@ -122,7 +124,9 @@ module UnitInfo =
         | _, [ single ] -> top + "/" + single
         | _, _ -> top + "/(" + String.Join("·", denominator) + ")"
 
-    /// `Ok` with every exponent halved and the square root of the scale. Error names the unit when an exponent is odd.
+    /// `Ok` with every exponent halved and the correctly rounded square root of the scale. Error names the unit when
+    /// an exponent is odd. The root of a unit reached through `power`, `divide` or `multiply` can differ in the last
+    /// place from the same unit reached by another route: `sqrt (power u -2)` and `power u -1` for a scale of 0.7.
     let sqrt (u: UnitInfo) : Result<UnitInfo, string> =
         let odd e = e % 2 <> 0
 
@@ -138,7 +142,9 @@ module UnitInfo =
 
     let sameDimension (a: UnitInfo) (b: UnitInfo) : bool = a.Dimension = b.Dimension
 
-    /// Same dimension and same scale.
+    /// Same dimension and same scale, with scales compared exactly (`=`). Two routes to one unit through `power`,
+    /// `divide`, `multiply` or `sqrt` can give scales that differ in the last place, and then `sameUnit` is false;
+    /// compare derived scales within a tolerance where routes differ.
     let sameUnit (a: UnitInfo) (b: UnitInfo) : bool = sameDimension a b && a.Scale = b.Scale
 
 /// A unit of measure with the description its values carry at run time.
@@ -153,8 +159,9 @@ type UnitOf<[<Measure>] 'u> internal (info: UnitInfo) =
         UnitOf<'u / 'v>(UnitInfo.divide a.Info b.Info)
 
 module UnitOf =
-    /// A unit of one factor, `symbol`. The caller's annotation fixes 'u. Raises ArgumentOutOfRangeException unless
-    /// scale is positive and finite.
+    /// A unit of one factor, `symbol`. The caller's annotation fixes 'u. Factors are identified by their symbol, so
+    /// two units defined with one symbol are one factor in a product or quotient. Raises ArgumentOutOfRangeException
+    /// unless scale is positive and finite.
     let define<[<Measure>] 'u> (symbol: string) (dimension: Dimension) (scale: float) : UnitOf<'u> =
         if not (scale > 0.0) || Double.IsInfinity scale then
             raise (ArgumentOutOfRangeException(nameof scale, "A unit's scale must be positive and finite."))

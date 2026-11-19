@@ -61,5 +61,24 @@ let tests =
                 Expect.equal (UnitInfo.symbol perMetreSecondSquared) "kg/(m·s^2)" "two denominator factors"
                 let perSecondSquared = (Units.one / UnitOf.squared Units.second).Info
                 Expect.equal (UnitInfo.symbol perSecondSquared) "1/s^2" "no numerator, an exponent"
+                let perMetreSecond = (Units.one / (Units.metre * Units.second)).Info
+                Expect.equal (UnitInfo.symbol perMetreSecond) "1/(m·s)" "no numerator, two denominator factors"
+            }
+
+            test "a scale reached by two routes can differ in the last place" {
+                let u = (UnitOf.define<m> "u" Dimension.length 0.7).Info
+                let inverse = UnitInfo.power u -1
+
+                match UnitInfo.sqrt (UnitInfo.power u -2) with
+                | Ok root ->
+                    Expect.equal root.Dimension inverse.Dimension "dimension"
+                    Expect.isTrue (UnitInfo.sameDimension root inverse) "same dimension"
+
+                    Expect.isTrue
+                        (abs (root.Scale - inverse.Scale) <= 1e-15 * abs inverse.Scale)
+                        $"scales {root.Scale} and {inverse.Scale} within relative 1e-15"
+
+                    Expect.isFalse (UnitInfo.sameUnit root inverse) $"scales {root.Scale} and {inverse.Scale} differ in the last place"
+                | Error e -> failwith $"expected Ok, got Error {e}"
             }
         ]
