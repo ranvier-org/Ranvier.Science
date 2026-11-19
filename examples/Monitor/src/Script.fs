@@ -235,7 +235,10 @@ let private meanAndP95 (times: float[]) : struct (float * float) =
 /// doubling, each rate from a restart. Returns 0 when the default page's mean and 95th percentile are both under
 /// <c>budget</c> and every channel folded the items due at its rate; 1 otherwise.
 /// </summary>
-/// <remarks>With no rate under the budget, the last line reports the figures of 2,000 a second.</remarks>
+/// <remarks>
+/// The last line reports the highest swept rate that, together with every lower swept rate, has both figures under
+/// <c>budget</c>, or <c>none</c> when 2,000 a second is at or over it.
+/// </remarks>
 let private frames (props: Props) =
     let report = props.Platform.Report
     let expect = Expectations(report, "frames")
@@ -285,17 +288,14 @@ let private frames (props: Props) =
 
                 let struct (mean, p95) = measure 20 120
                 report $"frames | sweep | {rate} /s per channel | mean {ms mean} ms | p95 {ms p95} ms | 120 frames"
-                yield (string rate, mean, p95)
+                yield (rate, mean, p95)
         |]
 
-    let highest, mean, p95 =
-        match sweep |> Array.filter (fun (_, mean, p95) -> under mean p95) |> Array.tryLast with
-        | Some found -> found
-        | None ->
-            let _, mean, p95 = sweep[0]
-            ("none", mean, p95)
+    match sweep |> Array.takeWhile (fun (_, mean, p95) -> under mean p95) |> Array.tryLast with
+    | Some(rate, mean, p95) ->
+        report $"frames | highest rate under the budget | {rate} /s per channel | mean {ms mean} ms | p95 {ms p95} ms | 120 frames"
+    | None -> report "frames | highest rate under the budget | none | 120 frames"
 
-    report $"frames | highest rate under the budget | {highest} /s per channel | mean {ms mean} ms | p95 {ms p95} ms | 120 frames"
     if expect.Failed = 0 then 0 else 1
 
 /// Runs the named script against the page mounted for `props` and returns its exit code.
