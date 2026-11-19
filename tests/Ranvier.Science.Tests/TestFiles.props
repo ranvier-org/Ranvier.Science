@@ -4,5 +4,6 @@
         <Compile Include="$(MSBuildThisFileDirectory)Support.fs" Link="Support.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Smoke.fs" Link="Smoke.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Probes.fs" Link="Probes.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)SumTests.fs" Link="SumTests.fs" />
     </ItemGroup>
 </Project>
