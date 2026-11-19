@@ -20,5 +20,10 @@ let tests =
             Expect.equal (ulps 1.0 1.0) 0.0 "equal values"
             Expect.equal (ulps 1.0 (1.0 + epsilon)) 1.0 "one step above 1"
             Expect.equal (ulps big (big + 3.0 * System.Math.Pow (2.0, 48.0))) 3.0 "three steps at 2^100"
+            Expect.equal (ulps 1.0 infinity) infinity "finite against infinity"
+            Expect.equal (ulps infinity -infinity) infinity "opposite infinities"
+            Expect.equal (ulps infinity infinity) 0.0 "equal infinities"
+            Expect.isTrue (System.Double.IsNaN (ulps 1.0 nan)) "NaN against finite"
+            Expect.isTrue (System.Double.IsNaN (ulps nan nan)) "NaN against NaN"
         }
     ]
