@@ -92,7 +92,10 @@ let tests =
                     let run = rig.RunWith 0.1
                     run.State |> ignore
                     rig.Clock.Value <- 2.5
-                    Expect.equal run.State.X (4.0 + 2.0 * 0.1) "X is x0 + rate * 0.1")
+                    Expect.equal run.State.X (4.0 + 2.0 * 0.1) "X is x0 + rate * 0.1"
+                    rig.Clock.Value <- 2.5625
+                    run.State |> ignore
+                    Expect.equal rig.Gaps [ 0.1; 0.0625 ] "the next step is measured from the cut step's clock value, 2.5")
             }
 
             test "a quantity read by start restarts the run" {
@@ -107,6 +110,30 @@ let tests =
                     Expect.isFalse (obj.ReferenceEquals (s, first)) "a new state object"
                     Expect.equal s.Steps 0 "Steps is 0"
                     Expect.equal s.X 7.0 "X is the new x0")
+            }
+
+            test "a quantity written away and back between reads restarts the run" {
+                withGraph (fun () ->
+                    let rig = Rig (4.0, 2.0)
+                    let run = rig.Run ()
+                    let first = run.State
+                    rig.X0.Value <- 7.0
+                    rig.X0.Value <- 4.0
+                    let second = run.State
+                    Expect.isFalse (obj.ReferenceEquals (second, first)) "writes away and back: a new state object"
+                    Expect.equal second.Steps 0 "writes away and back: Steps is 0"
+                    Expect.equal second.X 4.0 "writes away and back: X is x0"
+                    Expect.equal rig.Starts 2 "writes away and back: start ran again"
+
+                    batch (fun () ->
+                        rig.X0.Value <- 9.0
+                        rig.X0.Value <- 4.0)
+
+                    let third = run.State
+                    Expect.isFalse (obj.ReferenceEquals (third, second)) "two writes in one batch: a new state object"
+                    Expect.equal third.Steps 0 "two writes in one batch: Steps is 0"
+                    Expect.equal third.X 4.0 "two writes in one batch: X is x0"
+                    Expect.equal rig.Starts 3 "two writes in one batch: start ran again")
             }
 
             test "a quantity read only by advance changes the course without a restart" {

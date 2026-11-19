@@ -198,3 +198,35 @@ What a direct request would replace: a step result or a callback in `foldGroupBy
 example a `subtract` returning `ValueNone`) would replace the raise, the exception cost per re-fold on .NET, and
 the reliance on `Step` treating every exception alike. A re-fold the core starts for its own reasons (a moved read
 of the fold functions, 1267-1268) is not counted in `Refolds`.
+
+## Differences from Kit.Flow
+
+`Run` (`src/Ranvier.Quantities/Run.fs`) replaces `Flow` (`AstroShowcase/Kit.fs`, the type `Flow` at line 157).
+It differs from `Flow` in two cases.
+
+### A control written away and back between reads
+
+`Flow.At` computes `keyOf p` at each call and restarts when `key <> k`, a structural comparison of two `float[]`
+(*from documentation*: `AstroShowcase/Kit.fs`, line 172). A control moved away and back between two calls gives an
+equal key, so `Flow` does not restart.
+
+`Run` restarts when a quantity `start` read received a write of a different value since the last read of `State`.
+A write away and a write back are two writes of a different value, so the run restarts. Test
+`a quantity written away and back between reads restarts the run` (*measured here*, on .NET and JavaScript):
+
+- unread writes `x0: 4 → 7 → 4`, then a read: a new state object, `Steps = 0`, `X = 4`, `start` called a second time;
+- `batch (fun () -> x0.Value <- 9.0; x0.Value <- 4.0)`, then a read: a new state object, `Steps = 0`, `X = 4`,
+  `start` called a third time.
+
+Consequence for the port: its bit-for-bit comparison with `Flow` holds when the run is read between distinct writes
+of a control, which is how the app writes controls (one write per control per frame, and a read every frame).
+
+### A NaN clock at a start
+
+`Flow.At` records the clock at a start (`last <- t`, line 175) even when it is NaN; every later comparison with NaN
+is false, so `Flow` then neither advances nor restarts until its key changes.
+
+`Run` leaves the last value unset after a start at a NaN clock; the first later read at a clock other than NaN
+records that clock and does not advance, and the ordinary rules follow. Test
+`a NaN clock at the start does not stick the run` (*measured here*, on .NET and JavaScript). No stepped clock in
+the app is NaN, so the port is unaffected.

@@ -7,7 +7,8 @@ open Ranvier
 type internal Started<'s>(state: 's) =
     member _.State: 's = state
 
-/// A published step of a run: a fresh instance per start and per advance, so each one notifies readers.
+/// A published step of a run. Each start, each advance, and the first clock recorded after a start at a NaN clock
+/// publish a new instance.
 [<Sealed>]
 type internal Stepped<'s>(origin: Started<'s>, state: 's, last: float) =
     member _.Origin: Started<'s> = origin
@@ -33,6 +34,9 @@ module Run =
     /// <para>
     /// <c>start</c> runs when the run is first read, when a quantity <c>start</c> read changes, and when the clock
     /// is below its last value by more than 1e-9. A start records the clock and does not advance.
+    /// A quantity <c>start</c> read has changed when it received a write of a different value since the last read of
+    /// <c>State</c>, including a write followed by a write back to the earlier value, and two such writes inside one
+    /// <c>batch</c>. A write of an equal value is ignored by the signal and leaves the run.
     /// When the clock is above its last value, <c>advance state (min maxStep (clock − last))</c> runs once and the
     /// clock becomes the last value; the part of the gap beyond <c>maxStep</c> is dropped.
     /// A clock equal to the last value, within 1e-9 below it, or NaN leaves the run unchanged.
