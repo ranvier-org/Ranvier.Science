@@ -24,9 +24,12 @@ Both commands run from the repository root.
 dotnet run -c Release --project tests/Ranvier.Science.Tests
 ```
 
-JavaScript (Fickl compiles the same test files, then mocha runs them):
+JavaScript (Fickl compiles the same test files, then mocha runs them). On a fresh checkout, restore the local tools
+and the Node packages first:
 
 ```
+dotnet tool restore
+npm install
 dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release
 npx mocha dist/tests/Main.fs.js
 ```
@@ -56,5 +59,5 @@ Run from the repository root, in Release.
 - [`docs/measurements/node-cost.md`](docs/measurements/node-cost.md): the node-cost measurements.
 - [`docs/measurements/aggregates.md`](docs/measurements/aggregates.md): the aggregate and key-scaling measurements.
 
-Every figure in those files carries a label (measured here, from documentation, or general knowledge); read the
-label before comparing two figures.
+Figures in those files carry a label (measured here, from documentation, or general knowledge), and a statement about
+the app that the slice has not checked is labelled an assumption; read the label before comparing two figures.

@@ -1,8 +1,14 @@
 # Node cost around four AstroShowcase formula bodies
 
-All figures below are **measured here**: one run of the command below on 2026-11-19, BenchmarkDotNet 0.15.8
-default job (not shortened), 21 min 41 s in total. Ratios are taken within this one run only, against the
-`Direct` row of the same body. Nothing here is compared with a figure from another document.
+This file holds two BenchmarkDotNet runs, both **measured here** on 2026-11-19 with BenchmarkDotNet 0.15.8:
+
+- **Run 1**, the command below, default job (not shortened): all 20 rows. Run time 00:21:24 (1284.22 s) and global
+  total time 00:21:35, as the log gives them (*from documentation*:
+  `BenchmarkDotNet.Artifacts/Ranvier.Science.Benchmarks.NodeCost.NodeCostBenchmarks-20261119-145616.log`).
+- **Run 2**, the five `decay` rows with three launches each (its own section below).
+
+Ratios are taken within one run only, against the `Direct` row of the same body in that run. Nothing here is
+compared with a figure from another document.
 
 ## Command
 
@@ -10,7 +16,7 @@ default job (not shortened), 21 min 41 s in total. Ratios are taken within this 
 dotnet run -c Release --project bench/Ranvier.Science.Benchmarks -- --filter "*NodeCost*"
 ```
 
-Machine and runtime lines of the BenchmarkDotNet summary:
+Machine and runtime lines of run 1's BenchmarkDotNet summary:
 
 ```
 BenchmarkDotNet v0.15.8, Windows 11 (10.0.26200.9974/25H2/2025Update/HudsonValley2)
@@ -79,14 +85,22 @@ precision.
 ## Run 2: the five `decay` rows, three launches each
 
 **Measured here**, 2026-11-19, to re-measure the rows that contradicted themselves. Same default job, with three
-launches of the benchmark process per row so that variation between processes enters the interval; 11 min 4 s in
-total. Ratios are taken within this run only, against its own `Direct` row. One operation is as in the table above.
+launches of the benchmark process per row so that variation between processes enters the interval. Run time
+00:10:55 (655.38 s) and global total time 00:11:04, as the log gives them (*from documentation*:
+`BenchmarkDotNet.Artifacts/Ranvier.Science.Benchmarks.NodeCost.NodeCostBenchmarks-20261119-152333.log`). Ratios are
+taken within this run only, against its own `Direct` row. One operation is as in the table above.
 
 ```
 dotnet run -c Release --project bench/Ranvier.Science.Benchmarks -- --filter "*NodeCost*" --body decay --launchCount 3
 ```
 
-Machine and runtime lines are those of run 1 (same session, same summary header).
+The machine lines and the `[Host]` line are those of run 1. The job line differs: the job is `Job-OEWQXS` with
+`LaunchCount=3`, not `DefaultJob` (*from documentation*, the same log):
+
+```
+  Job-OEWQXS : .NET 10.0.15 (10.0.15, 10.0.1526.53008), X64 RyuJIT x86-64-v4
+LaunchCount=3
+```
 
 | Method       | Body  | Mean           | Error       | StdDev        | Median         | Ratio | RatioSD | Gen0   | Gen1   | Allocated | Alloc Ratio |
 |------------- |------ |---------------:|------------:|--------------:|---------------:|------:|--------:|-------:|-------:|----------:|------------:|
@@ -100,8 +114,9 @@ In this run `Direct` (13,879 to 14,170 ns) and `NodeWritten` (13,796 to 14,022 n
 `KitChanged` is above `Direct`, as a path doing more work should be. This run has no contradiction. Between the runs
 the `Direct` row itself moved from 18.5 us to 14.0 us and `KitChanged` from 13.3 us to 16.1 us (StdDev 2,217 ns here),
 so the level of this body's rows differs from one benchmark process to another; no cause of that is shown by these
-runs. Each call allocates about 64 KB with Gen0 and Gen1 collections in every row, which is a candidate that these
-runs did not test.
+runs. Each call of the `Direct`, `KitChanged` and `NodeWritten` rows allocates about 64 KB, with Gen0 and Gen1
+collections, in both runs; the `KitUnchanged` and `NodeCached` rows run no body and allocate nothing. The allocation is
+a candidate that these runs did not test.
 
 ## Grain
 

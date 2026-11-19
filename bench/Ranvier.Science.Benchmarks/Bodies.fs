@@ -45,7 +45,7 @@ let keplerToState mu a e i raan argp nu =
     map xp yp, map vxp vyp
 
 /// The x component of the position, varying the true anomaly [rad]. The other inputs are the defaults of the
-/// Event location page (AstroShowcase/Pages.fs:1430-1433 and :1318): a = 30000 km, eccentricity 0.2,
+/// Event location page (AstroShowcase/Pages.fs:1430-1433 and :1319): a = 30000 km, eccentricity 0.2,
 /// inclination 55 deg, RAAN 35 deg, argument of perigee 50 deg.
 let kepler (nu: float) =
     let state = keplerToState muEarth 30000.0 0.2 (55.0 * deg) (35.0 * deg) (50.0 * deg) nu

@@ -52,6 +52,11 @@ that `let twice (x: float<'u>) = x + x` gives `4.0<m>` for `2.0<m>`.
 Consequence: Task 9 can type quantities with F# units of measure on both targets. Its fallback for a compiler that
 rejects measures is not needed.
 
+A class generic over a measure, with operators whose result has another measure (`UnitOf<'u>` with `*` giving
+`UnitOf<'u 'v>` and `/` giving `UnitOf<'u / 'v>`, `src/Ranvier.Quantities/Units.fs`), compiles and runs under Fickl
+(*measured here*: the list `"Units"` of `tests/Ranvier.Science.Tests/UnitsTests.fs` passes on .NET and under Mocha,
+by the commands above).
+
 ## B
 
 Not yet run. Probe B (an empty View page through Fickl) is the first task of Plan 2.
@@ -113,7 +118,8 @@ Question: does an effect that reads a stream fold re-run when the fold returns s
 Each test is a `createStreamFold` over a `ManualStream<int>` and a `createEffect` that reads `tally.TryValue` and
 counts its runs in a mutable counter. A push on the graph thread outside a batch flushes the effect before `Push`
 returns, on both targets (the core's test `an effect sees one run per item on the graph thread, and one per batch`
-relies on the same). Every zero item is followed by a non-zero item, and the count is read after each push.
+relies on the same). In E1 and E3 the zero item is followed by a non-zero item; E2 ends with its zero item. The
+count is read after each push.
 
 ### E1: the same instance
 
@@ -161,11 +167,30 @@ A fold publication notifies readers when the status changes or `equal.Equals (va
 | an equal rebuilt struct | no notification | notification | E2, *measured here* |
 | an equal rebuilt record | notification | notification | E3, *measured here* |
 
-Consequence: on both targets, a stream fold skips an unchanged item only when it returns the state it received, for
-a record state and for a struct state alike. A rebuilt record notifies readers on both targets; a rebuilt equal
-struct is skipped on .NET only. `createStreamFold` in 0.2.0 has no comparer overload; the only other lever is the
-graph's `GraphOptions.Equality`. This bounds the fold functions of Tasks 9 and 10 and of the later plans'
-stream-fed quantities.
+Consequence: a stream fold that returns the state it received notifies no reader, on both targets and for a record
+or a struct state (E1 for a record; `an item that leaves the sum unchanged notifies no reader of a stream fold` in
+`SumTests.fs` for the struct `Sum`, *measured here* on .NET and JavaScript). A rebuilt equal record notifies readers
+on both targets. A rebuilt equal struct notifies readers under JavaScript and no reader on .NET. So a fold skips its
+readers for an unchanged item on both targets only by returning the instance it received. `createStreamFold` in
+0.2.0 has no comparer overload; the only other lever is the graph's `GraphOptions.Equality`. This bounds the folds
+of Tasks 4, 5 and 6 (`Sum`, `Moments`, `Aggregate`) and Plan 2's stream-fed quantities.
+
+The library's folds, against the rule:
+
+- return their input: `Sum.add` when the total and the carry after the item equal those before;
+  `Moments.merge` when either side is empty (it returns the other side); `Moments.unmerge whole part` when `part`
+  is empty (it returns `whole`; test `merge and unmerge with an empty side return the other side`, which also asserts
+  the very instance under JavaScript);
+- always build a new state: `Moments.add`, whose count changes with every item.
+
+The same equality decides whether a `momentsBy` or `sumBy` row was edited: the fold compares a row's new projected
+value with its cached one (*from documentation*: `Ranvier/src/Ranvier/Combinators.fs`, the comparer at line 1008 and
+the comparison at line 1110). A `float` compares by value on both targets. A `Moments` compares by value on .NET and
+by reference under JavaScript, so a projection that should leave a row unedited returns the `Moments` instance it
+returned before. Test `a momentsBy row republished with an equal Moments` in `AggregateTests.fs` (*measured here* on
+.NET and JavaScript): four rows republished eight times with the same instance re-fold 0 times on both targets; then
+republished eight times with an equal rebuilt `Moments`, they re-fold 0 times on .NET, with the state unchanged, and 2
+times under JavaScript, where each republish is an edit.
 
 ## Workarounds
 
@@ -175,7 +200,7 @@ What the slice does: `Aggregate.sumBy` and `Aggregate.momentsBy` (`src/Ranvier.N
 state, an accumulator with the row count and the removals since the last re-fold, in a `Projection.foldGroupBy`.
 Their `subtract` raises `ArithmeticException` when the state it is given is not finite, or, under
 `RefoldAfterRemovals`, when the removals including this one reach the row count before it. `Refolds` counts these
-raises in a counter the closure owns.
+raises, and an exception raised by the accumulator's own removal, in a counter the closure owns.
 
 Core lines it relies on (*from documentation*: `Ranvier/src/Ranvier/Combinators.fs`, package 0.2.0 source):
 
@@ -199,10 +224,80 @@ example a `subtract` returning `ValueNone`) would replace the raise, the excepti
 the reliance on `Step` treating every exception alike. A re-fold the core starts for its own reasons (a moved read
 of the fold functions, 1267-1268) is not counted in `Refolds`.
 
+Consequence for the later page: under `FloatPolicy.standard` an aggregate of N rows re-folds once per N removals,
+and a row edit is one removal. A four-row aggregate whose rows all change between reads therefore re-folds on every
+read, and on .NET each re-fold raises and catches one `ArithmeticException`. *Measured here*: `dotnet fsi` on a
+scratch script (the final reviewer's check, re-run) against the Release build of commit 718f821, `Aggregate.sumBy
+FloatPolicy.standard` over four rows: 400 edits, each followed by a read, gave 100 re-folds; 100 batches of four
+edits, one per row, each followed by one read, gave 100 more. The cost of the raise per read was not measured.
+Whether a small aggregate keeps this threshold is for the later page to decide; this slice keeps the policy as
+designed.
+
+### `Tolerance.hold` inside the memo's computation
+
+What the slice does: `Quantity.deriveWithin` (`src/Ranvier.Quantities/Quantity.fs`, line 88) builds
+`createMemo (fun previous -> Tolerance.hold tolerance previous (compute ()))`, and `Quantity.blockFrom` lets a block
+do the same with `Tolerance.holdSeries`. `hold` returns the previous published value while the new one is within the
+tolerance of it, so the memo republishes the same value and its readers stay clean; the reference point stays at the
+last published value, so small steps cannot accumulate unseen.
+
+Core lines it relies on (*from documentation*, package 0.2.0 source): `createMemo` passes the value last published to
+`compute`, and returning it keeps dependents clean (`Ranvier/src/Ranvier/Api.fs`, the doc comment of `createMemo`,
+lines 258-260); the memo's cutoff compares the previous value with the new one (`Ranvier/src/Ranvier/Core.fs`, line
+4886). `createMemoWithComparer` (`Api.fs`, line 274) is no substitute: a tolerance comparer would keep readers clean,
+but the memo would still store each new value (`Core.fs`, lines 4880-4891), so the next comparison would start from
+the moved value and small steps would accumulate.
+
+What the core could offer in its place: a memo cutoff that keeps the published value when the comparer finds the new
+one equal, or a tolerance option on a memo.
+
+### `Run` publishing a new wrapper per start and advance
+
+What the slice does: `advance` mutates the run's state in place, so the state object is the same before and after a
+step. `Run` publishes a new `Stepped` wrapper (`src/Ranvier.Quantities/Run.fs`, lines 10-16) for each start and each
+advance, and returns the wrapper it was given for an equal or NaN clock. A reader of `State` is therefore notified
+after every start and advance, and after nothing else.
+
+Core lines it relies on (*from documentation*: `Ranvier/src/Ranvier/Types.fs`, lines 279-307): the default equality
+compares a class by reference on both targets, so a new wrapper is a change and the same wrapper is not.
+
+What the core could offer in its place: a memo whose computation reports whether it moved, alongside its value, so a
+state mutated in place could be published without a wrapper object per step.
+
+### A fold returning its input, standing in for a comparer on a stream fold's state
+
+What the slice does: `Sum.add`, `Moments.merge` and `Moments.unmerge` return the state they were given when the item
+leaves it unchanged (section E), and `Aggregate.momentsBy` asks its projection to return the instance it returned
+before for an unchanged row. A reader then stays clean on both targets, where an equal rebuilt struct would notify
+readers under JavaScript.
+
+Core lines it relies on (*from documentation*, package 0.2.0 source): a stream fold publishes when
+`equal.Equals (value, state)` is false (`Ranvier/src/Ranvier/Streams.fs`, `Publish`, lines 304-308), and a projection
+fold compares row values with the graph's comparer (`Combinators.fs`, lines 1008 and 1110); the comparer is
+`===` under Fable and `EqualityComparer<'T>.Default` for a struct on .NET (`Types.fs`, lines 279-307).
+
+What the core could offer in its place: a comparer overload of `createStreamFold` and of `Projection.foldGroupBy`, as
+`createMemoWithComparer` is for a memo.
+
+### A model holding entries after the owner of their nodes is disposed
+
+What the slice does: a `Model` (`src/Ranvier.Quantities/Model.fs`, lines 37-39 and 84-87) keeps its entries, and the
+identifiers it has reserved, in plain collections outside the graph, with no removal. A declaration creates its
+signal or memo under the current owner, so disposing that owner disposes the nodes and leaves the entries in the
+model; declaring an identifier again raises. A page that builds a model per table row creates a child model inside
+the row's owner, so the child goes with the row.
+
+Core lines it relies on (*from documentation*: `Ranvier/src/Ranvier/Api.fs`): `createSignal` and `createMemo` create
+nodes owned by the current owner; `onCleanup` (line 523) registers work to run when that owner is disposed, and the
+slice does not use it.
+
+What the core could offer in its place: an owner-scoped registry whose entries leave with their owner; with today's
+core, a declaration could register an `onCleanup` that removes its entry, which needs a removal on `Model`.
+
 ## Differences from Kit.Flow
 
 `Run` (`src/Ranvier.Quantities/Run.fs`) replaces `Flow` (`AstroShowcase/Kit.fs`, the type `Flow` at line 157).
-It differs from `Flow` in two cases.
+The cases below are the differences found so far; the list is not known to be complete.
 
 ### A control written away and back between reads
 
@@ -210,16 +305,40 @@ It differs from `Flow` in two cases.
 (*from documentation*: `AstroShowcase/Kit.fs`, line 172). A control moved away and back between two calls gives an
 equal key, so `Flow` does not restart.
 
-`Run` restarts when a quantity `start` read received a write of a different value since the last read of `State`.
-A write away and a write back are two writes of a different value, so the run restarts. Test
-`a quantity written away and back between reads restarts the run` (*measured here*, on .NET and JavaScript):
+`Run` restarts on a control that `start` reads as a signal directly, and not on one it reads through a memo or a
+derived quantity:
 
-- unread writes `x0: 4 → 7 → 4`, then a read: a new state object, `Steps = 0`, `X = 4`, `start` called a second time;
-- `batch (fun () -> x0.Value <- 9.0; x0.Value <- 4.0)`, then a read: a new state object, `Steps = 0`, `X = 4`,
-  `start` called a third time.
+- Read directly: a signal written away and back since the last read of `State` has changed, so the run restarts.
+  Test `a quantity written away and back between reads restarts the run` (*measured here*, on .NET and JavaScript):
+  unread writes `x0: 4 → 7 → 4`, then a read, give a new state object, `Steps = 0`, `X = 4`, and a second start;
+  `batch (fun () -> x0.Value <- 9.0; x0.Value <- 4.0)`, then a read, gives a new state object and a third start.
+- Read through a memo or a derived quantity: the memo's value at the next read equals the value `start` read, so the
+  run does not restart. Test `a control read through a derived quantity does not restart the run when written away
+  and back` (*measured here*, on .NET and JavaScript): a run whose `start` reads `createMemo (fun _ -> x0.Value)`, and
+  one whose `start` reads a `Quantity.derive` of a `Quantity.input`, each make one start across `4 → 7 → 4` between
+  reads and across two writes inside one `batch`, and advance as if nothing was written (the same state object,
+  `Steps` 2 then 3); a real change to 5 restarts each (a new state object, `Steps = 0`, a second start).
 
-Consequence for the port: its bit-for-bit comparison with `Flow` holds when the run is read between distinct writes
-of a control, which is how the app writes controls (one write per control per frame, and a read every frame).
+Consequence for the port: reading each control through a derived quantity gives `Flow`'s behaviour for any script
+of control changes, as the design's acceptance states it. Two statements about the app are **assumptions** for the
+later plan to confirm against its copy of the app: that it writes each control at most once per frame, and that it
+reads the run every frame while its page is shown.
+
+### `Flow.Reset ()`
+
+`Flow.Reset ()` discards the cached key, state and clock, so the next call starts afresh (*from documentation*:
+`AstroShowcase/Kit.fs`, lines 162-166). The three-body page calls it when the page is left (`AstroShowcase/PagesAstro.fs`,
+line 351, in `deactivate` of `ThreeBody`; *from documentation*). `Run` has no counterpart: its state is discarded
+only with its owner. A port of that page needs a replacement, such as a run created in the page's own owner.
+
+### A failing `start`
+
+`Flow.At` assigns the new key before calling `start` (*from documentation*: `AstroShowcase/Kit.fs`, lines 172-175),
+so when `start` raises, the next call sees an equal key and advances the state of the earlier start. `Run` re-raises
+`start`'s exception on every later read, including after a clock change, until a value `start` read changes, and
+then runs `start` again (*measured here*: the final reviewer's scratch script against the Release build of
+8ae3c1c, re-run in this fix round: a failing start raised on the first read and again after a clock change with one
+start in all, and ran a second start once its input changed; the contract is in the doc comment of `Run.State`).
 
 ### A NaN clock at a start
 
@@ -228,8 +347,14 @@ is false, so `Flow` then neither advances nor restarts until its key changes.
 
 `Run` leaves the last value unset after a start at a NaN clock; the first later read at a clock other than NaN
 records that clock and does not advance, and the ordinary rules follow. Test
-`a NaN clock at the start does not stick the run` (*measured here*, on .NET and JavaScript). No stepped clock in
-the app is NaN, so the port is unaffected.
+`a NaN clock at the start does not stick the run` (*measured here*, on .NET and JavaScript). That no stepped clock
+in the app is NaN, so that the port is unaffected, is an **assumption** for the later plan to confirm.
+
+## Limits of the JavaScript suite
+
+Under the Expecto shim, `Expect.throwsT` for a `System` exception type accepts any exception
+(*from documentation*: `tests/Ranvier.Science.Tests.Fable/Expecto.fs`, lines 138-147), so the exception types the
+plan's review focus names are pinned on .NET only.
 
 ## Sources read
 
@@ -322,6 +447,10 @@ the same script gives 0.0415 from t ≥ 30 (*measured here*, 2026-11-19, .NET: `
 against the Release build of `Ranvier.Statistics`, the coverage test's loop with the first checked t as a
 parameter). At t = 1 the interval has zero width at the observation, and the theorem's guarantee is asymptotic
 only. Consequence for the later page: it applies a burn-in before showing or acting on the sequence.
+
+The 0.0415 is for one setting: α = 0.05, ρ tightest at 1,000 (`rhoTightestAt 0.05 1000.0`), read from t ≥ 30, on
+streams of 10,000 standard normal observations. The later page will not be running that setting, so the figure
+gives no coverage for it.
 
 After the fix of `FixedSample.ofMoments` to `-(NormalQuantile.ofProbability (α/2))`, the coverage test prints the
 same fractions, 0.0415 and 0.5735, on both targets (*measured here*, by the commands above).

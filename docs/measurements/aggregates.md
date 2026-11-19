@@ -1,12 +1,22 @@
 # Maintained aggregates over 100,000 rows, and the cost of adding one key
 
-This file holds four BenchmarkDotNet runs and one drift run. Every figure is **measured here**, on 2026-11-19, on the
-machine below, with the command given beside each run. BenchmarkDotNet 0.15.8, default job (not shortened) unless a run
-says `--launchCount 3`. Ratios are taken within one run only, against the baseline row of the same category (and, in
-runs 2 and 4, of the same row count). Differences between rows are taken within one run. Nothing here is compared with a
-figure from another document.
+This file holds four BenchmarkDotNet runs, one drift run and the drift test's printed lines. Every figure is
+**measured here**, on 2026-11-19, on the machine below, with the command given beside each run. BenchmarkDotNet
+0.15.8, default job (not shortened) unless a run says `--launchCount 3`. Each run's log (*from documentation*, under
+`BenchmarkDotNet.Artifacts/`, git-ignored):
 
-Machine and runtime lines of the BenchmarkDotNet summary (the same for all four runs):
+- run 1: `Ranvier.Science.Benchmarks.Aggregates.AggregatesBenchmarks-20261119-161313.log`;
+- run 2: `Ranvier.Science.Benchmarks.KeyScaling.KeyScalingBenchmarks-20261119-162414.log`;
+- run 3: `Ranvier.Science.Benchmarks.Aggregates.AggregatesBenchmarks-20261119-162755.log`;
+- run 4: `Ranvier.Science.Benchmarks.KeyScaling.KeyScalingBenchmarks-20261119-164055.log`.
+
+Ratios are taken within one run only, against the baseline row of the same category (and, in runs 2 and 4, of the
+same row count). Differences between rows are taken within one run. Nothing here is compared with a figure from
+another document.
+
+Machine and runtime lines of the BenchmarkDotNet summary of runs 1, 2 and 4. Run 3 has the same machine and `[Host]`
+lines, and its job line reads `Job-OEWQXS : .NET 10.0.15 (10.0.15, 10.0.1526.53008), X64 RyuJIT x86-64-v4`, followed
+by `LaunchCount=3  Categories=AddOneKey` (*from documentation*, run 3's log):
 
 ```
 BenchmarkDotNet v0.15.8, Windows 11 (10.0.26200.9974/25H2/2025Update/HudsonValley2)
@@ -196,6 +206,23 @@ exactly representable (exact for about one in seven), and differ in magnitude by
 rounded sum, `tests/Ranvier.Science.Tests/Exact.fs`) of the current values after every pass, so the samples that fall
 between re-folds count; the largest distance over the 1,000 samples is printed. This is one input sequence, not a bound.
 
+## The drift test's lines, per target
+
+The test `between re-folds the sum stays within 2 ulp` (`tests/Ranvier.Science.Tests/AggregateTests.fs`) edits 1,000
+rows under `FloatPolicy.standard` and, beside it, under `FloatPolicy.fast`, and prints one line. *Measured here*,
+2026-11-19, at commit 718f821: .NET with `dotnet run -c Release --project tests/Ranvier.Science.Tests`; JavaScript
+with `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release` then
+`npx mocha dist/tests/Main.fs.js`.
+
+```
+.NET:       Aggregate drift: largest distance 0 ulp before a re-fold, 0 ulp at every 997th edit, 196138 ulp under fast, over 1000000 edits, 1000 re-folds
+JavaScript: Aggregate drift: largest distance 0 ulp before a re-fold, 0 ulp at every 997th edit, 14 ulp under fast, over 100000 edits, 100 re-folds
+```
+
+The two runs have different lengths (1,000,000 edits on .NET, 100,000 under JavaScript), so their `fast` figures are
+not comparable with each other. The test asserts the `standard` distance only (at most 2 ulp); the `fast` figure is
+printed, not asserted.
+
 ## The two sentences
 
 **What the standard policy costs against the fast one.** In run 1, revising 1,000 of 100,000 rows and reading the sum
@@ -212,9 +239,10 @@ undecided); the collection's own processing of the key changes, measured by a co
 nothing, was 784.8 us of it in run 4, and allocated 782.98 of the 785.54 KB per operation (99.7%), which is two key
 arrays of 100,000 `int`s (2 x 400,000 B = 781.25 KB) plus about 1.7 KB, and 79.84 of 82.41 KB (96.9%) at 10,000 rows
 (two arrays of 40,000 B = 78.13 KB plus about 1.7 KB); the allocation of the collection grew 9.8 times for 10 times the
-rows, so the clearest sign of linear growth is the collection's key array, built on every key change in
-`Ranvier/src/Ranvier/Collections.fs` (`toArray`, lines 28 to 41, called from `ReadDelta` at line 58 when keys have
-changed; *from documentation*, read in the source), while the time grew 27.7 times, which mixes the row count with a
+rows, so the clearest sign of linear growth is the collection's key array, built once per read that follows one or
+more key changes in `Ranvier/src/Ranvier/Collections.fs` (`toArray`, lines 28 to 41, called from `ReadDelta`, lines
+55 to 63, when changes are recorded since the last read; *from documentation*, read in the source; one operation
+has two reads, each after a key change, hence two arrays), while the time grew 27.7 times, which mixes the row count with a
 change of GC regime (Gen2 collections at 100,000 rows only) and is not a scaling law. What the aggregate adds over the
 control is +1.7 us (about 6%) at 10,000 rows for both aggregates and a constant +2.6 KB at both sizes; at 100,000 rows
 its time increment is undecided in these runs (+58.4 us for the core, -58.9 us for `standard`, each outside the
