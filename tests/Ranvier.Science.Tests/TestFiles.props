@@ -13,5 +13,6 @@
         <Compile Include="$(MSBuildThisFileDirectory)QuantityTests.fs" Link="QuantityTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)GeneratorTests.fs" Link="GeneratorTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)RunTests.fs" Link="RunTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)ConfidenceSequenceTests.fs" Link="ConfidenceSequenceTests.fs" />
     </ItemGroup>
 </Project>

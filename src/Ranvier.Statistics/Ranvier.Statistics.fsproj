@@ -5,7 +5,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Placeholder.fs" />
+        <Compile Include="NormalQuantile.fs" />
+        <Compile Include="ConfidenceSequence.fs" />
     </ItemGroup>
 
     <ItemGroup>

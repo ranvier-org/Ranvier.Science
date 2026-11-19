@@ -230,3 +230,89 @@ is false, so `Flow` then neither advances nor restarts until its key changes.
 records that clock and does not advance, and the ordinary rules follow. Test
 `a NaN clock at the start does not stick the run` (*measured here*, on .NET and JavaScript). No stepped clock in
 the app is NaN, so the port is unaffected.
+
+## Sources read
+
+### The confidence sequence (`src/Ranvier.Statistics/ConfidenceSequence.fs`)
+
+Read on 2026-11-19: Waudby-Smith, Arbour, Sinha, Kennedy and Ramdas, "Time-uniform central limit theory and
+asymptotic confidence sequences", arXiv 2103.06476, version 9 (14 March 2024; the abstract page lists v1 to v9).
+Theorem 2.2 with equation 13, Definition 2.1, Section 2.2.1 (equation 11) and appendix B.2 (equations 302 to 311).
+
+Routes, each read as the paper's own LaTeX (the `alttext` of each formula), not as a summary:
+
+1. `https://arxiv.org/html/2103.06476v9` in the browser pane: Theorem 2.2 and appendix B.2 extracted as text.
+2. `https://ar5iv.labs.arxiv.org/html/2103.06476` in the browser pane, the same passages. ar5iv shows no version
+   number. Both routes are LaTeXML renderings of the authors' source, so they share that source.
+3. The authors' reference implementation, `R/asymptotic_confseq.R` and `R/misc.R` of the GitHub repository
+   `WannabeSmith/drconfseq`, branch `main`, read as raw text: functions `std_conjmix_margin`, `best_rho2_exact`,
+   `best_rho2_approx`, `asymptotic_confseq` and `cumul_var`.
+
+A fetch of the PDF returned only compressed bytes; the fetch tool stored a copy outside the repository, which was
+deleted unread.
+
+The formulas, in this repository's notation (*from documentation*: arXiv 2103.06476 v9, the sections named):
+
+- **Radius (Theorem 2.2, equation 13).** `radius α ρ t sd = sd · sqrt( (2(tρ² + 1) / (t²ρ²)) · ln( sqrt(tρ² + 1) / α ) )`,
+  and the interval is `mean_t ± radius`. Routes 1 and 2 give the same LaTeX; it equals the brief's formula.
+- **Standard deviation.** `sd_t² = (1/t)·Σy² − mean_t²` over the first t observations, with `mean_t` the mean of
+  the first t: the population variance, `Moments.variance`. The brief's choice is confirmed.
+- **ρ.** A constant ρ > 0, fixed before the data are seen, "which dictates the time at which (13) is tightest". In
+  version 9, ρ enters only as `tρ²`, with sd outside the square root: the brief's scaling. The reference
+  implementation's `lyapunov_asympcs` uses `t·var·ρ²` instead, a different scaling of ρ; the paper's Theorem 2.2
+  and the implementation's `asymptotic_confseq` (unit margin times `sqrt(var)`) use the brief's.
+- **Guarantee (Theorem 2.2, Definition 2.1).** Observations independent and identically distributed, with finite
+  variance (the conditions of the central limit theorem). The intervals over all t form a (1 − α) asymptotic
+  confidence sequence: there is a (generally unknown) sequence of intervals that holds the mean at every t
+  simultaneously with probability at least 1 − α, and the ratios of its bounds to these bounds tend to 1 almost
+  surely. The guarantee is asymptotic and time-uniform, as the design document reads it.
+- **`rhoTightestAt` (appendix B.2, equation 302).** `ρ = sqrt( (−W₋₁(−α²·e⁻¹) − 1) / n )`, with `W₋₁` the lower
+  branch of the Lambert W function; equivalently `ρ = sqrt(u / n)` with `u > 0` the root of `α²·exp u = u + 1`
+  (equation 307, with `u = n·ρ²`). Implemented by Newton's method on `u − ln(u + 1) + 2 ln α = 0`, started from the
+  closed-form approximation of equation 311, `u ≈ −2 ln α + ln(−2 ln α + 1)`.
+
+Correction to the brief's formula: none.
+
+Differences in the reference implementation, recorded and not followed: `cumul_var` divides by t − 1
+(`(cumul_mean(x^2) - cumul_mean(x)^2) * t / (t - 1)`), where Theorem 2.2 divides by t; the brief and this
+repository follow the paper.
+
+Comparison with the reference implementation. R is not installed on this machine, so the R code was not run. The
+expression of `std_conjmix_margin(t, rho2 = ρ², alpha)` was transcribed into an F# script and evaluated beside
+`ConfidenceSequence.radius α ρ t 1.0` (*measured here*: `dotnet fsi` on a scratch script against the Release build
+of `Ranvier.Statistics`, 2026-11-19):
+
+| α | ρ | t | `radius` | transcribed reference expression |
+|---|---|---|---|---|
+| 0.05 | 1 | 100 | 0.32730186242349329 | 0.32730186242349335 |
+| 0.1 | 0.05 | 1000 | 0.090559960337208867 | 0.090559960337208867 |
+| 0.01 | 0.3 | 37 | 0.61252437936126281 | 0.61252437936126281 |
+
+The same script gives `rhoTightestAt 0.05 1000 = 0.090619909854668543`, for which `α²·exp u − (u + 1) = −5.3e-15`,
+and equation 311's approximation `0.089085097528922116` (*measured here*, same run).
+
+**The unconfirmed mark on the radius formula is cleared.** The equation itself was read as LaTeX by two routes
+that agree (routes 1 and 2), and the authors' reference implementation (route 3) has the same expression.
+`rhoTightestAt` is taken from equation 302, read by the same two routes and matching `best_rho2_exact`.
+
+### The normal quantile (`src/Ranvier.Statistics/NormalQuantile.fs`)
+
+Acklam's rational approximation. Coefficients and break-point 0.02425 checked against the copy in Debian's
+`imms` source, `immscore/ltqnorm.h` (*from documentation*), which matches the widely reproduced listing; stated
+relative error below 1.15e-9 (*from documentation*: the same algorithm's description).
+
+## Coverage
+
+Test `the sequence covers under continuous monitoring and the fixed-sample interval does not`: 2,000 streams
+(seeds 1 to 2,000) of 10,000 standard normal deviates each, α = 0.05, ρ = `rhoTightestAt 0.05 1000.0`; a stream
+misses when its interval excludes 0 at any t ≥ 30.
+
+| Target | Confidence sequence miss fraction | Fixed-sample interval miss fraction |
+|---|---|---|
+| .NET | 0.0415 | 0.5735 |
+| JavaScript | 0.0415 | 0.5735 |
+
+*Measured here*, 2026-11-19: .NET with `dotnet run -c Release --project tests/Ranvier.Science.Tests`; JavaScript
+with `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release` then
+`npx mocha dist/tests/Main.fs.js`. Each figure is the line the test prints, counted over the 2,000 streams of one
+run. The two targets print the same fractions.
