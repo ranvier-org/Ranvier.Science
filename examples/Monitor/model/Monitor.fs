@@ -72,7 +72,8 @@ type FormulaState =
         Error: string voption
     }
 
-/// What the frame before the last `frame` call delivered and caused.
+/// What the frame before the last `frame` call delivered and caused. `Restarts` counts the restarts of the rows present
+/// at both calls.
 type Diagnostics = { Items: int; Rows: int; Restarts: int }
 
 /// The page's channel keys, its restart signal, and the figures `frame` keeps between calls.
@@ -82,12 +83,14 @@ type MonitorInternals internal (channels: KeyedCollection<string, string>, resta
     member internal _.Restarts = restarts
     member val internal Items = 0 with get, set
     member val internal Means = Dictionary<string, int>()
-    member val internal Starts = Dictionary<string, int>()
+    member val internal Starts = Dictionary<string, RowCounts * int>()
 
 [<NoEquality; NoComparison>]
 type Monitor =
     {
         Model: Model
+        /// The row identifiers available to a formula, as constants in the rows' units; a child of `Model`.
+        Schema: Model
         Alpha: Input<1>
         TightestAt: Input<1>
         Target: Input<mK>
@@ -453,6 +456,7 @@ module Monitor =
         let monitor =
             {
                 Model = model
+                Schema = schema
                 Alpha = alpha
                 TightestAt = tightestAt
                 Target = target
@@ -518,7 +522,8 @@ module Monitor =
             | _ -> recomputed <- recomputed + 1
 
             match internals.Starts.TryGetValue r.Key with
-            | true, starts -> restarted <- restarted + (r.Counts.Starts - starts)
+            | true, (counts, starts) when obj.ReferenceEquals(counts, r.Counts) ->
+                restarted <- restarted + (r.Counts.Starts - starts)
             | _ -> ()
 
         internals.Means.Clear()
@@ -526,7 +531,7 @@ module Monitor =
 
         for r in current do
             internals.Means[r.Key] <- r.Counts.Means
-            internals.Starts[r.Key] <- r.Counts.Starts
+            internals.Starts[r.Key] <- (r.Counts, r.Counts.Starts)
 
         let tally =
             {
@@ -568,12 +573,12 @@ module Monitor =
     let setRate (m: Monitor) (text: string) : Result<unit, string> =
         setWith (fun x -> x >= 0.0 && x <= 1_000_000.0) "The rate must be a number from 0 to 1,000,000 per second." m.Rate text
 
-    /// The pooled row's cells. A tracked read.
+    /// The pooled row's cells; with channels and none pooled, the waiting cells with the pooled note. A tracked read.
     let pooledCells (m: Monitor) : string[] =
         let all = rows m
         let pooled = m.Pooled.Value.Value
 
-        if all.Length = 0 || Moments.count pooled = 0.0 then
+        if all.Length = 0 then
             waitingCells "All"
         else
             let showing = all |> Array.filter (fun r -> r.State() = RowState.Showing) |> Array.length
@@ -584,16 +589,19 @@ module Monitor =
                 else
                     "(pooled, " + string showing + " of " + string all.Length + " channels)"
 
-            let symbol = UnitInfo.symbol Units.millikelvin.Info
+            if Moments.count pooled = 0.0 then
+                [| "All"; "waiting for data"; ""; ""; note; "" |]
+            else
+                let symbol = UnitInfo.symbol Units.millikelvin.Info
 
-            [|
-                "All"
-                Format.count (Moments.count pooled)
-                Format.fixed' 2 (Moments.mean pooled) + " " + symbol
-                Format.fixed' 2 (Moments.standardError pooled) + " " + symbol
-                note
-                ""
-            |]
+                [|
+                    "All"
+                    Format.count (Moments.count pooled)
+                    Format.fixed' 2 (Moments.mean pooled) + " " + symbol
+                    Format.fixed' 2 (Moments.standardError pooled) + " " + symbol
+                    note
+                    ""
+                |]
 
     /// Units in the last place between the maintained and the from-scratch pooled mean. A tracked read.
     let pooledDistance (m: Monitor) : float =

@@ -39,21 +39,49 @@ let private sameInstance (a: obj) (b: obj) = obj.ReferenceEquals (a, b)
 
 let private line (cells: string[]) = String.concat " | " cells
 
+/// The message of what `body` raises, or None.
+let private raisedBy (body: unit -> unit) : string option =
+    try
+        body ()
+        None
+    with error ->
+        Some error.Message
+
 let private failingStream () =
     async {
         use graph = new Graph ()
-        let m = graph.Run (fun () -> monitorWith 1)
-        let a = graph.Run (fun () -> rowOf m "A")
-        graph.Run (fun () -> push a (valuesOf 40 0.0))
+        let m = graph.Run (fun () -> monitorWith 2)
+        let a, b = graph.Run (fun () -> rowOf m "A", rowOf m "B")
+
+        graph.Run (fun () ->
+            Expect.equal
+                (Monitor.pooledCells m)
+                [| "All"; "waiting for data"; ""; ""; "(pooled, 0 of 2 channels)"; "" |]
+                "the pooled cells with no channel showing")
+
+        graph.Run (fun () ->
+            push a (valuesOf 40 0.0)
+            push b (valuesOf 40 1.0))
+
         graph.Run (fun () -> readPage m)
+        let bCells = graph.Run (fun () -> b.Cells ())
         a.Feed.Fail (exn "boom")
         do! drained ()
 
         graph.Run (fun () ->
-            readPage m
-            Expect.equal (a.State ()) (RowState.Failed "boom") "the row's state"
-            Expect.equal (a.Cells ()).[1] "failed: boom" "the second cell"
-            Expect.equal (Monitor.pooledCells m) [| "All"; "waiting for data"; ""; ""; ""; "" |] "the pooled cells")
+            Expect.equal (raisedBy (fun () -> readPage m)) None "reading the page raises nothing"
+            Expect.equal (a.State ()) (RowState.Failed "boom") "A's state"
+            Expect.equal (a.Cells ()).[1] "failed: boom" "A's second cell"
+            Expect.equal (b.Cells ()) bCells "B's cells"
+            let pooled = m.Pooled.Value.Value
+
+            match b.Observations.TryValue with
+            | Ready f ->
+                Expect.equal (Moments.count pooled) (Moments.count f.Moments) "the pooled count is B's"
+                Expect.isLessThanOrEqual (relative (Moments.mean pooled) (Moments.mean f.Moments)) 1e-12 "the pooled mean is B's"
+            | other -> failtestf "B has no value: %A" other
+
+            Expect.equal (Monitor.pooledCells m).[4] "(pooled, 1 of 2 channels)" "the pooled note")
     }
 
 #if !FABLE_COMPILER
@@ -459,10 +487,50 @@ let tests =
                 Expect.equal (List.sort [ first; next ]) [ 0; 1 ] "one restart in exactly one reading")
         }
 
+        test "a channel removed and added again between frames restarts nothing it did not restart" {
+            withGraph (fun () ->
+                let m = monitorWith 2
+                let a, b = rowOf m "A", rowOf m "B"
+                a.TrueMean.Set 1.0<mK>
+                readPage m
+                a.TrueMean.Set 2.0<mK>
+                readPage m
+                Expect.equal a.Counts.Starts 3 "A's starts before the frame"
+                Monitor.frame m (1.0 / 60.0)
+                readPage m
+                Monitor.removeChannel m "A"
+                readPage m
+                Expect.equal (Monitor.addChannel m) "A" "the key added again"
+                readPage m
+                Expect.isFalse (sameInstance (rowOf m "A") a) "a new row under the key"
+                b.TrueMean.Set 1.0<mK>
+                readPage m
+                Monitor.frame m (1.0 / 60.0)
+                let restarts = m.Diagnostics.Value.Restarts
+                Expect.isTrue (restarts >= 0) (sprintf "restarts %d, not negative" restarts)
+                Expect.equal restarts 1 "the restart of B, the one row present at both frames")
+        }
+
+        test "a formula that divides by zero shows an infinity or NaN in its cell" {
+            withGraph (fun () ->
+                let m = monitorWith 1
+                let a = rowOf m "A"
+                push a (valuesOf 40 0.0)
+                readPage m
+                Expect.equal (a.State ()) RowState.Showing "a showing row"
+
+                for formula, cell in [ "1 / (n - n)", "∞"; "(n - n) / (n - n)", "NaN" ] do
+                    m.FormulaText.Value <- formula
+                    Expect.equal (raisedBy (fun () -> readPage m)) None (formula + ": reading the page raises nothing")
+                    Expect.equal m.Formula.Value.Error ValueNone (formula + ": no error")
+                    Expect.equal (a.Cells ()).[5] cell formula)
+        }
+
         test "the schema covers a row" {
             withGraph (fun () ->
                 let m = monitorWith 1
-                let entries = (rowOf m "A").Model.Entries
+                let row = rowOf m "A"
+                let entries = row.Model.Entries
                 Expect.equal (List.length entries) 9 "the row's entries"
 
                 for entry in entries do
@@ -471,6 +539,15 @@ let tests =
                     match m.Formula.Value.Valid with
                     | ValueSome c when m.Formula.Value.Error = ValueNone ->
                         Expect.isTrue (UnitInfo.equivalent c.Unit entry.Unit) (entry.Id + ": an equivalent unit")
-                    | _ -> failtestf "%s is not in the schema: %A" entry.Id m.Formula.Value.Error)
+                    | _ -> failtestf "%s is not in the schema: %A" entry.Id m.Formula.Value.Error
+
+                // The reverse: a row's model, or the page's model above it, declares every identifier of the schema.
+                Expect.isNonEmpty m.Schema.Entries "the schema's entries"
+
+                for entry in m.Schema.Entries do
+                    match row.Model.TryFind entry.Id with
+                    | ValueSome declared ->
+                        Expect.isTrue (UnitInfo.equivalent declared.Unit entry.Unit) (entry.Id + ": declared with an equivalent unit")
+                    | ValueNone -> failtestf "%s of the schema is declared by neither the row's model nor the page's" entry.Id)
         }
     ] @ threadTests)

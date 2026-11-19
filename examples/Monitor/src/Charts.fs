@@ -22,6 +22,9 @@ let private IntervalWidth = 0.7
 [<Literal>]
 let private IntervalOpacity = 0.85
 
+/// White, the colour of the target line and its legend swatch; distinct from every colour of `palette`.
+let private targetColour: Rgb = (255, 255, 255)
+
 /// "<name> [<unit symbol>]", from a quantity's entry; the name alone when the unit has no symbol.
 let axisLabel (entry: Entry) : string =
     let symbol = UnitInfo.symbol entry.Unit
@@ -77,7 +80,7 @@ let private legendMarks (p: Panel) : Mark list =
         label 1 "fixed-sample interval: valid at one planned n only"
         stroke $"{p.Key}/lgs1" grey IntervalWidth (segment (x - 13.0) (y 1) x (y 1)) |> Mark.withOpacity IntervalOpacity
         label 2 "target"
-        stroke $"{p.Key}/lgs2" amber 1.2 (segment (x - 13.0) (y 2) x (y 2))
+        stroke $"{p.Key}/lgs2" targetColour 1.2 (segment (x - 13.0) (y 2) x (y 2))
     ]
 
 /// The chart of every channel: per channel a band, a mean line and the two lines of the fixed-sample interval,
@@ -110,4 +113,4 @@ let scene (m: Monitor) : Scene =
     let channels =
         rows |> Array.toList |> List.mapi (fun i r -> channelMarks p palette[i % palette.Length] r) |> List.concat
 
-    Scene.create Width height "Sequential monitor chart" (p.Frame @ channels @ [ hline p "target" amber target ] @ legendMarks p)
+    Scene.create Width height "Sequential monitor chart" (p.Frame @ channels @ [ hline p "target" targetColour target ] @ legendMarks p)

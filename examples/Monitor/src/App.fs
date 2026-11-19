@@ -84,7 +84,8 @@ let private formulaStatus (page: Page) =
     let f = page.Monitor.Formula.Value
 
     match f.Error, f.Valid with
-    | ValueSome message, _ -> "stale: " + message
+    | ValueSome message, ValueSome _ -> "stale: " + message
+    | ValueSome message, ValueNone -> message
     | ValueNone, ValueSome _ -> "ok"
     | ValueNone, ValueNone -> ""
 
