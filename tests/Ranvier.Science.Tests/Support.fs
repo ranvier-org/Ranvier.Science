@@ -76,6 +76,22 @@ type ManualStream<'T>() =
     member this.Fail(error: exn) =
         this.Latest.Done.SetException error
 
+#if !FABLE_COMPILER
+/// <summary>Runs <c>work</c> on a thread other than the caller's and waits for it.</summary>
+let offThread (work: unit -> unit) =
+    let thread = Thread (ThreadStart work)
+    thread.Start ()
+    thread.Join ()
+
+/// <summary>A graph whose dispatched work runs on the test's <c>Pump</c> calls.</summary>
+let manualGraph () =
+    new Graph (
+        { GraphOptions.Default with
+            Dispatcher = Some (ManualDispatcher () :> IGraphDispatcher)
+        }
+    )
+
+#endif
 /// <summary>Completes once a stream memo has observed the start's task settle: at once on .NET, a microtask later under Fable.</summary>
 let settled (start: StreamStart<'T>) : Async<unit> =
 #if FABLE_COMPILER

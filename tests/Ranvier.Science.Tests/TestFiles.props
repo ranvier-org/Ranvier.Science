@@ -6,5 +6,6 @@
         <Compile Include="$(MSBuildThisFileDirectory)Probes.fs" Link="Probes.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)SumTests.fs" Link="SumTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MomentsTests.fs" Link="MomentsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)AggregateTests.fs" Link="AggregateTests.fs" />
     </ItemGroup>
 </Project>

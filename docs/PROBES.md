@@ -168,3 +168,33 @@ graph's `GraphOptions.Equality`. This bounds the fold functions of Tasks 9 and 1
 stream-fed quantities.
 
 ## Workarounds
+
+### Raising from `subtract` to request a re-fold
+
+What the slice does: `Aggregate.sumBy` and `Aggregate.momentsBy` (`src/Ranvier.Numerics/Aggregate.fs`) keep their
+state, an accumulator with the row count and the removals since the last re-fold, in a `Projection.foldGroupBy`.
+Their `subtract` raises `ArithmeticException` when the state it is given is not finite, or, under
+`RefoldAfterRemovals`, when the removals including this one reach the row count before it. `Refolds` counts these
+raises in a counter the closure owns.
+
+Core lines it relies on (*from documentation*: `Ranvier/src/Ranvier/Combinators.fs`, package 0.2.0 source):
+
+- `ProjectionFold.Step` (1058-1064) runs a step in `try ... with _ -> full <- true`; `Sync` then calls `Recompute`
+  (1294-1295), so one raise gives one re-fold in the same read.
+- A row edit is one step, `add (subtract s old) v` (1121), with `old` the row's cached value; `foldGroupBy` (1856)
+  folds over `map projection upstream`, so `old` is the cached projected value and `projection` runs once per edit
+  (*measured here*: test `a row edit makes one subtract and one add`, 1 call on .NET and JavaScript).
+- A removed row is `Step (fun s -> subtract s old)` (1146), except the last valued row: `valued = 0` sets the state
+  to `zero` without calling `subtract` (1142). `removing the last row returns zero` therefore needs no re-fold.
+- `Recompute` (1242-1254) folds `add` from `zero` over the cached row values in `Keys` order (`lastKeys`). A keyed
+  collection's `Keys` are in insertion order, and `AddOrUpdate` of an existing key keeps its position
+  (*from documentation*: `Ranvier/src/Ranvier/Collections.fs`, `KeyedCollection.AddOrUpdate`). With keys inserted
+  `0 .. N-1`, the re-fold order is key order: the two "from-scratch bits" tests compare against a fold in key order
+  and pass on both targets (*measured here*).
+- The core's own `sumBy` uses the same device: `subtractFinite` (1860-1865) raises `ArithmeticException` on an
+  infinite or NaN difference.
+
+What a direct request would replace: a step result or a callback in `foldGroupBy` that asks for a re-fold (for
+example a `subtract` returning `ValueNone`) would replace the raise, the exception cost per re-fold on .NET, and
+the reliance on `Step` treating every exception alike. A re-fold the core starts for its own reasons (a moved read
+of the fold functions, 1267-1268) is not counted in `Refolds`.
