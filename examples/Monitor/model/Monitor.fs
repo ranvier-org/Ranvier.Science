@@ -493,13 +493,14 @@ module Monitor =
         let restarts = m.Internals.Restarts
         restarts.Value <- untrack (fun () -> restarts.Value) + 1
 
-    /// The rows in channel order. A tracked read of the keys.
-    let rows (m: Monitor) : Row[] = m.Rows.Keys |> Array.map m.Rows.Get
+    /// The rows in channel order, A before B before C and AA after Z. A tracked read of the keys.
+    let rows (m: Monitor) : Row[] =
+        m.Rows.Keys |> Array.sortBy positionOf |> Array.map m.Rows.Get
 
     /// <summary>
     /// One frame of <c>dt</c> seconds: every feed delivers at the page's rate, in one batch, while <c>Running</c> is
     /// true. A <c>dt</c> that is negative or not finite counts as 0, and one above 0.1 as 0.1. Writes
-    /// <c>Diagnostics</c> for the previous frame first.
+    /// <c>Diagnostics</c> for the previous frame in the same batch, when its values differ from the ones it holds.
     /// </summary>
     let frame (m: Monitor) (dt: float) : unit =
         let step = if dt >= 0.0 && dt < infinity then min dt 0.1 else 0.0
@@ -527,7 +528,7 @@ module Monitor =
             internals.Means[r.Key] <- r.Counts.Means
             internals.Starts[r.Key] <- r.Counts.Starts
 
-        m.Diagnostics.Value <-
+        let tally =
             {
                 Items = internals.Items
                 Rows = recomputed
@@ -535,10 +536,14 @@ module Monitor =
             }
 
         internals.Items <-
-            if running then
-                batch (fun () -> current |> Array.sumBy (fun r -> r.Feed.EmitAtRate(rate, step)))
-            else
-                0
+            batch (fun () ->
+                if untrack (fun () -> m.Diagnostics.Value) <> tally then
+                    m.Diagnostics.Value <- tally
+
+                if running then
+                    current |> Array.sumBy (fun r -> r.Feed.EmitAtRate(rate, step))
+                else
+                    0)
 
     let private setWith (accept: float -> bool) (message: string) (input: Input<'u>) (text: string) : Result<unit, string> =
         match Format.tryNumber text with

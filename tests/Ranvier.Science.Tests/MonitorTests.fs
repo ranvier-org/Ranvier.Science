@@ -205,6 +205,7 @@ let tests =
                 let refolds = m.Pooled.Refolds ()
                 Monitor.removeChannel m "B"
                 readPage m
+                Expect.equal (b.Feed.EmitAtRate (1000.0, 0.1)) 0 "the removed feed delivers nothing"
                 let pooled = m.Pooled.Value.Value
                 let scratch = m.PooledFromScratch.Value
                 Expect.equal (Moments.count pooled) (Moments.count scratch) "the pooled count"
@@ -416,6 +417,53 @@ let tests =
                 Expect.equal (Moments.mean again.Moments) (Moments.mean first.Moments) "the mean of the first start"
                 Expect.equal (Moments.variance again.Moments) (Moments.variance first.Moments) "the variance of the first start"
                 Expect.equal (History.samples again.History) (History.samples first.History) "the samples of the first start")
+        }
+
+        test "a freed letter is reused and the rows stay in channel order" {
+            withGraph (fun () ->
+                let m = monitorWith 3
+                Monitor.removeChannel m "B"
+                Expect.equal (Monitor.addChannel m) "B" "the freed key"
+                readPage m
+                let b = rowOf m "B"
+                Expect.equal (float b.Seed.Value) 2.0 "B's seed"
+                Expect.equal b.TrueMean.Value -0.02<mK> "B's true mean"
+                Expect.equal (Monitor.rows m |> Array.map (fun r -> r.Key)) [| "A"; "B"; "C" |] "the keys in channel order"
+
+                for _ in 4..26 do
+                    Monitor.addChannel m |> ignore
+
+                Expect.equal (Monitor.addChannel m) "AA" "the key after Z"
+                let keys = Monitor.rows m |> Array.map (fun r -> r.Key)
+                Expect.equal keys[keys.Length - 2 ..] [| "Z"; "AA" |] "the last keys")
+        }
+
+        test "the diagnostics report the frame before" {
+            withGraph (fun () ->
+                let m = monitorWith 2
+                Expect.equal (Monitor.setRate m "1024") (Result.Ok ()) "rate set"
+
+                let aFrame () =
+                    Monitor.frame m 0.015625
+                    readPage m
+
+                aFrame ()
+                aFrame ()
+                Expect.equal m.Diagnostics.Value { Items = 32; Rows = 2; Restarts = 0 } "after two frames"
+                let second = m.Diagnostics.Value
+                aFrame ()
+                Expect.isTrue (sameInstance m.Diagnostics.Value second) "an equal tally is not written"
+                m.Running.Value <- false
+                aFrame ()
+                aFrame ()
+                Expect.equal m.Diagnostics.Value { Items = 0; Rows = 0; Restarts = 0 } "paused"
+                m.Running.Value <- true
+                (rowOf m "A").TrueMean.Set 1.0<mK>
+                aFrame ()
+                let first = m.Diagnostics.Value.Restarts
+                aFrame ()
+                let next = m.Diagnostics.Value.Restarts
+                Expect.equal (List.sort [ first; next ]) [ 0; 1 ] "one restart in exactly one reading")
         }
 
         test "the schema covers a row" {
