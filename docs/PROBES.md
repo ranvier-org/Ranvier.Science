@@ -380,7 +380,7 @@ core, a declaration could register an `onCleanup` that removes its entry, which 
 ### The core's projection read into an array for the view's `each`
 
 What the page does: the table is `each (fun (row: Row) -> row.Key) (fun (page: Page) -> Monitor.rows page.Monitor)
-rowComponent` (`examples/Monitor/src/App.fs`, line 189). `Monitor.rows` (`examples/Monitor/model/Monitor.fs`, line 497)
+rowComponent` (`examples/Monitor/src/App.fs`, line 190). `Monitor.rows` (`examples/Monitor/model/Monitor.fs`, line 501)
 reads the core projection's keys (`m.Rows.Keys`), sorts them by channel position, and maps them to the projection's
 rows with `m.Rows.Get`, giving a `Row[]`. The view's list construct then builds a projection of its own over that
 array, keyed by `row.Key` and creating one component per key. Two projections therefore hold one key set: the core's,
@@ -398,7 +398,7 @@ measured, and neither was the cost of the array and the second projection.
 
 ### A mark that comes or goes costs a page update
 
-What the page does: the chart's mark keys are fixed per channel (`examples/Monitor/src/Charts.fs`, lines 56 to 64: the
+What the page does: the chart's mark keys are fixed per channel (`examples/Monitor/src/Charts.fs`, lines 59 to 67: the
 four marks `band/<key>`, `mean/<key>`, `fixlo/<key>` and `fixhi/<key>`). A frame that adds or removes no channel adds or
 removes no mark; the script `counts` checks that two consecutive scenes have equal keys, and that adding a channel adds
 exactly four (output in `docs/measurements/monitor.md`, *measured here*).
@@ -418,7 +418,7 @@ follow the document's finding and are not a measurement of this page.
 
 What the chart library could offer in its place: listeners attached once to the scene's root and dispatched by path,
 or a scene renderer without listeners for marks that need none. The page renders its scene with `Renderer.passive`
-(`examples/Monitor/src/App.fs`, line 219), which is `create` with a dispatch that ignores events (*from documentation*:
+(`examples/Monitor/src/App.fs`, line 220), which is `create` with a dispatch that ignores events (*from documentation*:
 `Renderer.fs`, line 199), so it adds the seven listeners of line 90 and ignores what they receive.
 
 ### The row's band reads the fold's state, not the history alone

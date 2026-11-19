@@ -81,9 +81,9 @@ Records of the page:
   and `counts` outputs.
 - [`docs/pictures/monitor-native.png`](docs/pictures/monitor-native.png): the page in the native window, written by
   `dotnet run -c Release --project examples/Monitor/native -- --script picture` and copied from
-  `examples/Monitor/out/monitor.png`, at commit `a5ce24c`.
+  `examples/Monitor/out/monitor.png`, at commit `709b5dd`.
 - [`docs/pictures/monitor-browser.png`](docs/pictures/monitor-browser.png): the page in headless Chrome, written by
-  `node examples/Monitor/web/run.mjs picture --picture docs/pictures/monitor-browser.png`, at commit `4adc36b`.
+  `node examples/Monitor/web/run.mjs picture --picture docs/pictures/monitor-browser.png`, at commit `709b5dd`.
 - [`docs/PROBES.md`](docs/PROBES.md): section B (the heads, packages and build), the workarounds the page needed, and
   hot reload.
 
