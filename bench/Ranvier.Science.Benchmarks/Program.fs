@@ -58,6 +58,12 @@ let main argv =
                 eprintfn "%s" f
 
             1
+    | "--drift" :: _ ->
+        for name, policy in [ "standard", Ranvier.Numerics.FloatPolicy.standard; "fast", Ranvier.Numerics.FloatPolicy.fast ] do
+            let worst, refolds = Aggregates.drift policy 1_000
+            printfn "drift %s: 1000 passes x 1000 rows over 100000 rows, sampled after every pass: largest distance %.2f ulps, %d re-folds" name worst refolds
+
+        0
     | args ->
         // `--body <name>` restricts the run to one body's five rows; the default is all four bodies.
         let args =

@@ -13,6 +13,9 @@
         <Compile Include="Bodies.fs" />
         <Compile Include="KitMemo.fs" />
         <Compile Include="NodeCost.fs" />
+        <Compile Include="..\..\tests\Ranvier.Science.Tests\Exact.fs" Link="Exact.fs" />
+        <Compile Include="Aggregates.fs" />
+        <Compile Include="KeyScaling.fs" />
         <Compile Include="Program.fs" />
     </ItemGroup>
 

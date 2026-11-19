@@ -1,6 +1,7 @@
 <Project>
     <!-- The suite, in compile order. Ranvier.Science.Tests and Ranvier.Science.Tests.Fable both compile it. -->
     <ItemGroup>
+        <Compile Include="$(MSBuildThisFileDirectory)Exact.fs" Link="Exact.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Support.fs" Link="Support.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Smoke.fs" Link="Smoke.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Probes.fs" Link="Probes.fs" />
