@@ -99,7 +99,8 @@ Package versions each head ended on (*measured here*: the `libraries` of each he
 - Native: `Ranvier` 0.2.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Ranvier.View.WebCore` 0.2.0,
   `Ranvier.View.WebCore.Sdl` 0.2.1, `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1, and in Debug
   `Ranvier.View.WebCore.Hmr` 0.1.3.
-- Browser: `Ranvier` 0.2.0, `Ranvier.Dom` 0.1.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Fable.Core` 5.3.0.
+- Browser: `Ranvier` 0.2.0, `Ranvier.Dom` 0.1.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Fable.Core` 5.3.0, and
+  `Ranvier.Css`, `Ranvier.Css.Core` and `Ranvier.Css.Bindings` 0.1.1.
   `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1 are compiled from
   the `Ranvier.D5` clone through the project reference; the clone asks for `Ranvier.View` 0.1.49, and the head
   resolves 0.2.0.
@@ -370,6 +371,50 @@ slice does not use it.
 What the core could offer in its place: an owner-scoped registry whose entries leave with their owner; with today's
 core, a declaration could register an `onCleanup` that removes its entry, which needs a removal on `Model`.
 
+### The core's projection read into an array for the view's `each`
+
+What the page does: the table is `each (fun (row: Row) -> row.Key) (fun (page: Page) -> Monitor.rows page.Monitor)
+rowComponent` (`examples/Monitor/src/App.fs`, line 189). `Monitor.rows` (`examples/Monitor/model/Monitor.fs`, line 497)
+reads the core projection's keys (`m.Rows.Keys`), sorts them by channel position, and maps them to the projection's
+rows with `m.Rows.Get`, giving a `Row[]`. The view's list construct then builds a projection of its own over that
+array, keyed by `row.Key` and creating one component per key. Two projections therefore hold one key set: the core's,
+which creates each row's stream fold (probe C), and the view's, which creates each row's DOM.
+
+Source relied on (*from documentation*: `Ranvier.View/src/Ranvier.View.Dom/Mounting.fs`, line 4349, where the list
+construct calls `Api.createProjectionOnce ProjectionOptions.CreateFirst items.Key.Invoke buildRow` over a snapshot of
+the items it was given). The line is the clone's source; the 0.2.0 package's source was not read.
+
+What the view or the core could offer in its place: *a proposal, not measured*. An `each` that takes a core
+`Projection` directly and lays out its rows in key order would remove the array, the sort in `Monitor.rows` and the
+second projection. The order would then come from the projection, so a channel's position would have to be its
+position in the keys, which `Monitor.rows` today derives by sorting. What such an `each` would cost or save was not
+measured, and neither was the cost of the array and the second projection.
+
+### A mark that comes or goes costs a page update
+
+What the page does: the chart's mark keys are fixed per channel (`examples/Monitor/src/Charts.fs`, lines 56 to 64: the
+four marks `band/<key>`, `mean/<key>`, `fixlo/<key>` and `fixhi/<key>`). A frame that adds or removes no channel adds or
+removes no mark; the script `counts` checks that two consecutive scenes have equal keys, and that adding a channel adds
+exactly four (output in `docs/measurements/monitor.md`, *measured here*).
+
+Why: `Ranvier.D5.View` puts seven event listeners on the `g` element of every mark, `wheel` among them
+(*from documentation*: `Ranvier.D5/src/Ranvier.D5.View/Renderer.fs`, line 90, read in the clone at 0.1.1). The
+earlier native comparison measured that, in WebCore, adding or removing a `wheel` listener makes the next page update
+resolve style, lay out and repaint the whole document: a frame after a label came or went spent 5.36 ms in the page
+update against 0.51 ms in a usual frame, and 3.71 ms in the present phase against 0.95 ms (*from documentation*:
+`AstroShowcase.Web/measure/README.md`, lines 130 to 160, measured there on 2026-11-18 with `Ranvier.D5.View` 0.1.0 and
+`Ranvier.View.WebCore.Sdl` 0.1.1, on a different app; the document says other programs used several cores for part of
+the time, so its tables are compared within each table only). The same document found no such cost in Chrome, and
+gives the reason as inferred, not measured (same file, lines 100 to 106).
+
+What this slice did not measure: the cost of a mark that comes or goes on this page, on either target. The fixed keys
+follow the document's finding and are not a measurement of this page.
+
+What the chart library could offer in its place: listeners attached once to the scene's root and dispatched by path,
+or a scene renderer without listeners for marks that need none. The page renders its scene with `Renderer.passive`
+(`examples/Monitor/src/App.fs`, line 219), which is `create` with a dispatch that ignores events (*from documentation*:
+`Renderer.fs`, line 199), so it adds the seven listeners of line 90 and ignores what they receive.
+
 ## Differences from Kit.Flow
 
 `Run` (`src/Ranvier.Quantities/Run.fs`) replaces `Flow` (`AstroShowcase/Kit.fs`, the type `Flow` at line 157).
@@ -443,6 +488,18 @@ is false, so `Flow` then neither advances nor restarts until its key changes.
 records that clock and does not advance, and the ordinary rules follow. Test
 `a NaN clock at the start does not stick the run` (*measured here*, on .NET and JavaScript). That no stepped clock
 in the app is NaN, so that the port is unaffected, is an **assumption** for the later plan to confirm.
+
+## Hot reload
+
+The native head has a `dev` entry (`examples/Monitor/native/Program.fs`, `main`, compiled in Debug only): `dotnet run
+-- dev` hands the page to `Ranvier.View.WebCore.Hmr.Dev.RunWith`, which keeps the window open and patches saved edits
+into it. It compiles: `dotnet build -c Debug examples/Monitor/native` ended with 0 errors (*measured here*, Task 6).
+It was not run: no task of the plan opens a window, so no `dev` host was started, and no edit was patched into a
+running page.
+
+What a reload does to stream state is not measured. Each channel's stream fold is created in a row factory of the
+core projection (probe C), so its state lives in the page's graph. Whether a patched edit keeps that graph, restarts
+the feeds or rebuilds the rows was not observed.
 
 ## Limits of the JavaScript suite
 

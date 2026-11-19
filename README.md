@@ -12,6 +12,7 @@ released. It builds on the published `Ranvier` 0.2.0 package and is not a finish
 - `src/Ranvier.Statistics`: normal quantile, confidence sequence, fixed-sample interval.
 - `tests/`: one test suite that compiles to two targets, .NET and, through the Fickl compiler, JavaScript.
 - `bench/Ranvier.Science.Benchmarks`: the benchmark project.
+- `examples/Monitor`: the sequential monitor, one page for a native window and a browser (below).
 - `docs/`: the probe record and the measurements.
 
 ## Tests
@@ -37,6 +38,50 @@ npx mocha dist/tests/Main.fs.js
 `tests/Ranvier.Science.Tests/Recorded.fs` holds one recorded stream of 1,000 doubles. Both targets fold the same
 doubles, and `CrossTargetTests.fs` pins the moments (exact equality) and the confidence-sequence bounds (relative
 `1e-12`).
+
+## The sequential monitor
+
+`examples/Monitor` is one page, a sequential monitor, built from one set of sources for a native window and a browser.
+Each channel is a stream of observations folded into moments; the page shows a table of rows (count, mean, standard
+error, a confidence sequence and a fixed-sample interval, the user's formula) and a chart of each channel's mean with
+its sequence band. The folds, the rows and the diagnostics are a graph of the core's nodes.
+
+- `examples/Monitor/model`: the page's graph (channels, feeds, history, the monitor).
+- `examples/Monitor/src`: the view, the chart and the scripted runs, shared by both heads.
+- `examples/Monitor/native`: the head that mounts the page in a window.
+- `examples/Monitor/web`: the head that Fickl compiles to JavaScript, and the script that drives it in headless Chrome.
+
+The commands below run from the repository root. The scripted runs hide the window and run Chrome headless; a run
+without a script name (`dotnet run -c Release --project examples/Monitor/native`) opens a visible window, and no run of
+that kind or of the `dev` host has been made in this slice.
+
+1. .NET suite: `dotnet run -c Release --project tests/Ranvier.Science.Tests`
+2. JavaScript suite: `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release`, then
+   `npx mocha dist/tests/Main.fs.js`
+3. Native scripted run: `dotnet run -c Release --project examples/Monitor/native -- --script <name>`
+4. Browser build: `dotnet fickl examples/Monitor/web -e .fs.js -o examples/Monitor/web/dist -c Release`. The first
+   build took 1299 s (*measured here*, `docs/PROBES.md`, section B); a build with nothing changed took 0.7 s.
+5. Browser scripted run: `node examples/Monitor/web/run.mjs <name>`
+
+The scripts, each ending with the line `script done 0` on success (1 when a check fails, 2 for an unknown name):
+
+- `table`: prints one line per row of the table (channel, count, mean, standard error, confidence sequence, formula),
+  then whether the pinned text equals the DOM text.
+- `counts`: prints the counts of scene builds, mark keys and node updates over a frame, a change of the confidence level
+  and an added channel, then `all as expected`.
+- `picture`: runs `table`, then saves a picture of the page. The native run writes `examples/Monitor/out/monitor.png`;
+  the browser run takes `--picture <png>` and writes that file.
+- `frames`: times the frame work of the page at four channels and over a sweep of rates, and prints each block's mean and
+  95th percentile against a budget. It prints no frame rate.
+
+Records of the page:
+
+- [`docs/measurements/monitor.md`](docs/measurements/monitor.md): the `frames` figures on both targets, and the `table`
+  and `counts` outputs.
+- [`docs/pictures/monitor-native.png`](docs/pictures/monitor-native.png): the page in the native window.
+- [`docs/pictures/monitor-browser.png`](docs/pictures/monitor-browser.png): the page in headless Chrome.
+- [`docs/PROBES.md`](docs/PROBES.md): section B (the heads, packages and build), the workarounds the page needed, and
+  hot reload.
 
 ## Benchmarks
 
