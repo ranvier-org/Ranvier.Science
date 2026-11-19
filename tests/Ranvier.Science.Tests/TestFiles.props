@@ -11,5 +11,6 @@
         <Compile Include="$(MSBuildThisFileDirectory)ToleranceTests.fs" Link="ToleranceTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)UnitsTests.fs" Link="UnitsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)QuantityTests.fs" Link="QuantityTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)RunTests.fs" Link="RunTests.fs" />
     </ItemGroup>
 </Project>
