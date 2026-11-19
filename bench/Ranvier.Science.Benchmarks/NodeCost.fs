@@ -17,6 +17,9 @@ let cases =
       { Name = "rigidStep"; Body = Bodies.rigidStep; First = 2.0; Second = 2.5 }
       { Name = "decay"; Body = Bodies.decay; First = 400.0; Second = 425.0 } ]
 
+/// The body names the benchmark class runs; `Program.fs` narrows it to one body for `--body <name>`.
+let mutable selectedBodies = cases |> List.map (fun c -> c.Name)
+
 /// The five call paths around one body, in an active graph that lives until disposal.
 /// The alternating paths (Direct, KitChanged, NodeWritten) use First at their first call, then Second, then First
 /// again: a signal ignores a write of an equal value and KitMemo ignores an equal key, so every call after the first
@@ -80,8 +83,12 @@ type Paths(case: Case) =
 type NodeCostBenchmarks() =
     let mutable paths: Paths = Unchecked.defaultof<Paths>
 
-    [<Params("rate", "kepler", "rigidStep", "decay")>]
+    [<ParamsSource("Bodies")>]
     member val Body = "rate" with get, set
+
+    /// The bodies to measure: all four, or the one named by `--body`.
+    member _.Bodies = selectedBodies
+
 
     [<GlobalSetup>]
     member this.Setup() =

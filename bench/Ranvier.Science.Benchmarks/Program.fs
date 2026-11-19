@@ -59,6 +59,14 @@ let main argv =
 
             1
     | args ->
+        // `--body <name>` restricts the run to one body's five rows; the default is all four bodies.
+        let args =
+            match args |> List.tryFindIndex ((=) "--body") with
+            | Some i when i + 1 < args.Length ->
+                NodeCost.selectedBodies <- [ args[i + 1] ]
+                args |> List.indexed |> List.filter (fun (j, _) -> j <> i && j <> i + 1) |> List.map snd
+            | _ -> args
+
         BenchmarkSwitcher.FromAssembly(typeof<NodeCost.NodeCostBenchmarks>.Assembly).Run(List.toArray args)
         |> ignore
 

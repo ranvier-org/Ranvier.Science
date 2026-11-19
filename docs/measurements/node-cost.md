@@ -41,7 +41,7 @@ A signal ignores a write of an equal value, so `NodeWritten` alternates between 
 `Direct` alternate the same two inputs so that their ratios compare like with like. `KitUnchanged` and `NodeCached`
 use a fixed input by definition, so their ratios compare a cache hit with a computation.
 
-## Results (20 rows)
+## Run 1: results (20 rows)
 
 | Method       | Body      | Mean           | Error       | StdDev        | Ratio | RatioSD | Gen0   | Gen1   | Allocated | Alloc Ratio |
 |------------- |---------- |---------------:|------------:|--------------:|------:|--------:|-------:|-------:|----------:|------------:|
@@ -69,12 +69,47 @@ use a fixed input by definition, so their ratios compare a cache hit with a comp
 | NodeCached   | rigidStep |      0.6019 ns |   0.0260 ns |     0.0231 ns | 0.010 |    0.00 |      - |      - |         - |        0.00 |
 | NodeWritten  | rigidStep |     88.7269 ns |   1.7898 ns |     4.0031 ns | 1.458 |    0.09 | 0.0430 |      - |     720 B |        1.00 |
 
-The `Direct` rows are the ratio baseline and read 1.00 up to run noise (the `decay` baseline has a StdDev of
-1,950 ns and a bimodal distribution warning). Ratios of 0.000 are below the table's precision.
+The `Direct` rows are the ratio baseline of each body, so they read 1.00 by construction. For `decay` this run
+is not a valid baseline: `KitChanged` and `NodeWritten` do the same work as `Direct` plus a memo or a node, yet read
+28% and 15% below it, and their confidence intervals do not overlap `Direct`'s (17,857 to 19,180 ns for `Direct`,
+15,339 to 15,951 ns for `NodeWritten`). The `decay` ratios of this run are therefore not a measurement of the
+node's overhead. The other three bodies have no such contradiction. Ratios of 0.000 are below the table's
+precision.
+
+## Run 2: the five `decay` rows, three launches each
+
+**Measured here**, 2026-11-19, to re-measure the rows that contradicted themselves. Same default job, with three
+launches of the benchmark process per row so that variation between processes enters the interval; 11 min 4 s in
+total. Ratios are taken within this run only, against its own `Direct` row. One operation is as in the table above.
+
+```
+dotnet run -c Release --project bench/Ranvier.Science.Benchmarks -- --filter "*NodeCost*" --body decay --launchCount 3
+```
+
+Machine and runtime lines are those of run 1 (same session, same summary header).
+
+| Method       | Body  | Mean           | Error       | StdDev        | Median         | Ratio | RatioSD | Gen0   | Gen1   | Allocated | Alloc Ratio |
+|------------- |------ |---------------:|------------:|--------------:|---------------:|------:|--------:|-------:|-------:|----------:|------------:|
+| Direct       | decay | 14,024.3487 ns | 145.5030 ns |   325.4384 ns | 14,020.9801 ns | 1.001 |    0.03 | 3.8452 | 0.4120 |   64344 B |        1.00 |
+| KitUnchanged | decay |      5.7628 ns |   0.0804 ns |     0.2104 ns |      5.7224 ns | 0.000 |    0.00 |      - |      - |         - |        0.00 |
+| KitChanged   | decay | 16,078.6210 ns | 593.4427 ns | 2,217.0095 ns | 15,212.9913 ns | 1.147 |    0.16 | 3.8452 | 0.4272 |   64376 B |        1.00 |
+| NodeCached   | decay |      0.5493 ns |   0.0399 ns |     0.1119 ns |      0.5896 ns | 0.000 |    0.00 |      - |      - |         - |        0.00 |
+| NodeWritten  | decay | 13,909.2013 ns | 113.1783 ns |   201.1742 ns | 13,893.1450 ns | 0.992 |    0.03 | 3.8452 | 0.4120 |   64344 B |        1.00 |
+
+In this run `Direct` (13,879 to 14,170 ns) and `NodeWritten` (13,796 to 14,022 ns) have overlapping intervals, and
+`KitChanged` is above `Direct`, as a path doing more work should be. This run has no contradiction. Between the runs
+the `Direct` row itself moved from 18.5 us to 14.0 us and `KitChanged` from 13.3 us to 16.1 us (StdDev 2,217 ns here),
+so the level of this body's rows differs from one benchmark process to another; no cause of that is shown by these
+runs. Each call allocates about 64 KB with Gen0 and Gen1 collections in every row, which is a candidate that these
+runs did not test.
 
 ## Grain
 
-Of the four bodies, only `decay` (about 18.5 us per direct call, mean as measured here) has a write-then-read node
-under 10% more than its direct call (ratio 0.855 within this run, which is inside the noise of the `Direct`
-baseline: the node adds roughly 25 to 28 ns to the cheaper three bodies, which is negligible only against a body
-that takes microseconds); `rigidStep` (ratio 1.458), `kepler` (3.55) and `rate` (3.76) do not qualify.
+Applying the 10% rule to path 5 (write, then read) against `Direct` of the same run: `rate` (3.76), `kepler` (3.55)
+and `rigidStep` (1.458) do not qualify, from run 1. Of the four bodies, only `decay` has a write-then-read node
+under 10% more than its direct call: ratio 0.992 in run 2 (about 14.0 us direct), where run 1's ratio of 0.855 is
+not used because its baseline was contradicted by its own rows. This rests on run 2 alone; the node's added cost
+on the cheaper bodies, from run 1 means, is 24.40 ns for `kepler` (34.06 - 9.66), 26.45 ns for `rate`
+(36.04 - 9.59) and 27.77 ns for `rigidStep` (88.73 - 60.96), that is 24 to 28 ns. As an inference from those rows,
+not a measurement: a node of that cost against a body of 14 to 18 us would be about 0.2% more, which agrees with
+a ratio near 1 but is not the same as measuring it.
