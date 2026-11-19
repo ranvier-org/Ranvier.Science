@@ -411,10 +411,10 @@ that file reads them.
 5. **R-T: the table's header reads "confidence sequence"** where the design's sketch has "95% sequence" (*from
    documentation*: the design, §7.1): the level follows α, and α is split across channels, so a fixed percentage would
    be wrong or misread.
-6. **R-AB: the fixed-sample line uses the per-channel α**, α divided by the channel count (0.05 / 4 at the page's
-   setting, *from documentation*: `docs/PROBES.md`, "Coverage"), so that it contrasts with the sequence at one level: a
-   level of 98.75% at four channels (*general knowledge*: 1 − 0.05 / 4, the ruling's arithmetic, not read from a
-   file under `docs/`).
+6. **R-AB: the fixed-sample line uses the per-channel α**, α divided by the channel count, so that it contrasts with
+   the sequence at one level. At the page's setting that α is 0.05 / 4 (*measured here*: `docs/PROBES.md`, "Coverage",
+   the test at the page's setting), with four channels A to D (*from documentation*: `docs/measurements/monitor.md`,
+   "The script"), so the line's level is 1 − 0.05 / 4.
 7. **R-AA: the row's band reads the fold's state, not the history alone**, so it recomputes on every publication of the
    fold, including one that adds no history sample, and returns its previous value when every array is held to the
    previous one. The cost of these recomputations was not measured (*from documentation*: `docs/PROBES.md`, "The row's
