@@ -12,10 +12,20 @@ let private Width = 960.0
 [<Literal>]
 let private CountLimit = 1e7
 
-/// "<name> [<unit symbol>]", from a quantity's entry; a dimensionless unit is written "1".
+[<Literal>]
+let private BandOpacity = 0.22
+
+/// The stroke width of a fixed-sample interval's line, in pixels.
+[<Literal>]
+let private IntervalWidth = 0.7
+
+[<Literal>]
+let private IntervalOpacity = 0.85
+
+/// "<name> [<unit symbol>]", from a quantity's entry; the name alone when the unit has no symbol.
 let axisLabel (entry: Entry) : string =
     let symbol = UnitInfo.symbol entry.Unit
-    entry.Name + " [" + (if symbol = "" then "1" else symbol) + "]"
+    if symbol = "" then entry.Name else entry.Name + " [" + symbol + "]"
 
 let private isFinite (x: float) = abs x < infinity
 
@@ -48,10 +58,26 @@ let private channelMarks (p: Panel) (colour: Rgb) (row: Row) : Mark list =
     let band = row.Band.Value
 
     [
-        fill ("band/" + row.Key) colour 0.22 (areaPath p band)
+        fill ("band/" + row.Key) colour BandOpacity (areaPath p band)
         stroke ("mean/" + row.Key) colour 1.6 (linePath p band band.Mean)
-        stroke ("fixlo/" + row.Key) colour 0.7 (linePath p band band.FixedLower) |> Mark.withOpacity 0.85
-        stroke ("fixhi/" + row.Key) colour 0.7 (linePath p band band.FixedUpper) |> Mark.withOpacity 0.85
+        stroke ("fixlo/" + row.Key) colour IntervalWidth (linePath p band band.FixedLower) |> Mark.withOpacity IntervalOpacity
+        stroke ("fixhi/" + row.Key) colour IntervalWidth (linePath p band band.FixedUpper) |> Mark.withOpacity IntervalOpacity
+    ]
+
+/// The legend inside the top right of the plot: a filled block for the band, a thin line for the fixed-sample
+/// interval and a line for the target, each drawn as its marks are.
+let private legendMarks (p: Panel) : Mark list =
+    let x = p.Left + p.Width - 8.0
+    let y (i: int) = p.Top + 12.0 + 14.0 * float i
+    let label (i: int) (value: string) = text $"{p.Key}/lg{i}" (x - 18.0) (y i + 3.5) 10.0 "end" grey value
+
+    [
+        label 0 "confidence sequence"
+        fill $"{p.Key}/lgs0" grey BandOpacity (rect (x - 13.0) (y 0 - 4.0) 13.0 8.0)
+        label 1 "fixed-sample interval: valid at one planned n only"
+        stroke $"{p.Key}/lgs1" grey IntervalWidth (segment (x - 13.0) (y 1) x (y 1)) |> Mark.withOpacity IntervalOpacity
+        label 2 "target"
+        stroke $"{p.Key}/lgs2" amber 1.2 (segment (x - 13.0) (y 2) x (y 2))
     ]
 
 /// The chart of every channel: per channel a band, a mean line and the two lines of the fixed-sample interval,
@@ -84,7 +110,4 @@ let scene (m: Monitor) : Scene =
     let channels =
         rows |> Array.toList |> List.mapi (fun i r -> channelMarks p palette[i % palette.Length] r) |> List.concat
 
-    let legendMarks =
-        legend p [ grey, "confidence sequence"; grey, "fixed-sample interval: valid at one planned n only"; amber, "target" ]
-
-    Scene.create Width height "Sequential monitor chart" (p.Frame @ channels @ [ hline p "target" amber target ] @ legendMarks)
+    Scene.create Width height "Sequential monitor chart" (p.Frame @ channels @ [ hline p "target" amber target ] @ legendMarks p)

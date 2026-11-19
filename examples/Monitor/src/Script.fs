@@ -29,7 +29,7 @@ let private line (cells: string[]) = String.concat " | " cells
 /// The elements of the table that show a channel or the pooled row, in document order.
 let private tableRows (document: Ranvier.Dom.Document) : Node list =
     let nodes = document.querySelectorAll "tr[data-row]"
-    [ for i in 0u .. nodes.length - 1u -> nodes.item i ]
+    [ for i in 0 .. int nodes.length - 1 -> nodes.item (uint32 i) ]
 
 /// Rebuilds the page with two channels on the recorded stream and compares the table with the pinned text.
 let private table (props: Props) =
@@ -60,7 +60,9 @@ let private table (props: Props) =
 
     let pinned = expect.Equal "the table text" Recorded.tableLines (cells |> List.map line)
     let shown = tableRows props.Platform.Document |> List.map (fun node -> node.textContent)
-    let dom = expect.Equal "the table rows' text" (cells |> List.map (String.concat "")) shown
+    let dom =
+        expect.Equal "the number of table rows" cells.Length shown.Length
+        && expect.Equal "the table rows' text" (cells |> List.map (String.concat "")) shown
     let verdict ok = if ok then "equal" else "different"
     report $"table | pinned text: {verdict pinned} | DOM text: {verdict dom}"
     if expect.Failed = 0 then 0 else 1
