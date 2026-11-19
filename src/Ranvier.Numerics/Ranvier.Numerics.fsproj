@@ -6,6 +6,7 @@
 
     <ItemGroup>
         <Compile Include="Sum.fs" />
+        <Compile Include="Moments.fs" />
     </ItemGroup>
 
     <ItemGroup>
