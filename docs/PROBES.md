@@ -316,3 +316,12 @@ misses when its interval excludes 0 at any t ≥ 30.
 with `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release` then
 `npx mocha dist/tests/Main.fs.js`. Each figure is the line the test prints, counted over the 2,000 streams of one
 run. The two targets print the same fractions.
+
+Checked from t = 1 instead of t ≥ 30, the same 2,000 streams give a confidence-sequence miss fraction of 1.0, and
+the same script gives 0.0415 from t ≥ 30 (*measured here*, 2026-11-19, .NET: `dotnet fsi` on a scratch script
+against the Release build of `Ranvier.Statistics`, the coverage test's loop with the first checked t as a
+parameter). At t = 1 the interval has zero width at the observation, and the theorem's guarantee is asymptotic
+only. Consequence for the later page: it applies a burn-in before showing or acting on the sequence.
+
+After the fix of `FixedSample.ofMoments` to `-(NormalQuantile.ofProbability (α/2))`, the coverage test prints the
+same fractions, 0.0415 and 0.5735, on both targets (*measured here*, by the commands above).

@@ -65,6 +65,38 @@ let tests =
                     (abs (NormalQuantile.ofProbability 0.025 + upper))
                     1e-9
                     "0.025 within 1e-9 of the negated 0.975 quantile"
+
+                Expect.isLessThanOrEqual (abs (NormalQuantile.ofProbability 0.999 - 3.090232306)) 1e-8 "0.999 within 1e-8 of 3.090232306"
+                Expect.isLessThanOrEqual (abs (NormalQuantile.ofProbability 1e-10 + 6.361340902)) 1e-8 "1e-10 within 1e-8 of -6.361340902"
+            }
+
+            test "the fixed-sample interval accepts a very small alpha" {
+                let m = Array.fold (Moments.add true) Moments.zero [| 1.0; 2.0; 4.0 |]
+                let f = FixedSample.ofMoments 1e-17 m
+                let finite (x: float) = not (Double.IsNaN x || Double.IsInfinity x)
+                Expect.isTrue (finite f.Lower && finite f.Upper) "finite bounds"
+            }
+
+            // Mean 2, population standard deviation 1, count 2.
+            test "the fixed-sample half-width at alpha 0.0125" {
+                let m = Array.fold (Moments.add true) Moments.zero [| 1.0; 3.0 |]
+                let f = FixedSample.ofMoments 0.0125 m
+                let expected = 2.497705474 * 1.0 / sqrt 2.0
+                let half = (f.Upper - f.Lower) / 2.0
+                Expect.isLessThanOrEqual (abs (half - expected) / expected) 1e-8 "half-width within relative 1e-8"
+            }
+
+            // Seed 1.
+            test "the sequence at one observation excludes every other value" {
+                let struct (z, _) = Generator.normal (Generator.create 1)
+
+                for x in [ z; 3.5; -0.25 ] do
+                    let s = ConfidenceSequence.ofMoments 0.05 1.0 (Moments.add true Moments.zero x)
+                    Expect.equal (s.Lower, s.Upper) (x, x) (sprintf "[x, x] at x = %g" x)
+                    Expect.isTrue (excludes (x + 1e-9) s && excludes (x - 1e-9) s) (sprintf "excludes neighbours of %g" x)
+
+                Expect.notEqual z 0.0 "the deviate differs from the mean 0"
+                Expect.isTrue (excludes 0.0 (ConfidenceSequence.ofMoments 0.05 1.0 (Moments.add true Moments.zero z))) "excludes the mean 0"
             }
 
             test "an empty sample has NaN bounds" {

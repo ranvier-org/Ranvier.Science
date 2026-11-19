@@ -21,17 +21,23 @@ module private Arguments =
 /// Theorem 2.2, equation 13).
 /// </summary>
 /// <remarks>
-/// For independent, identically distributed observations with finite variance, the intervals at t = 1, 2, 3, …
-/// form a (1 − α) asymptotic confidence sequence: as t grows, their bounds approach, almost surely, those of a
-/// sequence of intervals that holds the mean at every t simultaneously with probability at least 1 − α. The
-/// guarantee remains valid when the interval is read after every observation and the decision to stop depends on
-/// what was read.
+/// For independent, identically distributed observations with finite variance, the intervals form a (1 − α)
+/// asymptotic confidence sequence: as t grows, their bounds approach, almost surely, those of a sequence of
+/// intervals that holds the mean at every t simultaneously with probability at least 1 − α. The guarantee is
+/// asymptotic: it states no coverage at any finite t. Intervals at small t fall outside it (at one observation the
+/// interval has zero width at the observation), so a monitor reads the sequence only after a burn-in.
+/// Measured by this repository's coverage test, outside the theorem: on standard normal streams of 10,000
+/// observations, α = 0.05, 0.0415 of 2,000 streams excluded the mean at some t ≥ 30, and every stream did at t = 1.
 /// </remarks>
 module ConfidenceSequence =
     /// <summary>
     /// The half-width sd · sqrt((2(tρ² + 1) / (t²ρ²)) · ln(sqrt(tρ² + 1) / α)) at t observations with standard
     /// deviation sd. NaN when t ≤ 0. Raises ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1 and rho &gt; 0.
     /// </summary>
+    /// <remarks>
+    /// The coverage guarantee of the module is asymptotic, with no statement at any finite t; a monitor applies a
+    /// burn-in before reading it.
+    /// </remarks>
     let radius (alpha: float) (rho: float) (t: float) (sd: float) : float =
         Arguments.alpha alpha
         Arguments.positive (nameof rho) rho
@@ -48,6 +54,11 @@ module ConfidenceSequence =
     /// a zero-width interval at the observation for a sample of one. Raises ArgumentOutOfRangeException unless
     /// 0 &lt; alpha &lt; 1 and rho &gt; 0.
     /// </summary>
+    /// <remarks>
+    /// The interval holds the mean only asymptotically, with no coverage statement at any finite count. At small
+    /// counts it is too narrow (at one observation it excludes every other value), so a monitor applies a burn-in
+    /// before showing or acting on it; the repository's coverage test reads from t ≥ 30.
+    /// </remarks>
     let ofMoments (alpha: float) (rho: float) (m: Moments) : Interval =
         let mean = Moments.mean m
         let r = radius alpha rho (Moments.count m) (sqrt (Moments.variance m))
@@ -89,5 +100,5 @@ module FixedSample =
     let ofMoments (alpha: float) (m: Moments) : Interval =
         Arguments.alpha alpha
         let mean = Moments.mean m
-        let r = NormalQuantile.ofProbability (1.0 - alpha / 2.0) * Moments.standardError m
+        let r = -(NormalQuantile.ofProbability (alpha / 2.0)) * Moments.standardError m
         { Lower = mean - r; Upper = mean + r }
