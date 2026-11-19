@@ -13,7 +13,8 @@ type Row = (struct (int * float))
 let private keyOf (struct (k: int, _: float)) = k
 let private valueOf (struct (_: int, v: float)) = v
 
-/// The value of a row before any revision. Not exactly representable, between 100 and 243.
+/// The value of a row before any revision: 100 plus a multiple of 1/7, between 100 and 243. Not exactly representable
+/// unless the multiple is a whole number, which holds for about one key in seven.
 let private baseValue (key: int) = 100.0 + float ((key * 37) % 1000) / 7.0
 
 /// The 1,000 keys a revision replaces: every hundredth key of 100,000.
@@ -175,8 +176,8 @@ type AggregatesBenchmarks() =
     [<Benchmark; BenchmarkCategory("AddOneKey")>]
     member _.SumStandard_AddOneKey() = scenario.AddRemove ()
 
-/// A deterministic value for pass `pass` and key `key`: a fraction that is not exactly representable, scaled by 1e5
-/// at every hundredth key so that the rows differ in magnitude.
+/// A deterministic value for pass `pass` and key `key`: a multiple of 1/7, so mostly not exactly representable (exact for
+/// about one value in seven), scaled by 1e5 at every hundredth key so that the rows differ in magnitude.
 let private driftValue (pass: int) (key: int) =
     let raw = float ((pass * 7919 + key * 104729) % 100_003) / 7.0
     if key % 100 = 0 then raw * 1e5 else raw
