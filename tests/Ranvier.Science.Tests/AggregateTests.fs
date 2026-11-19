@@ -187,15 +187,27 @@ let tests =
                 let maintained = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard valueOf
                 let scratch = rows.Rows |> Aggregate.momentsFromScratchBy FloatPolicy.standard valueOf
                 maintained.Value.Value |> ignore
+                // Sampled at the edit before each re-fold and at every 97th edit.
+                let mutable meanDistance = 0.0
+                let mutable varianceDistance = 0.0
 
                 for e in 1..10_000 do
                     rows.AddOrUpdate (struct (e % 100, momentsOf (100 + e)))
                     let m = maintained.Value.Value
 
-                    if e % 100 = 0 then
+                    if e % 100 = 99 || e % 97 = 0 then
                         let s = scratch.Value
-                        Expect.isLessThanOrEqual (relative (Moments.mean m) (Moments.mean s)) 1e-12 (sprintf "mean at edit %d" e)
-                        Expect.isLessThanOrEqual (relative (Moments.variance m) (Moments.variance s)) 1e-9 (sprintf "variance at edit %d" e))
+                        meanDistance <- max meanDistance (relative (Moments.mean m) (Moments.mean s))
+                        varianceDistance <- max varianceDistance (relative (Moments.variance m) (Moments.variance s))
+
+                printfn
+                    "Aggregate moments drift: largest relative difference %g in the mean, %g in the variance, %d re-folds"
+                    meanDistance
+                    varianceDistance
+                    (maintained.Refolds ())
+
+                Expect.isLessThanOrEqual meanDistance 1e-12 "mean"
+                Expect.isLessThanOrEqual varianceDistance 1e-9 "variance")
         }
 
         test "after a re-fold the maintained moments have the from-scratch bits" {
@@ -226,6 +238,20 @@ let tests =
                     Expect.isTrue (System.Double.IsNaN sum.Value.Value) (sprintf "NaN with Compensated = %b" policy.Compensated)
                     rows.Remove 4 |> ignore
                     Expect.equal sum.Value.Value (plainFold policy.Compensated values) (sprintf "removed with Compensated = %b" policy.Compensated))
+        }
+
+        test "a NaN row poisons the moments until it is removed" {
+            for policy in [ FloatPolicy.standard; FloatPolicy.fast ] do
+                withGraph (fun () ->
+                    let rows = rowsOf (Array.init 4 momentsOf)
+                    let maintained = rows.Rows |> Aggregate.momentsBy policy valueOf
+                    let scratch = rows.Rows |> Aggregate.momentsFromScratchBy policy valueOf
+                    maintained.Value.Value |> ignore
+                    rows.AddOrUpdate (struct (4, Moments.add policy.Compensated (momentsOf 4) nan))
+                    let label = sprintf "Compensated = %b" policy.Compensated
+                    Expect.isTrue (System.Double.IsNaN (Moments.mean maintained.Value.Value)) ("NaN mean with " + label)
+                    rows.Remove 4 |> ignore
+                    Expect.equal maintained.Value.Value scratch.Value ("removed with " + label))
         }
 
         test "removing the last row returns zero" {

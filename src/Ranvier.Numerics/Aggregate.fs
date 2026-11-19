@@ -7,7 +7,7 @@ open Ranvier
 type Maintained<'T> =
     {
         Value: Memo<'T>
-        /// Re-folds since creation. Read it after `Value`.
+        /// The re-folds requested by the policy since creation, on a non-finite state or on removals reaching the row count. Read it after `Value`.
         Refolds: unit -> int
     }
 
