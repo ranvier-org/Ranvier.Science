@@ -62,9 +62,8 @@ What the lines say, each comparison within this run:
 - `decay change`: the median over 21 changes of the ballistic coefficient, alternately up and down between 80 and 90,
   each timed with `Stopwatch.GetTimestamp` from before the change to the end of the frame after it, from `goTo` and
   `resetModel` on each page. It is a measurement and asserts nothing. The 21 spans include the window's graph work
-  and the draw of the 3D view for that frame. An earlier run of the same code (not saved) printed 12.53 ms for the
-  original and 8.25 ms for the tracked page, so the medians of one run are not stable figures: use the pair of one
-  run and no more.
+  and the draw of the 3D view for that frame. The pair is from one run and was not repeated, so it is not known how much
+  it varies between runs.
 
 ## The `--bench` run
 
@@ -108,6 +107,6 @@ the pixels of a region that differ between two PNG files and the largest per-cha
 - the tracked decay page, in a full run against a run that starts at it: 5578 of 423447 pixels differ, at most 2/255;
 - the original against the tracked page within one run: 815 of 423447 pixels differ, at most 1/255.
 
-The difference between the original and the tracked page lies within the difference between two captures of one page:
-the same page differs from itself in more pixels (4374 and 5578) than the two pages differ from each other (815), and by
-no more than 2/255 in any channel.
+The first count (815) is a within-run figure: two pages of one run. The other two (4374 and 5578) are between-run
+figures: one page in two runs. They are not directly comparable, and no conclusion is drawn by setting one against the
+other. All three differ by at most 2/255 in any channel, which says only that every difference is tiny.
