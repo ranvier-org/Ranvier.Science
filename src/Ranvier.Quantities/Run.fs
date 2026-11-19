@@ -36,6 +36,8 @@ module Run =
     /// When the clock is above its last value, <c>advance state (min maxStep (clock − last))</c> runs once and the
     /// clock becomes the last value; the part of the gap beyond <c>maxStep</c> is dropped.
     /// A clock equal to the last value, within 1e-9 below it, or NaN leaves the run unchanged.
+    /// A start at a NaN clock leaves the run with no last value; the first later read at a clock other than NaN
+    /// records that clock as the last value and does not advance.
     /// Reads inside <c>advance</c> are not tracked.
     /// </para>
     /// <para>
@@ -58,7 +60,9 @@ module Run =
 
                 match previous with
                 | ValueSome last when obj.ReferenceEquals (last.Origin, origin) ->
-                    if now < last.Last - 1e-9 then
+                    if System.Double.IsNaN last.Last then
+                        if System.Double.IsNaN now then last else Stepped (origin, last.State, now)
+                    elif now < last.Last - 1e-9 then
                         Stepped (origin, untrack start, now)
                     elif now > last.Last then
                         untrack (fun () -> advance last.State (min maxStep (now - last.Last)))

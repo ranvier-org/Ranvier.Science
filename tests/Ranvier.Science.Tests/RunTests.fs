@@ -152,7 +152,29 @@ let tests =
                     Expect.isTrue (obj.ReferenceEquals (again, first)) "the same state object after an equal clock"
                     Expect.isTrue (obj.ReferenceEquals (s, first)) "the same state object after a NaN clock"
                     Expect.equal s.Steps 1 "Steps is unchanged"
-                    Expect.equal rig.Starts 1 "no start")
+                    Expect.equal rig.Starts 1 "no start"
+                    rig.Clock.Value <- 3.0
+                    run.State |> ignore
+                    Expect.equal rig.Gaps [ 1.0; 2.0 ] "a finite clock after NaN advances by the gap from the earlier finite value")
+            }
+
+            test "a NaN clock at the start does not stick the run" {
+                withGraph (fun () ->
+                    let rig = Rig (4.0, 2.0)
+                    rig.Clock.Value <- nan
+                    let run = rig.Run ()
+                    let first = run.State
+                    Expect.equal first.X 4.0 "X is x0"
+                    Expect.equal first.Steps 0 "Steps is 0"
+                    rig.Clock.Value <- 2.0
+                    let recorded = run.State
+                    Expect.isTrue (obj.ReferenceEquals (recorded, first)) "the same state object after the first finite clock"
+                    Expect.equal recorded.Steps 0 "the first finite clock is recorded and does not advance"
+                    rig.Clock.Value <- 3.0
+                    let s = run.State
+                    Expect.isTrue (obj.ReferenceEquals (s, first)) "the same state object after the second finite clock"
+                    Expect.equal s.Steps 1 "Steps is 1"
+                    Expect.equal s.X (4.0 + 2.0 * 1.0) "X is x0 + rate * 1.0")
             }
 
             test "a reader is notified after each advance" {
