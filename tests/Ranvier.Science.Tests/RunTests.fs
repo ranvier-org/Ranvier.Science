@@ -205,6 +205,120 @@ let tests =
                     expect "a real change" false 0 5.0 2)
             }
 
+            test "a control read through a memo that something else reads restarts the run when written away and back" {
+                let advance (s: Sim) (dt: float) =
+                    s.X <- s.X + dt
+                    s.Steps <- s.Steps + 1
+
+                let measure (label: string) (setControl: float -> unit) (readControl: unit -> float) (otherReader: unit -> unit) =
+                    let clock = createSignal 0.0
+                    let mutable starts = 0
+
+                    let run =
+                        Run.create
+                            (fun () -> clock.Value)
+                            (fun () ->
+                                starts <- starts + 1
+                                { X = readControl (); Steps = 0 })
+                            advance
+
+                    createEffect otherReader
+                    let first = run.State
+                    clock.Value <- 1.0
+                    run.State |> ignore
+                    setControl 7.0
+                    setControl 4.0
+                    clock.Value <- 2.0
+                    let afterWrites = run.State
+                    Expect.isFalse (obj.ReferenceEquals (afterWrites, first)) (label + ", writes away and back: a new state object")
+                    Expect.equal afterWrites.Steps 0 (label + ", writes away and back: Steps is 0")
+                    Expect.equal afterWrites.X 4.0 (label + ", writes away and back: X is x0")
+                    Expect.equal starts 2 (label + ", writes away and back: start ran again")
+
+                    batch (fun () ->
+                        setControl 9.0
+                        setControl 4.0)
+
+                    clock.Value <- 3.0
+                    let afterBatch = run.State
+                    Expect.isTrue (obj.ReferenceEquals (afterBatch, afterWrites)) (label + ", two writes in one batch: the same state object")
+                    Expect.equal afterBatch.Steps 1 (label + ", two writes in one batch: Steps is 1")
+                    Expect.equal afterBatch.X 5.0 (label + ", two writes in one batch: X is x0 + 1")
+                    Expect.equal starts 2 (label + ", two writes in one batch: no further start")
+
+                withGraph (fun () ->
+                    let x0 = createSignal 4.0
+                    let x0Value = createMemo (fun _ -> x0.Value)
+                    measure "a memo an effect also reads" (fun v -> x0.Value <- v) (fun () -> x0Value.Value) (fun () -> x0Value.Value |> ignore))
+
+                withGraph (fun () ->
+                    let model = Model.create "page"
+                    let tilt = Quantity.input model "tilt" "Tilt" Units.one 4.0
+                    let tiltValue = Quantity.derive model "tilt_value" "Tilt value" Units.one (fun () -> tilt.Value)
+
+                    measure
+                        "a derived quantity an effect also reads through Entry.Read"
+                        (fun v -> tilt.Set v)
+                        (fun () -> float tiltValue.Value)
+                        (fun () -> tiltValue.Entry.Read () |> ignore))
+
+                withGraph (fun () ->
+                    let model = Model.create "page"
+                    let tilt = Quantity.input model "tilt" "Tilt" Units.one 4.0
+                    let tiltValue = Quantity.derive model "tilt_value" "Tilt value" Units.one (fun () -> tilt.Value)
+
+                    measure
+                        "a derived quantity an effect also reads through Entry.Status"
+                        (fun v -> tilt.Set v)
+                        (fun () -> float tiltValue.Value)
+                        (fun () -> tiltValue.Entry.Status () |> ignore))
+            }
+
+            test "a control read through a memo created for the run alone does not restart the run when written away and back" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let model = Model.create "page"
+                    let tilt = Quantity.input model "tilt" "Tilt" Units.one 4.0
+                    let tiltValue = Quantity.derive model "tilt_value" "Tilt value" Units.one (fun () -> tilt.Value)
+                    let forTheRun = createMemo (fun _ -> float tilt.Value)
+                    let mutable starts = 0
+
+                    let run =
+                        Run.create
+                            (fun () -> clock.Value)
+                            (fun () ->
+                                starts <- starts + 1
+                                { X = forTheRun.Value; Steps = 0 })
+                            (fun s dt ->
+                                s.X <- s.X + dt
+                                s.Steps <- s.Steps + 1)
+
+                    createEffect (fun () -> tilt.Value |> ignore)
+                    createEffect (fun () -> tiltValue.Entry.Read () |> ignore)
+                    let first = run.State
+                    clock.Value <- 1.0
+                    run.State |> ignore
+                    tilt.Set 7.0
+                    tilt.Set 4.0
+                    clock.Value <- 2.0
+                    let afterWrites = run.State
+                    Expect.isTrue (obj.ReferenceEquals (afterWrites, first)) "writes away and back: the same state object"
+                    Expect.equal afterWrites.Steps 2 "writes away and back: Steps is 2"
+                    Expect.equal afterWrites.X 6.0 "writes away and back: X is x0 + 2"
+                    Expect.equal starts 1 "writes away and back: one start"
+
+                    batch (fun () ->
+                        tilt.Set 9.0
+                        tilt.Set 4.0)
+
+                    clock.Value <- 3.0
+                    let afterBatch = run.State
+                    Expect.isTrue (obj.ReferenceEquals (afterBatch, first)) "two writes in one batch: the same state object"
+                    Expect.equal afterBatch.Steps 3 "two writes in one batch: Steps is 3"
+                    Expect.equal afterBatch.X 7.0 "two writes in one batch: X is x0 + 3"
+                    Expect.equal starts 1 "two writes in one batch: one start")
+            }
+
             test "a quantity read only by advance changes the course without a restart" {
                 withGraph (fun () ->
                     let rig = Rig (4.0, 2.0)

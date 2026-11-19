@@ -254,9 +254,10 @@ one equal, or a tolerance option on a memo.
 ### `Run` publishing a new wrapper per start and advance
 
 What the slice does: `advance` mutates the run's state in place, so the state object is the same before and after a
-step. `Run` publishes a new `Stepped` wrapper (`src/Ranvier.Quantities/Run.fs`, lines 10-16) for each start and each
-advance, and returns the wrapper it was given for an equal or NaN clock. A reader of `State` is therefore notified
-after every start and advance, and after nothing else.
+step. `Run` publishes a new `Stepped` wrapper (`src/Ranvier.Quantities/Run.fs`, lines 10-16) for every start, every
+advance, and the first clock recorded after a start at a NaN clock; a reader of `State` is notified after each of
+these. It returns the wrapper it was given, and notifies no reader, for a clock equal to the last value, a clock
+within 1e-9 below it, and a NaN clock (before or after a value has been recorded).
 
 Core lines it relies on (*from documentation*: `Ranvier/src/Ranvier/Types.fs`, lines 279-307): the default equality
 compares a class by reference on both targets, so a new wrapper is a change and the same wrapper is not.
@@ -305,24 +306,42 @@ The cases below are the differences found so far; the list is not known to be co
 (*from documentation*: `AstroShowcase/Kit.fs`, line 172). A control moved away and back between two calls gives an
 equal key, so `Flow` does not restart.
 
-`Run` restarts on a control that `start` reads as a signal directly, and not on one it reads through a memo or a
-derived quantity:
+`Run` restarts on a control that `start` reads as a signal directly. On one it reads through a memo or a derived
+quantity, it restarts when anything else evaluates that memo between the writes, and not otherwise:
 
 - Read directly: a signal written away and back since the last read of `State` has changed, so the run restarts.
   Test `a quantity written away and back between reads restarts the run` (*measured here*, on .NET and JavaScript):
   unread writes `x0: 4 → 7 → 4`, then a read, give a new state object, `Steps = 0`, `X = 4`, and a second start;
   `batch (fun () -> x0.Value <- 9.0; x0.Value <- 4.0)`, then a read, gives a new state object and a third start.
-- Read through a memo or a derived quantity: the memo's value at the next read equals the value `start` read, so the
-  run does not restart. Test `a control read through a derived quantity does not restart the run when written away
-  and back` (*measured here*, on .NET and JavaScript): a run whose `start` reads `createMemo (fun _ -> x0.Value)`, and
-  one whose `start` reads a `Quantity.derive` of a `Quantity.input`, each make one start across `4 → 7 → 4` between
-  reads and across two writes inside one `batch`, and advance as if nothing was written (the same state object,
-  `Steps` 2 then 3); a real change to 5 restarts each (a new state object, `Steps = 0`, a second start).
+- Read through a memo or a derived quantity that nothing else reads: the memo is evaluated only by the run's next
+  read, at the value `start` read, so the run does not restart. Test `a control read through a derived quantity does
+  not restart the run when written away and back` (*measured here*, on .NET and JavaScript): a run whose `start` reads
+  `createMemo (fun _ -> x0.Value)`, and one whose `start` reads a `Quantity.derive` of a `Quantity.input`, each make
+  one start across `4 → 7 → 4` between reads and across two writes inside one `batch`, and advance as if nothing was
+  written (the same state object, `Steps` 2 then 3); a real change to 5 restarts each (a new state object,
+  `Steps = 0`, a second start).
+- Read through a memo or a derived quantity that something else reads: an effect that reads it evaluates it at 7
+  between the writes, which marks `start`'s memo as changed, so the run restarts. Test `a control read through a memo
+  that something else reads restarts the run when written away and back` (*measured here*, on .NET and JavaScript,
+  by the two suite commands; on .NET also by `dotnet fsi` on a scratch script against the Release build, and under
+  JavaScript by the re-reviewer's `node` script on the memo route): for a memo an effect also reads, and for a
+  derived quantity an effect reads through `Entry.Read ()` or through `Entry.Status ()`, the writes `4 → 7 → 4`
+  between reads give a new state object, `Steps = 0`, `X = 4` and a second start; the same two writes inside one
+  `batch` then give no further start (the same state object, `Steps = 1`), since the effects run once, after the
+  batch, at 4.
+- Read through a memo created for the run alone: test `a control read through a memo created for the run alone does
+  not restart the run when written away and back` (*measured here*, on .NET and JavaScript): `start` reads its own
+  `createMemo (fun _ -> float tilt.Value)` while one effect reads the input `tilt` and another reads a derived
+  quantity of it through `Entry.Read ()`; across `4 → 7 → 4` between reads and two writes inside one `batch` the run
+  makes one start and keeps its state object (`Steps` 2 then 3).
 
-Consequence for the port: reading each control through a derived quantity gives `Flow`'s behaviour for any script
-of control changes, as the design's acceptance states it. Two statements about the app are **assumptions** for the
-later plan to confirm against its copy of the app: that it writes each control at most once per frame, and that it
-reads the run every frame while its page is shown.
+Consequence for the port: it keeps the design's "any script of control changes" when `start` reads each control
+through a memo that nothing else reads, and the page shows a control's value from the input (or from another node,
+never from that memo). Reading the control through a derived quantity that the page also reads, for example in a
+model table through `Entry.Read` or `Entry.Status`, does not give it: a write away and back between two reads of the
+run restarts the run. Two statements about the app are **assumptions** for the later plan to confirm against its copy
+of the app: that it writes each control at most once per frame, and that it reads the run every frame while its page
+is shown.
 
 ### `Flow.Reset ()`
 

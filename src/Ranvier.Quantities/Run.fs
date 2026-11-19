@@ -38,10 +38,13 @@ module Run =
     /// is below its last value by more than 1e-9. A start records the clock and does not advance.
     /// A signal read directly by <c>start</c> has changed when it received a write of a different value since the last
     /// read of <c>State</c>, including a write followed by a write back to the earlier value, and two such writes inside
-    /// one <c>batch</c>. A memo or a derived quantity read by <c>start</c> has changed only when its value at the next
-    /// read of <c>State</c> differs, under the graph's equality, from the value <c>start</c> read; writes away and back
-    /// to its inputs between reads, or inside one <c>batch</c>, leave the run unchanged. A write of an equal value is
-    /// ignored by the signal and leaves the run unchanged.
+    /// one <c>batch</c>. A memo or a derived quantity read by <c>start</c> has changed when it was evaluated at a value
+    /// other than the one <c>start</c> read, under the graph's equality, by this run's next read of <c>State</c> or by
+    /// any other reader in between. Writes away and back to its inputs between reads of <c>State</c> leave the run
+    /// unchanged only while nothing else reads the memo between the writes; two such writes inside one <c>batch</c>
+    /// leave it unchanged unless the memo is read between them. A memo that only <c>start</c> reads leaves the run
+    /// unchanged across writes away and back, whatever else reads its inputs. A write of an equal value is ignored by
+    /// the signal and leaves the run unchanged.
     /// When the clock is above its last value, <c>advance state (min maxStep (clock − last))</c> runs once and the
     /// clock becomes the last value; the part of the gap beyond <c>maxStep</c> is dropped.
     /// A clock equal to the last value, within 1e-9 below it, or NaN leaves the run unchanged.
