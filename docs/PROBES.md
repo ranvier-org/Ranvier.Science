@@ -90,18 +90,23 @@ hello | probe page | marks 1
 script done 0
 ```
 
-`node examples/Monitor/web/run.mjs hello --picture <png>` printed the same two lines and wrote a 1280 x 900
-screenshot showing the text and the mark.
+`node examples/Monitor/web/run.mjs hello --picture <png>` printed the same two lines and wrote a screenshot
+showing the text and the mark, 1280 x 900 px (*measured here*: the width and height in the PNG file's `IHDR`
+chunk).
 
 Package versions each head ended on (*measured here*: the `libraries` of each head's `obj/project.assets.json`):
 
 - Native: `Ranvier` 0.2.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Ranvier.View.WebCore` 0.2.0,
   `Ranvier.View.WebCore.Sdl` 0.2.1, `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1, and in Debug
   `Ranvier.View.WebCore.Hmr` 0.1.3.
-- Browser: `Ranvier` 0.2.0, `Ranvier.Dom` 0.1.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Fable.Core` 5.3.0,
-  with Fickl 0.10.1 (Fable 5.27.0). `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1 are compiled from
+- Browser: `Ranvier` 0.2.0, `Ranvier.Dom` 0.1.0, `Ranvier.View` and `Ranvier.View.Dom` 0.2.0, `Fable.Core` 5.3.0.
+  `Ranvier.D5`, `Ranvier.D5.Charts` and `Ranvier.D5.View` 0.1.1 are compiled from
   the `Ranvier.D5` clone through the project reference; the clone asks for `Ranvier.View` 0.1.49, and the head
   resolves 0.2.0.
+
+The browser build ran Fickl 0.10.1 (Fable 5.27.0) (*measured here*: the first line of `dotnet fickl --help`,
+`Fickl 0.10.1 (Fable 5.27.0): F# to JavaScript compiler`; `dotnet tool list --local` lists `fickl` 0.10.1 from
+`.config/dotnet-tools.json`).
 
 Fallbacks: none was needed. The plain build compiled and the page loaded unbundled, so `--noCache`, the `fickl`
 clone's compiler, `Ranvier.View` 0.1.50 and `rolldown` were not tried.
@@ -110,8 +115,19 @@ Build time (*measured here*, the wall time of the browser build command): 1299 s
 compiled, of which Fickl reported 873 s for compilation and 421 s for caching 121 package sources. The next run,
 with no source changed, took 0.7 s (`Skipped compilation because all generated files are up-to-date!`).
 
-State of the `Ranvier.D5` clone (*measured here*, `git -C ../Ranvier.D5 status --short` and `log --oneline -1`),
-the same before the first browser build and after the last:
+State of the `Ranvier.D5` clone (*measured here*, `git -C ../Ranvier.D5 status --short` and `log --oneline -1`).
+The two outputs are identical.
+
+Before the first browser build:
+
+```
+ M .github/workflows/ci.yml
+ M src/Ranvier.D5/Ranvier.D5.fsproj
+?? tests/PackedFickl/
+08e5642 Prepare version 0.1.1 (#58)
+```
+
+After the last browser build:
 
 ```
  M .github/workflows/ci.yml
