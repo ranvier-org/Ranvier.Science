@@ -1,3 +1,4 @@
+// A copy of AstroShowcase/Png.fs, under the namespace of this page.
 module SequentialMonitor.Png
 
 open System

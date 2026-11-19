@@ -35,7 +35,7 @@ dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Releas
 npx mocha dist/tests/Main.fs.js
 ```
 
-`tests/Ranvier.Science.Tests/Recorded.fs` holds one recorded stream of 1,000 doubles. Both targets fold the same
+`examples/Monitor/model/Recorded.fs` holds one recorded stream of 1,000 doubles. Both targets fold the same
 doubles, and `CrossTargetTests.fs` pins the moments (exact equality) and the confidence-sequence bounds (relative
 `1e-12`).
 
@@ -43,8 +43,9 @@ doubles, and `CrossTargetTests.fs` pins the moments (exact equality) and the con
 
 `examples/Monitor` is one page, a sequential monitor, built from one set of sources for a native window and a browser.
 Each channel is a stream of observations folded into moments; the page shows a table of rows (count, mean, standard
-error, a confidence sequence and a fixed-sample interval, the user's formula) and a chart of each channel's mean with
-its sequence band. The folds, the rows and the diagnostics are a graph of the core's nodes.
+error, a confidence sequence, the user's formula) and a chart of each channel's mean with its sequence band and its
+fixed-sample interval, which the chart alone draws. The folds, the rows and the diagnostics are a graph of the core's
+nodes.
 
 - `examples/Monitor/model`: the page's graph (channels, feeds, history, the monitor).
 - `examples/Monitor/src`: the view, the chart and the scripted runs, shared by both heads.
@@ -78,10 +79,16 @@ Records of the page:
 
 - [`docs/measurements/monitor.md`](docs/measurements/monitor.md): the `frames` figures on both targets, and the `table`
   and `counts` outputs.
-- [`docs/pictures/monitor-native.png`](docs/pictures/monitor-native.png): the page in the native window.
-- [`docs/pictures/monitor-browser.png`](docs/pictures/monitor-browser.png): the page in headless Chrome.
+- [`docs/pictures/monitor-native.png`](docs/pictures/monitor-native.png): the page in the native window, written by
+  `dotnet run -c Release --project examples/Monitor/native -- --script picture` and copied from
+  `examples/Monitor/out/monitor.png`, at commit `a5ce24c`.
+- [`docs/pictures/monitor-browser.png`](docs/pictures/monitor-browser.png): the page in headless Chrome, written by
+  `node examples/Monitor/web/run.mjs picture --picture docs/pictures/monitor-browser.png`, at commit `4adc36b`.
 - [`docs/PROBES.md`](docs/PROBES.md): section B (the heads, packages and build), the workarounds the page needed, and
   hot reload.
+
+Both pictures show the page in the state the `table` script leaves, two channels on the recorded stream, and not the
+default page of four channels.
 
 ## Benchmarks
 

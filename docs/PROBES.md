@@ -300,14 +300,20 @@ example a `subtract` returning `ValueNone`) would replace the raise, the excepti
 the reliance on `Step` treating every exception alike. A re-fold the core starts for its own reasons (a moved read
 of the fold functions, 1267-1268) is not counted in `Refolds`.
 
-Consequence for the later page: under `FloatPolicy.standard` an aggregate of N rows re-folds once per N removals,
-and a row edit is one removal. A four-row aggregate whose rows all change between reads therefore re-folds on every
-read, and on .NET each re-fold raises and catches one `ArithmeticException`. *Measured here*: `dotnet fsi` on a
-scratch script (the final reviewer's check, re-run) against the Release build of commit 718f821, `Aggregate.sumBy
+Consequence: under `FloatPolicy.standard` an aggregate of N rows re-folds once per N removals, and a row edit is one
+removal. A four-row aggregate whose rows all change between reads therefore re-folds on every read under that policy,
+and on .NET each re-fold raises and catches one `ArithmeticException`. *Measured here*: `dotnet fsi` on a scratch
+script (the final reviewer's check, re-run) against the Release build of commit 718f821, `Aggregate.sumBy
 FloatPolicy.standard` over four rows: 400 edits, each followed by a read, gave 100 re-folds; 100 batches of four
 edits, one per row, each followed by one read, gave 100 more. The cost of the raise per read was not measured.
-Whether a small aggregate keeps this threshold is for the later page to decide; this slice keeps the policy as
-designed. `FloatPolicy.withRefoldFloor` later added a floor on the removals, which is 0 under `standard` and `fast`.
+
+`FloatPolicy.withRefoldFloor n` sets the policy's `RefoldFloor`: a re-fold then waits for the larger of the row count
+and n removals. The floor is 0 under `standard` and `fast`, which keep the behaviour above. The page pools under
+`FloatPolicy.standard |> FloatPolicy.withRefoldFloor 64` (`examples/Monitor/model/Monitor.fs`, the pooled aggregate
+`Pooled` in `create`), so its aggregate of four rows re-folds once per 64 removals, not on every read. Test
+`pooled, maintained and from scratch` of the list `"Monitor"` (`tests/Ranvier.Science.Tests/MonitorTests.fs`) bounds
+it: four channels, 600 frames each followed by a read of the page, and at most 40 re-folds (*measured here*: the test
+passes on .NET and under Mocha, by the suite commands).
 
 ### `Tolerance.hold` inside the memo's computation
 
@@ -414,6 +420,17 @@ What the chart library could offer in its place: listeners attached once to the 
 or a scene renderer without listeners for marks that need none. The page renders its scene with `Renderer.passive`
 (`examples/Monitor/src/App.fs`, line 219), which is `create` with a dispatch that ignores events (*from documentation*:
 `Renderer.fs`, line 199), so it adds the seven listeners of line 90 and ignores what they receive.
+
+### The row's band reads the fold's state, not the history alone
+
+Recorded as found (the controller's ruling R-AA); the code is unchanged. The row's `Band` block
+(`examples/Monitor/model/Monitor.fs`, `band` in `create`) reads the stream fold's state through
+`observations.TryValue`, a `Folded` that holds the moments and the history together, where the plan's node table
+gives the history as what it reads (`Ranvier/docs/superpowers/plans/2026-11-19-science-slice-2-monitor.md`, Task 5,
+the row `Band`). Every item makes a new `Folded` (`Folded.add` in `examples/Monitor/model/History.fs`), so the block
+recomputes on every publication of the fold, including one that adds no history sample, and returns its previous value
+when every array of the new band is held to the previous one (`holdBand` in `Monitor.fs`) (*from documentation*: those
+two files). The cost of these recomputations was not measured.
 
 ## Differences from Kit.Flow
 

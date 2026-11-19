@@ -1,4 +1,6 @@
-// Serves this folder on localhost, where a page may use WebGPU. Usage: node serve.mjs [port]
+// A copy of AstroShowcase.Web/web/serve.mjs, with comments for this page.
+// Serves this folder on 127.0.0.1 and prints its URL; with no port, or port 0, on a free port.
+// Usage: node serve.mjs [port]
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -8,7 +10,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const types = { ".html": "text/html", ".js": "text/javascript" };
 
 const server = http.createServer((request, response) => {
-  // The page posts its benchmark and drag-probe lines here; they are appended to probe.log beside this file.
+  // The page posts here each line it reports, its errors among them; they are appended to probe.log beside this
+  // file, which run.mjs reads.
   if (request.method === "POST" && request.url === "/log") {
     let body = "";
     request.on("data", (chunk) => (body += chunk));
@@ -18,7 +21,7 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  // The page reads its query itself (?backend=webgl2), so the query plays no part in finding the file.
+  // The page reads its query itself (?script=<name>), so the query plays no part in finding the file.
   const name = decodeURIComponent(request.url.split("?")[0]).replace(/^\/+/, "") || "index.html";
   const file = path.join(root, name);
   if (!file.startsWith(root) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {

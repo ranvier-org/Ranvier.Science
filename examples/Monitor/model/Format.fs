@@ -40,13 +40,13 @@ module Format =
         struct (product, error)
 
     /// <summary>
-    /// <c>x</c> rounded half away from zero to <c>decimals</c> places: digits, ".", and a leading "-" unless every digit
-    /// is 0. "NaN", "∞" and "-∞" for the rest. The same text on .NET and in JavaScript.
+    /// <c>x</c> to <c>decimals</c> places: digits, ".", and a leading "-" unless every digit is 0. "NaN", "∞" and "-∞"
+    /// for the rest. The same text on .NET and in JavaScript.
     /// </summary>
     /// <remarks>
     /// <c>decimals</c> is from 0 to 22, the powers of ten a double holds exactly; raises ArgumentOutOfRangeException
-    /// for any other value. The rounding is exact, of the double's own value, while |x|·10^decimals is below 2^53
-    /// (about 9.007e15). From 2^53 up, the digits after the first sixteen or so are zeros.
+    /// for any other value. The double's own value is rounded half away from zero, exactly, while |x|·10^decimals is
+    /// below 2^53 (about 9.007e15), and from 2^53 up its digits past about the sixteenth are truncated to zeros.
     /// </remarks>
     let fixed' (decimals: int) (x: float) : string =
         if decimals < 0 || decimals > maxDecimals then
