@@ -135,7 +135,7 @@ let tests =
                         Expect.equal v (plainFold true values) "the fold in key order")
         }
 
-        test "between re-folds the sum stays within 8 ulp" {
+        test "between re-folds the sum stays within 2 ulp" {
             withGraph (fun () ->
 #if FABLE_COMPILER
                 let edits = 100_000
@@ -145,22 +145,40 @@ let tests =
                 let valueAt (i: int) = 1.0 + (float i * 3.14159) % 999_999.0
                 let values = Array.init 1000 valueAt
                 let rows = rowsOf values
+                let plainRows = rowsOf (Array.copy values)
                 let sum = rows.Rows |> Aggregate.sumBy FloatPolicy.standard valueOf
+                let plain = plainRows.Rows |> Aggregate.sumBy FloatPolicy.fast valueOf
                 sum.Value.Value |> ignore
-                let mutable largest = 0.0
+                plain.Value.Value |> ignore
+                // The largest distance at the edit before each re-fold, at every 997th edit, and of the fast sum.
+                let mutable beforeRefold = 0.0
+                let mutable everyPhase = 0.0
+                let mutable fast = 0.0
 
                 for e in 1..edits do
                     let k = e % 1000
                     values[k] <- valueAt (1000 + e)
                     rows.AddOrUpdate (struct (k, values[k]))
+                    plainRows.AddOrUpdate (struct (k, values[k]))
                     let maintained = sum.Value.Value
+                    let unmaintained = plain.Value.Value
 
-                    if e % 1000 = 0 then
-                        let distance = ulps maintained (exactSum values)
-                        largest <- max largest distance
-                        Expect.isLessThanOrEqual distance 8.0 (sprintf "edit %d" e)
+                    if e % 1000 = 999 || e % 997 = 0 then
+                        let exact = exactSum values
+                        let distance = ulps maintained exact
+                        fast <- max fast (ulps unmaintained exact)
 
-                printfn "Aggregate drift: largest distance %g ulp over %d edits, %d re-folds" largest edits (sum.Refolds ()))
+                        if e % 1000 = 999 then beforeRefold <- max beforeRefold distance
+                        if e % 997 = 0 then everyPhase <- max everyPhase distance
+                        Expect.isLessThanOrEqual distance 2.0 (sprintf "edit %d" e)
+
+                printfn
+                    "Aggregate drift: largest distance %g ulp before a re-fold, %g ulp at every 997th edit, %g ulp under fast, over %d edits, %d re-folds"
+                    beforeRefold
+                    everyPhase
+                    fast
+                    edits
+                    (sum.Refolds ()))
         }
 
         test "maintained moments follow from-scratch moments" {
