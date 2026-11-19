@@ -93,8 +93,9 @@ default page of four channels.
 
 ## AstroTracked
 
-`examples/AstroTracked` is a versioned copy of the AstroShowcase demo app (31 pages) with two pages added beside their
-originals: Atmospheric Drag Decay and Attitude Dynamics, each ported onto tracked quantities and registered as "..., tracked".
+`examples/AstroTracked` is a versioned copy of the AstroShowcase demo app, with its 29 pages, and two pages added beside
+their originals, 31 in all: Atmospheric Drag Decay and Attitude Dynamics, each ported onto tracked quantities and
+registered as "..., tracked".
 The original pages are changed only by a counter, a removed `private` and one state reader; the other pages are
 untouched. The copy is not in `Ranvier.Science.slnx`, and it takes no fixes from the app it was copied from.
 
@@ -113,8 +114,9 @@ Records:
 
 - [`examples/AstroTracked/COPY.md`](examples/AstroTracked/COPY.md): where the copy came from, its hashes, its package
   versions and the warning baseline.
-- [`docs/measurements/tracked-pages.md`](docs/measurements/tracked-pages.md): the counts, the state comparison, the
-  control-change medians, the frame means and the picture comparison of one run on one machine.
+- [`docs/measurements/tracked-pages.md`](docs/measurements/tracked-pages.md): on one machine, in separate runs, the
+  counts, the state comparison and the control-change medians of four `--tracked` runs, the frame means of one `--bench`
+  run, and the picture comparison of three `--shots` runs.
 
 ## Benchmarks
 

@@ -11,10 +11,10 @@ How to read it:
 - The report measures nothing. Every figure is copied from a file under `docs/` and carries that file's label and name.
   *Measured here* means measured in this repository by the run the named file records; *from documentation* names the
   file that was read; *general knowledge* was not checked.
-- Two figures stand side by side only where the named file took both from one run. A figure of the native window is
-  never compared with a figure of the browser.
-- Code facts cite this repository at commit `c8a31f8`, or the core's source in the `Ranvier` clone at `25a4452`, the
-  0.2.0 baseline of the design.
+- Two figures are compared only where the named file took both from one run; figures of repeated runs are listed
+  together, each run's own. A figure of the native window is never compared with a figure of the browser.
+- Code facts cite this repository at commit `c8a31f8` (the `tracked` mode's check after the second creation at
+  `09928d7`), or the core's source in the `Ranvier` clone at `25a4452`, the 0.2.0 baseline of the design.
 - Plan defects, rulings and open items come from the ledgers of the three plans, the controller's working records in
   `.superpowers/sdd/`, which are not under version control. Plan 2's ledger was deleted with its workspace and is read
   here from an extract rebuilt from the session transcript; the extract says it may miss Task 9's completion line and
@@ -81,12 +81,13 @@ It fits on core 0.2.0 with no core change, on both targets. It needed two device
 ### Q3: what a quantity must carry at run time
 
 What an `Entry` carries (`src/Ranvier.Quantities/Model.fs`, 18-32): an identifier usable in formulas (`Id`), a name, a
-run-time unit (`UnitInfo`: a symbol, seven exponents over the SI base dimensions and a scale,
-`src/Ranvier.Quantities/Units.fs`), a kind (input, constant or derived), the reference a constant was taken from
-(`Source`, empty otherwise), a tracked read of the value as a number in its unit (`Read`), and a tracked read of a
-status that never raises (`Status`: ready, pending or failed). A model resolves an identifier to its entry and a child
-model falls back to its parent (`Model.TryFind`, 66-72), so in a row `mean` is that channel's mean and `alpha` is the
-page's.
+run-time unit (`UnitInfo`: named factors with their exponents, `Factors`; a `Dimension` of seven exponents over the SI
+base dimensions; and a `Scale`; the symbol is derived from the factors by `UnitInfo.symbol`;
+`src/Ranvier.Quantities/Units.fs`, 19-26 and 113), a kind (input, constant or derived), the reference a constant was
+taken from (`Source`, empty otherwise), a tracked read of the value as a number in its unit (`Read`), and a tracked read
+of a status that never raises (`Status`: ready, pending or failed). A model resolves an identifier to its entry and a
+child model falls back to its parent (`Model.TryFind`, 66-72), so in a row `mean` is that channel's mean and `alpha` is
+the page's.
 
 What the formula notation and the table needed beyond it (`examples/Monitor/model/Monitor.fs` and Plan 2's records):
 
@@ -130,10 +131,12 @@ traced build (section 2, entry 7).
   across one change and the frame after it: the original page makes 112 for each of the three controls and for the
   reset; the tracked page makes 112 for the initial altitude, and 1 each for the ballistic coefficient, the solar
   activity and the reset. For the three controls these are the counts the design predicted (§8).
-- **The comparison** (*measured here*: the same file and run). Over a script of 1911 frames the two Attitude Dynamics
-  pages' states are bit-identical after every frame, with 7 restarts of the run on each page; in the script's steps 5
-  and 6 neither page restarts; with the page away for 30 frames neither advances. The two Decay pages give equal
-  status text and equal lifetime bits at 7 settings and 2 clock times each.
+- **The comparison** (*measured here*: the same file and run). The script steps the clock through 1941 frames and reads
+  the two Attitude Dynamics pages' states after 1911 of them; at every read the two states are bit-identical, with 7
+  restarts of the run on each page, and in the script's steps 5 and 6 neither page restarts. The 30 frames of step 9,
+  with the page away, are not read (ruling P3-2), and the count of `Attitude.advance` calls across them is 0 on each
+  page: neither state moved. The two Decay pages give equal status text and equal lifetime bits at 7 settings and 2
+  clock times each.
 - **The rule that makes the port exact.** `start` reads each control through a memo created for the run alone, and the
   page shows a control's value from the input (`examples/AstroTracked/PagesTracked.fs`, 267-278). A control that
   `start` reads directly, or through a memo something else reads between two reads of the run, restarts the run when
@@ -141,11 +144,19 @@ traced build (section 2, entry 7).
   `docs/PROBES.md`, "Differences from Kit.Flow", tests on .NET and JavaScript). That section lists three more
   differences: `Flow.Reset ()` has no counterpart, a failing `start` re-raises until a value it read changes, and a NaN
   clock at a start is not recorded; it says the list is not known to be complete.
-- **Time, within one run each, not interpreted** (*measured here*: `docs/measurements/tracked-pages.md`). The median
-  over 21 changes of the ballistic coefficient was 13.90 ms on the original page and 12.43 ms on the tracked page (the
-  `--tracked` run, not repeated). The `--bench` run's frame means were 6.89 ms (Decay, original), 6.44 ms (Decay,
-  tracked), 7.29 ms (Attitude, original) and 6.21 ms (Attitude, tracked), one run of 120 frames a page; the file reports
-  those differences and does not interpret them.
+- **Time, compared within one run each, not interpreted** (*measured here*: `docs/measurements/tracked-pages.md`).
+  - *The control-change span*, from before a change of the ballistic coefficient to the end of the frame after it, the
+    3D view's draw included; in each `--tracked` run the original Decay page is timed first, after the attitude script,
+    and the tracked page second, each after one warm frame. Its median over 21 changes, original against tracked, was
+    13.90 ms against 12.43 ms in the recorded run at `e41488d`, and 15.88 against 15.56 ms, 16.56 against 15.94 ms and
+    8.39 against 12.31 ms in three later runs at `83a7baf`: within each run the tracked page's median minus the
+    original's is -1.47, -0.32, -0.62 and +3.92 ms. The difference changes sign between runs, and the file draws no
+    conclusion from it.
+  - *The `--bench` frame*, the app's work after a 1/60 s write of the clock, with the 3D view drawn once, until the
+    graph settles. Its means were 6.89 ms (Decay, original), 6.44 ms (Decay, tracked), 7.29 ms (Attitude, original)
+    and 6.21 ms (Attitude, tracked), one run of 120 frames a page; the file reports those differences and does not
+    interpret them.
+  - Neither is the frame of Q5, which another benchmark times on the monitor page against its budget.
 
 ### Q5: does one page build and behave the same in the native window and the browser?
 
@@ -173,8 +184,9 @@ the owner to compare by eye (section 8); no pixel equality is claimed.
 - **The frame work, per target, against the budget.** The budget is 6.06 ms, the period of a 165 Hz display (*from
   documentation*: `docs/measurements/monitor.md`, "The budget"). One frame is the fold, recomputation, scene build and
   DOM writes of one frame plus one forced layout; paint and presentation are not timed, the window is hidden and Chrome
-  headless, and no frame rate follows from these figures. Four runs of the `frames` script on each target (*measured
-  here*: `docs/measurements/monitor.md`, "Results"):
+  headless, and no frame rate follows from these figures. This frame is the monitor page's, from the `frames` script,
+  and is a different benchmark from the AstroTracked `--bench` frame of Q4; the two are not compared. Four runs of the
+  `frames` script on each target (*measured here*: `docs/measurements/monitor.md`, "Results"):
 
   | Native, run | Commit | Default page, mean | Default page, 95th percentile | Highest rate under the budget |
   |---|---|---|---|---|
@@ -342,9 +354,10 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
    is therefore no entry: no other formula, table or catalogue can read it as a quantity. A quantity typed by its
    run-time unit, with the F# measure as an optional view, would serve both.
 5. **A model's entries outlive their nodes.** A model keeps every entry with no removal, and a second declaration of an
-   identifier raises (`Model.fs`, 74-87). A disposed memo answers reads with its last value (*from documentation*:
-   `Ranvier/proofs/CORRESPONDENCE.md`, the row `apply_dispose` on a memo), so an entry whose owner is gone reads a
-   frozen value and raises nothing. The tracked pages build a new model per mount to avoid the raise (Plan 3's
+   identifier raises (`Model.fs`, 74-87). A disposed memo answers reads with its last value, and a failed one keeps its
+   failure; the F# code gives the type's default for a memo that never ran (*from documentation*:
+   `Ranvier/proofs/CORRESPONDENCE.md`, the row `apply_dispose` on a memo). So an entry whose owner is gone reads its
+   last value, or keeps its failure. The tracked pages build a new model per mount to avoid the raise (Plan 3's
    second-creation check). A page that mounts and unmounts, or a reload under the `dev` host, meets one or the other: a
    raise on re-declaration, or stale entries in a model kept from before (section 2, entry 6).
 6. **The tracked pages repeat drawing code because the originals' helpers take a control row.** The original pages'
@@ -472,6 +485,10 @@ From Plan 3 (its ledger):
 - P3-10: the node table gives the sweep-lines block no read of the altitude, while the lifetime panel's title shows it
   (`PagesTracked.fs`, 133; the original's title at `PagesOrbit.fs`, 655); the read adds no recomputation, since the
   sweep reads the altitude alone.
+- P3-14: Review Focus 4 expects of a second mount that "the pages read the new nodes", while Task 3's table asks of
+  the second creation only that it "raises nothing, and one more frame draws". The `tracked` mode now also counts the
+  calls of `Decay.decay` on the tracked Decay page after the second creation: 112 for its first frame and 1 for a
+  change of the ballistic coefficient (*measured here*: `docs/measurements/tracked-pages.md`, the three later runs).
 - Task 1 labelled the page count *from documentation* (the design's §2) where its Step 4 measures it; `COPY.md`
   records the measured count with the design's beside it.
 - Task 3 compared `Status row t` as strings, which needs the tracked page's altitude interpolation to equal the
@@ -489,8 +506,9 @@ Each item with what would verify it.
 - **A paced, visible frame-rate run on both targets.** Every frame figure is work time in a hidden window or a headless
   browser (Q5). To verify: a visible run on each target when the owner asks, timing presented frames.
 - **`Kit.Flow` and `Run` side by side on inputs other than Plan 3's script.** The bit-identical comparison covers the
-  1911 frames of one script (*measured here*: `docs/measurements/tracked-pages.md`). To verify: a generator of control
-  and clock scripts run against both, with writes away and back, clocks set back and gaps above the step limit.
+  1911 reads of one script of 1941 frames (*measured here*: `docs/measurements/tracked-pages.md`). To verify: a
+  generator of control and clock scripts run against both, with writes away and back, clocks set back and gaps above
+  the step limit.
 - **The PDF of arXiv 2103.06476.** The theorem and appendix B.2 were read as the paper's LaTeX by two routes and
   against the authors' reference code; a fetch of the PDF returned only compressed bytes (*from documentation*:
   `docs/PROBES.md`, "Sources read"). To verify: read Theorem 2.2 and equation 302 in the PDF.
@@ -501,21 +519,31 @@ Each item with what would verify it.
   α = 0.05 / 4 read through `ofMomentsAfter 30.0`, each over 2,000 streams of 10,000 standard normal observations
   (*measured here*: `docs/PROBES.md`, "Coverage"). To verify: the coverage test over a grid of α, ρ, burn-in and
   observations that are not normal.
-- **The inputs' handling of an equal write in the app** (P3-5, P3-11). `App.typed` skips an equal value, so no check
-  of the copy exercises it; `resetModel` on a row already at its defaults reaches `writeRow` with no guard
-  (`App.fs`, 181-183) and would. The library's tests cover it today.
+- **A control row written equal in all three inputs, in the app** (P3-5, P3-11). Every row write sets all three
+  inputs of the tracked Decay page (`examples/AstroTracked/PagesTracked.fs`, 151-155), so the inputs a change leaves
+  alone get an equal write, and the count lines exercise that per input (*measured here*:
+  `docs/measurements/tracked-pages.md`): the sweep reads the altitude alone (`PagesTracked.fs`, 125-128), and an equal
+  write to the altitude that invalidated it would make the ballistic-coefficient count 112, not 1; the same holds for
+  the solar-activity and reset counts. What no counted check exercises is a whole row written equal: `App.typed` skips
+  an equal value, and `resetModel` on a row already at its defaults reaches `writeRow` with no guard (`App.fs`,
+  181-183). The library's tests cover an input's equal write today. To verify: count the calls of `Decay.decay` across
+  `resetModel` on the tracked Decay page at its defaults and the frame after it.
 - **The 3D view between captures.** The whole-window pictures are not bit-reproducible in the 3D view between captures
   (*measured here*: `docs/measurements/tracked-pages.md`, "Pictures"), so the ported pages' 3D views were compared by
   reading. To verify: a capture that is bit-reproducible, or a comparison of the buffers both pages upload.
-- **The cost of re-uploading the tracked Attitude page's fixed part.** On a write away and back, the tracked page's
-  fixed-part block recomputes and `draw` uploads it again, where the original's `Kit.memo` returns the same buffer
-  (Task 4's review). To verify: count uploads and time the frame after such a write on both pages, in one run.
+- **The cost of a write away and back on the tracked pages.** On a write away and back between two reads, the tracked
+  Attitude page's fixed-part block recomputes and `draw` uploads it again, where the original's `Kit.memo` returns the
+  same buffer (Task 4's review). The tracked Decay page's `history` and `sweep` read the inputs directly too
+  (`PagesTracked.fs`, 117-128), so such a write costs it 1 call of `Decay.decay` (the ballistic coefficient or the
+  solar activity) or 112 (the initial altitude), where the original's `Kit.memo` costs 0. The recorded assumption that
+  the app writes each control at most once per frame (the last item of this section) bounds it. To verify: count
+  uploads and calls of `Decay.decay`, and time the frame after such a write, on both pages of each port, in one run.
 - **Other costs named and not measured:** the raise per re-fold on .NET (Q2); the band's recomputations (R-AA); the
   array and the second projection of the view's `each`; a mark that comes or goes on this page (*from documentation*:
   `docs/PROBES.md`, the sections named in section 3). To verify: a benchmark of each.
-- **Repeats.** The `frames` sweep within a run (R-Z); the control-change medians and the `--bench` frame means of the
-  tracked pages, one run each (`docs/measurements/tracked-pages.md`). To verify: repeated runs, with the spread
-  reported.
+- **Repeats.** The `frames` sweep within a run (R-Z) and the `--bench` frame means of the tracked pages, one run each;
+  the control-change medians have four runs, each pair compared within its run, with differences of both signs and no
+  spread stated (`docs/measurements/tracked-pages.md`). To verify: repeated runs of each, with the spread reported.
 - **Candidate causes named and not tested:** the level of the `decay` rows between benchmark processes, and their
   allocation of about 64 KB a call (`docs/measurements/node-cost.md`); the Gen2 collections and the spread of the
   100,000-row add-key rows (`docs/measurements/aggregates.md`). To verify: runs that vary one candidate at a time.
