@@ -325,3 +325,24 @@ only. Consequence for the later page: it applies a burn-in before showing or act
 
 After the fix of `FixedSample.ofMoments` to `-(NormalQuantile.ofProbability (α/2))`, the coverage test prints the
 same fractions, 0.0415 and 0.5735, on both targets (*measured here*, by the commands above).
+
+## One recorded stream on both targets
+
+Test `the recorded stream gives pinned numbers` (`tests/Ranvier.Science.Tests/CrossTargetTests.fs`) folds the 1,000
+doubles of `Recorded.fs` with `Moments.add true`. The stream was made once on .NET with
+`Generator.normals 0.84 3.0 1000 (Generator.create 20261119)` and is checked in as data.
+
+| Value | .NET | JavaScript |
+|---|---|---|
+| count | 1000 | 1000 |
+| mean | 0.9199618814567002 | 0.9199618814567002 |
+| variance | 8.34324586928672 | 8.34324586928672 |
+| confidence sequence lower bound (α 0.05, `rhoTightestAt 0.05 1000.0`) | 0.642729642202583 | 0.642729642202583 |
+| confidence sequence upper bound | 1.1971941207108174 | 1.1971941207108174 |
+
+*Measured here*, 2026-11-19: .NET with `dotnet run -c Release --project tests/Ranvier.Science.Tests` (the test's
+pinned literals were taken from a `dotnet fsi` run against the Release build and the test passes on them);
+JavaScript by importing the compiled `dist/tests` modules (`Recorded`, `Moments`, `ConfidenceSequence`) into a scratch
+`node` script that ran the same fold and printed the values. Count, mean and variance are exactly equal, and both bounds
+agree to a relative difference of 0 (printed with round-trip formatting). The test asserts the moments with `=` and the
+bounds within relative 1e-12.
