@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <!-- BenchmarkDotNet refuses to run a Debug build. -->
+        <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+        <ServerGarbageCollection>false</ServerGarbageCollection>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Bodies.fs" />
+        <Compile Include="KitMemo.fs" />
+        <Compile Include="NodeCost.fs" />
+        <Compile Include="Program.fs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Ranvier.Numerics\Ranvier.Numerics.fsproj" />
+    </ItemGroup>
+
+</Project>
