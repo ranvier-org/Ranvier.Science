@@ -10,6 +10,7 @@
         <Compile Include="Format.fs" />
         <Compile Include="History.fs" />
         <Compile Include="Feed.fs" />
+        <Compile Include="Monitor.fs" />
     </ItemGroup>
 
     <ItemGroup>

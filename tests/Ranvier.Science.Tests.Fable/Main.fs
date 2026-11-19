@@ -22,6 +22,7 @@ let all =
             testList "ConfidenceSequenceTests.fs" [ Ranvier.Science.Tests.ConfidenceSequenceTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
+            testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]
         ]
 
 Mocha.runTests all |> ignore
