@@ -41,6 +41,11 @@ type private NativeWindow(window: Window, argv: string[]) =
         member _.Report(line) = Console.WriteLine line
 
         member _.SavePicture(name) =
+            // The page is laid out and painted again first, so the picture shows the page as it is now.
+            for _ in 1..4 do
+                window.Step(timeout = 4) |> ignore
+
+            window.Present()
             let struct (w, h, pixels) = window.ReadPixels()
             let path = Path.Combine(pictures, name + ".png")
             Png.PngEncoder.saveRgba8 path w h pixels

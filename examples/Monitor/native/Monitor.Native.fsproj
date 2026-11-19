@@ -10,6 +10,8 @@
 
     <ItemGroup>
         <Compile Include="../src/Host.fs" />
+        <Compile Include="../src/Plot.fs" />
+        <Compile Include="../src/Charts.fs" />
         <Compile Include="../src/App.fs" />
         <Compile Include="../src/Script.fs" />
         <Compile Include="Png.fs" />
@@ -23,6 +25,10 @@
         <PackageReference Include="Ranvier.View.WebCore.Sdl" Version="0.2.1" />
         <PackageReference Include="Ranvier.D5" Version="0.1.1" />
         <PackageReference Include="Ranvier.D5.View" Version="0.1.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../model/Monitor.Model.fsproj" />
     </ItemGroup>
 
     <!-- Hot reload runs under the JIT only, so it is a Debug-only reference, used by "dotnet run" with the dev argument. -->

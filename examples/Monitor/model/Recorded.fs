@@ -258,3 +258,13 @@ let stream: float[] =
         2.707768855819069; -2.934589114896355; 2.480152387651102; 1.1017655349844033
         0.42229183371875245; -2.700972228129343; 4.1949753938278445; 7.71943875568496
     |]
+
+/// The table text of two channels on the recorded stream with the formula `(mean - target) / se`: channel A given
+/// `stream`, channel B given `2.0 - x` for each `x` of it, then the pooled row. Each line is a row's six cells joined
+/// by " | "; the pooled row's last cell is empty.
+let tableLines: string list =
+    [
+        "A | 1,000 | 0.92 mK | 0.09 mK | [0.62, 1.22] mK | 10.1"
+        "B | 1,000 | 1.08 mK | 0.09 mK | [0.78, 1.38] mK | 11.8"
+        "All | 2,000 | 1.00 mK | 0.06 mK | (pooled, descriptive) | "
+    ]

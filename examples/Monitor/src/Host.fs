@@ -20,6 +20,8 @@ type IPlatform =
 type Session() =
     /// The mounted page, set by its setup.
     member val Page: obj = null with get, set
+    /// The graph the page was mounted in, set by its setup. A signal write from outside the page runs in its `Run`.
+    member val Graph: Ranvier.Graph = Unchecked.defaultof<Ranvier.Graph> with get, set
     /// False while a scripted run calls the frames itself.
     member val Auto = true with get, set
 

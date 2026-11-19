@@ -103,14 +103,7 @@ let tests =
                 m.FormulaText.Value <- "(mean - target) / se"
                 let lines = [ for r in Monitor.rows m -> line (r.Cells ()) ] @ [ line (Monitor.pooledCells m) ]
 
-                Expect.equal
-                    lines
-                    [
-                        "A | 1,000 | 0.92 mK | 0.09 mK | [0.62, 1.22] mK | 10.1"
-                        "B | 1,000 | 1.08 mK | 0.09 mK | [0.78, 1.38] mK | 11.8"
-                        "All | 2,000 | 1.00 mK | 0.06 mK | (pooled, descriptive) | "
-                    ]
-                    "the three lines")
+                Expect.equal lines Recorded.tableLines "the three lines")
         }
 
         test "changing alpha folds nothing and recomputes each channel's bounds and band once" {
