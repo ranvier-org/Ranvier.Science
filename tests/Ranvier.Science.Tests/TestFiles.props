@@ -3,5 +3,6 @@
     <ItemGroup>
         <Compile Include="$(MSBuildThisFileDirectory)Support.fs" Link="Support.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Smoke.fs" Link="Smoke.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)Probes.fs" Link="Probes.fs" />
     </ItemGroup>
 </Project>

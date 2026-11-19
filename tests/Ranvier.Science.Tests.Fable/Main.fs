@@ -8,6 +8,7 @@ let all =
         "Ranvier.Science"
         [
             testList "Smoke.fs" [ Ranvier.Science.Tests.Smoke.tests ]
+            testList "Probes.fs" [ Ranvier.Science.Tests.Probes.tests ]
         ]
 
 Mocha.runTests all |> ignore
