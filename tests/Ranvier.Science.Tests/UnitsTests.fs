@@ -88,4 +88,26 @@ let tests =
                     Expect.isFalse (UnitInfo.sameUnit root inverse) $"scales {root.Scale} and {inverse.Scale} differ in the last place"
                 | Error e -> failwith $"expected Ok, got Error {e}"
             }
+
+            test "equivalent holds across routes that differ in the last place" {
+                let u = (UnitOf.define<m> "u" Dimension.length 0.7).Info
+                let inverse = UnitInfo.power u -1
+
+                match UnitInfo.sqrt (UnitInfo.power u -2) with
+                | Ok root ->
+                    Expect.isFalse (UnitInfo.sameUnit root inverse) "sameUnit separates them"
+                    Expect.isTrue (UnitInfo.equivalent root inverse) "equivalent joins them"
+                | Error e -> failwith $"expected Ok, got Error {e}"
+            }
+
+            test "equivalent separates sizes and dimensions" {
+                Expect.isFalse (UnitInfo.equivalent Units.millikelvin.Info Units.kelvin.Info) "millikelvin and kelvin"
+
+                Expect.isFalse
+                    (UnitInfo.equivalent (Units.kilometre / Units.metre).Info UnitInfo.dimensionless)
+                    "kilometre per metre and dimensionless"
+
+                Expect.isFalse (UnitInfo.equivalent Units.metre.Info Units.second.Info) "metre and second"
+                Expect.isTrue (UnitInfo.equivalent Units.metre.Info Units.metre.Info) "a unit and itself"
+            }
         ]

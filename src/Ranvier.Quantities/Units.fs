@@ -147,6 +147,11 @@ module UnitInfo =
     /// compare derived scales within a tolerance where routes differ.
     let sameUnit (a: UnitInfo) (b: UnitInfo) : bool = sameDimension a b && a.Scale = b.Scale
 
+    /// Same dimension, and scales equal within a relative 1e-12. Two routes to one unit are equivalent where
+    /// `sameUnit` separates them by a difference in the last place.
+    let equivalent (a: UnitInfo) (b: UnitInfo) : bool =
+        sameDimension a b && abs (a.Scale - b.Scale) <= 1e-12 * abs b.Scale
+
 /// A unit of measure with the description its values carry at run time.
 [<Sealed>]
 type UnitOf<[<Measure>] 'u> internal (info: UnitInfo) =
