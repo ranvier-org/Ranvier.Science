@@ -151,6 +151,28 @@ let tests =
                 Expect.equal s.Lower (Moments.mean m) "at the mean"
             }
 
+            test "no interval before the burn-in" {
+                let alpha, rho = 0.05, 0.3
+                let xs = Array.init 30 (fun k -> sin (float k) * 2.0 + 1.0)
+                let before = Array.fold (Moments.add true) Moments.zero xs[0..28]
+                let at = Moments.add true before xs[29]
+                let early = ConfidenceSequence.ofMomentsAfter 30.0 alpha rho before
+                Expect.isTrue (Double.IsNaN early.Lower && Double.IsNaN early.Upper) "29 observations: NaN bounds"
+                let reached = ConfidenceSequence.ofMomentsAfter 30.0 alpha rho at
+                let plain = ConfidenceSequence.ofMoments alpha rho at
+                Expect.equal reached.Lower plain.Lower "30 observations: lower bound"
+                Expect.equal reached.Upper plain.Upper "30 observations: upper bound"
+            }
+
+            test "a burn-in out of range is rejected" {
+                let m = Array.fold (Moments.add true) Moments.zero [| 1.0; 2.0 |]
+
+                for burnIn in [ 0.5; nan; infinity ] do
+                    Expect.throwsT<ArgumentOutOfRangeException>
+                        (fun () -> ConfidenceSequence.ofMomentsAfter burnIn 0.05 1.0 m |> ignore)
+                        (sprintf "burnIn %g" burnIn)
+            }
+
             // Seeds 1 to 2,000, 10,000 deviates each.
             test "the sequence covers under continuous monitoring and the fixed-sample interval does not" {
                 let alpha = 0.05
@@ -175,5 +197,33 @@ let tests =
 
                 Expect.isLessThanOrEqual sequenceFraction 0.07 "sequence miss fraction <= 0.07"
                 Expect.isTrue (fixedFraction >= 0.15) "fixed-sample miss fraction >= 0.15"
+            }
+
+            test "the sequence covers at the page's setting" {
+                let alpha = 0.05 / 4.0
+                let rho = ConfidenceSequence.rhoTightestAt alpha 1000.0
+                let streams = 2000
+                let mutable misses = 0
+
+                for i in 1..streams do
+                    let mutable g = Generator.create i
+                    let mutable m = Moments.zero
+                    let mutable missed = false
+                    let mutable t = 0
+
+                    while t < 10_000 && not missed do
+                        let struct (z, next) = Generator.normal g
+                        g <- next
+                        m <- Moments.add true m z
+                        t <- t + 1
+
+                        if excludes 0.0 (ConfidenceSequence.ofMomentsAfter 30.0 alpha rho m) then
+                            missed <- true
+
+                    if missed then misses <- misses + 1
+
+                let fraction = float misses / float streams
+                printfn "Coverage at the page's setting: confidence sequence misses %g of %d streams" fraction streams
+                Expect.isLessThanOrEqual fraction 0.0225 "miss fraction <= 0.0225"
             }
         ]

@@ -71,6 +71,21 @@ module ConfidenceSequence =
         { Lower = mean - r; Upper = mean + r }
 
     /// <summary>
+    /// <c>ofMoments</c> with NaN bounds while the count is below <c>burnIn</c>. Raises ArgumentOutOfRangeException
+    /// unless <c>burnIn</c> is finite and at least 1, and as <c>ofMoments</c> does.
+    /// </summary>
+    let ofMomentsAfter (burnIn: float) (alpha: float) (rho: float) (m: Moments) : Interval =
+        if not (burnIn >= 1.0 && burnIn < infinity) then
+            raise (ArgumentOutOfRangeException(nameof burnIn, "burnIn must be finite and at least 1."))
+
+        let interval = ofMoments alpha rho m
+
+        if Moments.count m < burnIn then
+            { Lower = nan; Upper = nan }
+        else
+            interval
+
+    /// <summary>
     /// The rho for which <c>radius</c> at t = n is smallest: sqrt(u / n), where u &gt; 0 solves
     /// α² · exp u = u + 1 (arXiv 2103.06476, appendix B.2, equation 302). Raises ArgumentOutOfRangeException unless
     /// 0 &lt; alpha &lt; 1 and n is finite and greater than 0.
