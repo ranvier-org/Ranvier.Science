@@ -445,7 +445,9 @@ Uncertain.map2 : f: (float -> float -> float) -> dfx: (float -> float -> float) 
 
 with operators `+ − * /` (between two `Uncertain`s and with a `float` on either side), unary minus, and the static
 members that make F#'s `sqrt`, `exp`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`,
-`tanh`, `abs` and `**` apply. An `Uncertain` holds its value and, per independent source, the contribution
+`tanh`, `abs` and `**` apply. Under Fable, F#'s `abs` on an `Uncertain` compiles to `Math.abs` and returns NaN (Fable's
+`Replacements.fs`, case "Abs", found in T1 Task 5), so the module adds `Uncertain.abs : Uncertain -> Uncertain`, which
+code meant for both targets calls. An `Uncertain` holds its value and, per independent source, the contribution
 ∂f/∂xᵢ · uᵢ; the combined standard uncertainty is the root of the sum of their squares, and two values that share a
 source are correlated (the GUM's law of propagation for uncorrelated inputs, extended through shared sources; *general
 knowledge*). Source identifiers come from a counter, incremented with `Interlocked` on .NET. A NaN standard uncertainty
