@@ -13,19 +13,6 @@ type Interval = { Lower: float; Upper: float }
 /// </summary>
 type SequenceSettings = { Alpha: float; Rho: float; BurnIn: float }
 
-module private Arguments =
-    let alpha (alpha: float) =
-        if not (alpha > 0.0 && alpha < 1.0) then
-            raise (ArgumentOutOfRangeException(nameof alpha, "alpha must lie strictly between 0 and 1."))
-
-    let finitePositive (name: string) (x: float) =
-        if not (x > 0.0 && x < infinity) then
-            raise (ArgumentOutOfRangeException(name, name + " must be finite and greater than 0."))
-
-    let notNegative (name: string) (x: float) =
-        if x < 0.0 then
-            raise (ArgumentOutOfRangeException(name, name + " must be zero or more."))
-
 /// <summary>
 /// The Gaussian-mixture asymptotic confidence sequence for a mean (Waudby-Smith, Arbour, Sinha, Kennedy and
 /// Ramdas, "Time-uniform central limit theory and asymptotic confidence sequences", arXiv 2103.06476,
@@ -60,9 +47,11 @@ module ConfidenceSequence =
     /// applies the burn-in.
     /// </remarks>
     let radius (alpha: float) (rho: float) (t: float) (sd: float) : float =
-        Arguments.alpha alpha
-        Arguments.finitePositive (nameof rho) rho
-        Arguments.notNegative (nameof sd) sd
+        Check.alpha alpha
+        Check.finitePositive (nameof rho) rho
+
+        if not (Double.IsNaN sd) then
+            Check.notNegative (nameof sd) sd
 
         if not (t > 0.0) then
             nan
@@ -92,8 +81,8 @@ module ConfidenceSequence =
     /// 0 &lt; alpha &lt; 1 and n is finite and greater than 0.
     /// </summary>
     let rhoTightestAt (alpha: float) (n: float) : float =
-        Arguments.alpha alpha
-        Arguments.finitePositive (nameof n) n
+        Check.alpha alpha
+        Check.finitePositive (nameof n) n
         // Newton's method on h(u) = u − ln(u + 1) + 2 ln α, which is convex and increasing for u > 0, from the
         // closed-form approximation of equation 311.
         let twoLogAlpha = 2.0 * log alpha
@@ -109,8 +98,8 @@ module ConfidenceSequence =
         sqrt (u / n)
 
     let private check (alpha: float) (rho: float) (burnIn: float) =
-        Arguments.alpha alpha
-        Arguments.finitePositive (nameof rho) rho
+        Check.alpha alpha
+        Check.finitePositive (nameof rho) rho
 
         if not (burnIn >= 1.0 && burnIn < infinity) then
             raise (ArgumentOutOfRangeException(nameof burnIn, "burnIn must be finite and at least 1."))
@@ -166,7 +155,7 @@ module FixedSample =
     /// ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1.
     /// </summary>
     let ofMoments (alpha: float) (m: Moments) : Interval =
-        Arguments.alpha alpha
+        Check.alpha alpha
         let mean = Moments.mean m
         let r = -(NormalQuantile.ofProbability (alpha / 2.0)) * Moments.standardError m
         { Lower = mean - r; Upper = mean + r }

@@ -8,7 +8,9 @@
 
     <ItemGroup>
         <Compile Include="NormalQuantile.fs" />
+        <Compile Include="Check.fs" />
         <Compile Include="ConfidenceSequence.fs" />
+        <Compile Include="Continuous.fs" />
     </ItemGroup>
 
     <ItemGroup>

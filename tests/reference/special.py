@@ -9,6 +9,9 @@ Sections:
     incgamma
             the regularised incomplete gamma functions P(a, x) and Q(a, x), printed as 0.0 below 1e-300
     incbeta the regularised incomplete beta function I_x(a, b), each value at least 1e-300
+    normal  the standard normal cdf and survival, the cdf of N(3, 2) and the standard normal quantile, as struct tuples
+    lognormal
+            the cdf and survival of the log-normal distribution with mu = 0.5 and sigma = 0.8
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -62,6 +65,11 @@ Methods:
                 digits than the context's, it is computed again as Q(a, x) is. For whole a and b with a + b <= 200 the
                 section also sums I_x(a, b) = the sum over j = a..a+b-1 of C(a + b - 1, j) x^j (1 - x)^(a + b - 1 - j)
                 in exact fractions, and exits 1 unless both give the same double.
+    normal_sf   Q(1/2, z^2 / 2) / 2 for z >= 0 and 1 - normal_sf(-z) below, from gamma_q at the context precision plus
+                GUARD; normal_cdf(z) = 1 - normal_sf(z) for z >= 0 and normal_sf(-z) below.
+    invert      200 bisection steps on an increasing function between two bounds that bracket the target (asserted);
+                the bracket of width w shrinks to w 2^-200.
+    emit        prints a table of struct tuples, each value as repr(float(value)).
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -740,7 +748,126 @@ def section_incbeta() -> None:
     print_cases("incompleteBetaScanCases", "(float * float * float * float)[]", incbeta_rows(incbeta_scan_abxs))
 
 
-SECTIONS = {"gamma": section_gamma, "erf": section_erf, "incgamma": section_incgamma, "incbeta": section_incbeta}
+def normal_sf(z) -> Decimal:
+    """The standard normal survival function, Q(1/2, z^2 / 2) / 2 for z >= 0 and 1 - normal_sf(-z) below."""
+    z = Decimal(z)
+    if z < 0:
+        return 1 - normal_sf(-z)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = gamma_q(Decimal(1) / 2, z * z / 2) / 2
+    return +result
+
+
+def normal_cdf(z) -> Decimal:
+    """The standard normal distribution function, 1 - normal_sf(z) for z >= 0 and normal_sf(-z) below."""
+    z = Decimal(z)
+    if z < 0:
+        return normal_sf(-z)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = 1 - normal_sf(z)
+    return +result
+
+
+def invert(f, target, lo, hi) -> Decimal:
+    """x in [lo, hi] with f(x) = target, f increasing, by 200 bisection steps; exits 1 unless the bounds bracket it."""
+    lo, hi, target = Decimal(lo), Decimal(hi), Decimal(target)
+    if not f(lo) <= target <= f(hi):
+        sys.exit(f"invert: the target {target} is not bracketed by [{lo}, {hi}]")
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if f(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def emit(name: str, rows: list[tuple]) -> None:
+    """Prints `let private name: struct (float * ...)[]` with one struct tuple per row."""
+    fields = " * ".join("float" for _ in rows[0])
+    print(f"let private {name}: struct ({fields})[] =")
+    print("    [|")
+    for row in rows:
+        print("        struct (" + ", ".join(literal(v) for v in row) + ")")
+    print("    |]")
+    print()
+
+
+def check_normal_helpers() -> None:
+    """Exits 1 unless the helpers' building blocks meet four identities to 1e-50 at 60 digits."""
+    with localcontext() as ctx:
+        ctx.prec = DIGITS
+        tolerance = Decimal("1e-50")
+        checks = [
+            ("normal_cdf(0) = 1/2", normal_cdf(0) - Decimal("0.5")),
+            ("gamma_p(1, 0.3) = 1 - e^-0.3", gamma_p(1, 0.3) - (1 - (-Decimal(0.3)).exp())),
+            ("gamma_p(1, 7) = 1 - e^-7", gamma_p(1, 7.0) - (1 - (-Decimal(7)).exp())),
+            ("exp(ln_gamma(10)) = 362880", ln_gamma(10.0).exp() - 362880),
+            ("ln_gamma(0.5) = ln sqrt(pi)", ln_gamma(0.5) - pi().sqrt().ln()),
+        ]
+        for label, difference in checks:
+            if abs(difference) > tolerance:
+                sys.exit(f"check failed: {label}, off by {difference}")
+
+
+def normal_quantile(p: float) -> Decimal:
+    """x with normal_cdf(x) = p, bisecting the cdf for p <= 1/2 and the survival against 1 - Decimal(p) above."""
+    if p <= 0.5:
+        return invert(normal_cdf, Decimal(p), -40, 0)
+    return invert(lambda x: -normal_sf(x), -(1 - Decimal(p)), 0, 40)
+
+
+def section_normal() -> None:
+    print("// python -I tests/reference/special.py normal")
+    print()
+    check_normal_helpers()
+
+    xs = [-37.0, -30.0, -10.0, -5.0, -1.96, -1.0, -0.5, 0.0, 0.3, 1.0, 1.96, 3.0, 5.0, 8.0, 10.0, 30.0, 37.0]
+    emit("normalCases", [(x, value(normal_cdf, x), value(normal_sf, x)) for x in xs])
+
+    # N(3, 2): z = (x - 3) / 2 is exact for these x.
+    shifted_xs = [-5.0, 1.0, 3.0, 7.5]
+    emit(
+        "normalShiftedCases",
+        [(x, value(lambda x: normal_cdf((Decimal(x) - 3) / 2), x)) for x in shifted_xs],
+    )
+
+    ps = [1e-300, 1e-100, 1e-10, 0.025, 0.3, 0.975, 1 - 1e-10]
+    emit("normalQuantileCases", [(p, value(normal_quantile, p)) for p in ps])
+
+
+def lognormal_z(x) -> Decimal:
+    """(ln x - mu) / sigma at mu = 0.5 and sigma = 0.8, each the exact value of the double."""
+    return (Decimal(x).ln() - Decimal(0.5)) / Decimal(0.8)
+
+
+def lognormal_cdf(x) -> Decimal:
+    return normal_cdf(lognormal_z(x))
+
+
+def lognormal_sf(x) -> Decimal:
+    return normal_sf(lognormal_z(x))
+
+
+def section_lognormal() -> None:
+    print("// python -I tests/reference/special.py lognormal")
+    print()
+    check_normal_helpers()
+
+    xs = [1e-10, 0.1, 1.0, 2.0, 10.0, 1000.0]
+    emit("logNormalCases", [(x, value(lognormal_cdf, x), value(lognormal_sf, x)) for x in xs])
+
+
+SECTIONS = {
+    "gamma": section_gamma,
+    "erf": section_erf,
+    "incgamma": section_incgamma,
+    "incbeta": section_incbeta,
+    "normal": section_normal,
+    "lognormal": section_lognormal,
+}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in SECTIONS:

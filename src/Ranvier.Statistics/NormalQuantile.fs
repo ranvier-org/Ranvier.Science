@@ -20,7 +20,8 @@ module NormalQuantile =
         / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
 
     /// The standard normal quantile of p in (0, 1), to a relative error of 1.2e-9 or better.
-    /// Raises ArgumentOutOfRangeException unless 0 < p < 1.
+    /// Raises ArgumentOutOfRangeException unless 0 < p < 1. It is the faster approximation:
+    /// `Continuous.quantile` of `Continuous.normal 0.0 1.0` gives full precision.
     let ofProbability (p: float) : float =
         if not (p > 0.0 && p < 1.0) then
             raise (ArgumentOutOfRangeException(nameof p, "A probability must lie strictly between 0 and 1."))
