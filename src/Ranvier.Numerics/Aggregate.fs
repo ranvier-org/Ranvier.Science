@@ -24,12 +24,6 @@ type internal AggregateState<'A> =
     }
 
 module Aggregate =
-    let private isFinite (x: float) = abs x < infinity
-
-    let private momentsFinite (m: Moments) =
-        Moments.count m = 0.0
-        || (isFinite (Moments.mean m) && isFinite (Moments.variance m))
-
     /// <summary>
     /// A memo of <c>result</c> over an accumulator that adds and removes the <c>projection</c> of each row of
     /// <c>upstream</c> through <c>add</c> and <c>remove</c> from <c>zero</c>, kept current per row change.
@@ -124,7 +118,7 @@ module Aggregate =
     /// </remarks>
     let sumBy (policy: FloatPolicy) (projection: 'V -> float) (upstream: Projection<'K, 'V>) : Maintained<float> =
         let c = policy.Compensated
-        maintainedBy policy (Sum.value >> isFinite) (Sum.add c) (Sum.remove c) Sum.zero Sum.value projection upstream
+        maintainedBy policy (Sum.value >> Doubles.isFinite) (Sum.add c) (Sum.remove c) Sum.zero Sum.value projection upstream
 
     /// <summary>The <c>Moments.merge</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
     /// <remarks>
@@ -146,7 +140,7 @@ module Aggregate =
         (upstream: Projection<'K, 'V>)
         : Maintained<Moments> =
         let c = policy.Compensated
-        maintainedBy policy momentsFinite (Moments.merge c) (Moments.unmerge c) Moments.zero id projection upstream
+        maintainedBy policy Refold.momentsFinite (Moments.merge c) (Moments.unmerge c) Moments.zero id projection upstream
 
     /// The same value folded from every row on each change.
     let momentsFromScratchBy

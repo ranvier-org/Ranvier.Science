@@ -232,10 +232,8 @@ module WeightedMoments =
 
     /// True when the count is zero or every running total is finite.
     let internal isFinite (m: WeightedMoments) : bool =
-        let finite (x: float) = abs x < infinity
-
         m.N = 0.0
-        || (finite (Sum.value m.W)
-            && finite (Sum.value m.W2)
-            && finite (Sum.value m.Mean)
-            && finite (Sum.value m.S))
+        || (Doubles.isFinite (Sum.value m.W)
+            && Doubles.isFinite (Sum.value m.W2)
+            && Doubles.isFinite (Sum.value m.Mean)
+            && Doubles.isFinite (Sum.value m.S))

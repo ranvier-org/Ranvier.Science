@@ -66,9 +66,6 @@ module LeastSquares =
 
         0.5 * s
 
-    let private allFinite (r: float[]) : bool =
-        r |> Array.forall (fun x -> not (Double.IsNaN x || Double.IsInfinity x))
-
     // The forward-difference Jacobian at p, given the residuals r there.
     let private differenceJacobian (residuals: float[] -> float[]) (p: float[]) (r: float[]) : Matrix =
         let m = r.Length
@@ -128,7 +125,7 @@ module LeastSquares =
 
             j
 
-        if not (allFinite r) then
+        if not (Doubles.allFinite r) then
             { Parameters = p
               Residuals = r
               Jacobian = Matrix.init m n (fun _ _ -> nan)
@@ -143,7 +140,7 @@ module LeastSquares =
             let mutable iterations = 0
             let mutable converged = cost = 0.0
             // A non-finite Jacobian gives no step to try: the fit stops there, short of convergence.
-            let mutable finished = converged || not (allFinite j.Data)
+            let mutable finished = converged || not (Doubles.allFinite j.Data)
 
             while not finished && iterations < options.MaximumIterations do
                 iterations <- iterations + 1
@@ -201,7 +198,7 @@ module LeastSquares =
                                 if cost = 0.0 || stepSmall || decrease <= tolerance * previous then
                                     converged <- true
                                     finished <- true
-                                elif not (allFinite j.Data) then
+                                elif not (Doubles.allFinite j.Data) then
                                     finished <- true
                             else
                                 lambda <- lambda * 10.0

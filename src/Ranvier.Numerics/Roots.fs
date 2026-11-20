@@ -56,9 +56,6 @@ module NelderMeadOptions =
 /// either order and give the same bits for both. A NaN endpoint, a NaN function value or an unbracketed interval gives
 /// an `Error` naming the condition. An exception raised by the caller's function propagates unchanged.
 module Roots =
-    // 2^-52, the machine epsilon of Brent's tolerance expressions.
-    let private macheps = 2.220446049250313e-16
-
     let private checkTolerance (tolerance: float) : unit =
         if not (tolerance >= 0.0) then
             raise (ArgumentOutOfRangeException("tolerance", sprintf "The tolerance must be at least 0; it is %g." tolerance))
@@ -209,7 +206,7 @@ module Roots =
                     fb <- fc
                     fc <- fa
 
-                let tol1 = max (2.0 * macheps * abs b + 0.5 * tolerance) Double.Epsilon
+                let tol1 = max (2.0 * Doubles.epsilon * abs b + 0.5 * tolerance) Double.Epsilon
                 let m = 0.5 * (c - b)
 
                 if abs m <= tol1 || fb = 0.0 then
@@ -276,15 +273,15 @@ module Roots =
             else
                 let dfx = df x
 
-                if dfx = 0.0 || Double.IsNaN dfx || Double.IsInfinity dfx then
+                if dfx = 0.0 || not (Doubles.isFinite dfx) then
                     result <- Some(Error(sprintf "the derivative is zero or not finite at %.17g (df = %.17g)" x dfx))
                 else
                     let step = fx / dfx
                     let next = x - step
 
-                    if Double.IsNaN next || Double.IsInfinity next then
+                    if not (Doubles.isFinite next) then
                         result <- Some(Error(sprintf "the iterate is not finite after x = %.17g" x))
-                    elif abs step <= max tolerance (4.0 * macheps * abs next) || next = x then
+                    elif abs step <= max tolerance (4.0 * Doubles.epsilon * abs next) || next = x then
                         result <- Some(Ok next)
                     else
                         x <- next
@@ -296,8 +293,6 @@ module Roots =
 /// Minimisation of a function of one or several variables. A negative or NaN tolerance raises
 /// `ArgumentOutOfRangeException`. An exception raised by the caller's function propagates unchanged.
 module Minimize =
-    let private macheps = 2.220446049250313e-16
-
     /// A local minimum of f on [a, b] by Brent's localmin (Brent 1973, Algorithms for Minimization without
     /// Derivatives, chapter 5: golden section and parabolic interpolation; from documentation). `tolerance` is the
     /// absolute part t of the stopping rule: it stops when the interval around the best point is within
@@ -319,7 +314,7 @@ module Minimize =
                 raise (ArgumentOutOfRangeException("a", sprintf "The interval needs finite endpoints with a < b and a finite width; a = %g, b = %g." a b))
 
             let golden = 0.5 * (3.0 - sqrt 5.0)
-            let eps = sqrt macheps
+            let eps = sqrt Doubles.epsilon
             let tol3 = tolerance / 3.0
             let mutable a = a
             let mutable b = b

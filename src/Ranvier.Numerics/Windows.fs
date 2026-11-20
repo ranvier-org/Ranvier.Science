@@ -118,7 +118,7 @@ module internal Refold =
     /// The finiteness test of a Moments value: the count is zero, or its mean and variance are finite.
     let momentsFinite (m: Moments) : bool =
         Moments.count m = 0.0
-        || (abs (Moments.mean m) < infinity && abs (Moments.variance m) < infinity)
+        || (Doubles.isFinite (Moments.mean m) && Doubles.isFinite (Moments.variance m))
 
 /// <summary>A sliding window of the last items pushed, folded through an accumulator. Immutable.</summary>
 /// <remarks>

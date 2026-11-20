@@ -50,8 +50,7 @@ type OdeSolution =
 /// an exception raised by the caller's function propagates unchanged, and a result of f whose length differs from the
 /// state's raises `ArgumentException` naming both lengths.
 module Ode =
-    // Machine epsilon 2^-52 and the smallest normal double.
-    let private epsilon = 2.220446049250313e-16
+    // The smallest normal double.
     let private smallestNormal = 2.2250738585072014e-308
 
     let private checkLength (n: int) (k: float[]) : float[] =
@@ -213,8 +212,6 @@ module Ode =
 
             sqrt (sum / float n)
 
-    let private isFinite (x: float) : bool = not (Double.IsNaN x || Double.IsInfinity x)
-
     // Hairer et al., ibid., §II.4: a first step from the sizes of y and f at the start and of f's change over a trial
     // Euler step. The result may be NaN or non-positive when f is; the caller falls back.
     let private startingStep
@@ -284,7 +281,7 @@ module Ode =
                     options.InitialStep
                 else
                     let guess = startingStep options call t0 y0 k1 t1
-                    if isFinite guess && guess > 0.0 then guess else 1e-6 * (t1 - t0)
+                    if Doubles.isFinite guess && guess > 0.0 then guess else 1e-6 * (t1 - t0)
 
             let mutable h = start
             let mutable afterRejection = false
@@ -297,7 +294,7 @@ module Ode =
                 else
                     let proposed = min h options.MaximumStep
 
-                    if not (proposed > 4.0 * epsilon * abs t && proposed >= smallestNormal) then
+                    if not (proposed > 4.0 * Doubles.epsilon * abs t && proposed >= smallestNormal) then
                         failure <-
                             Some(
                                 match nonFinite with
@@ -357,10 +354,10 @@ module Ode =
                         let mutable finiteEstimate = true
 
                         for i in 0 .. n - 1 do
-                            if not (isFinite yNew[i]) then finiteState <- false
-                            if not (isFinite estimate[i]) then finiteEstimate <- false
+                            if not (Doubles.isFinite yNew[i]) then finiteState <- false
+                            if not (Doubles.isFinite estimate[i]) then finiteEstimate <- false
 
-                        if not finiteState || not (isFinite err) then
+                        if not finiteState || not (Doubles.isFinite err) then
                             h <- step / 5.0
                             rejected <- rejected + 1
                             afterRejection <- true

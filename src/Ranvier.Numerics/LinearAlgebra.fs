@@ -521,16 +521,13 @@ module Matrix =
                 )
             )
 
-    /// ε = 2⁻⁵², the spacing of doubles at 1.
-    let private epsilon = 2.220446049250313e-16
-
     /// The largest |entry|, and whether any entry is NaN or infinite.
     let private scan (m: Matrix) : struct (float * bool) =
         let mutable largest = 0.0
         let mutable nonFinite = false
 
         for x in m.Data do
-            if Double.IsNaN x || Double.IsInfinity x then nonFinite <- true
+            if not (Doubles.isFinite x) then nonFinite <- true
             elif abs x > largest then largest <- abs x
 
         struct (largest, nonFinite)
@@ -591,7 +588,7 @@ module Matrix =
             let struct (shrink, grow) = scaleFor largest
             let f = Array.map (fun x -> x * shrink) a.Data
             let permutation = Array.init n id
-            let threshold = float n * epsilon * (largest * shrink)
+            let threshold = float n * Doubles.epsilon * (largest * shrink)
             let mutable sign = 1.0
             let mutable singularAt = -1
             let mutable k = 0
@@ -723,7 +720,7 @@ module Matrix =
                     if abs a.Data[i * n + i] > largestDiagonal then
                         largestDiagonal <- abs a.Data[i * n + i]
 
-                let threshold = float n * epsilon * largestDiagonal
+                let threshold = float n * Doubles.epsilon * largestDiagonal
                 let l: float[] = Array.zeroCreate (n * n)
                 let mutable failedAt = -1
                 let mutable j = 0
@@ -842,7 +839,7 @@ module Matrix =
               Columns = n
               Factors = f
               Taus = taus
-              RankThreshold = float (max m n) * epsilon * largestColumn
+              RankThreshold = float (max m n) * Doubles.epsilon * largestColumn
               Shrink = shrink
               Grow = grow
               NonFinite = false }
@@ -877,7 +874,7 @@ module Matrix =
             let struct (shrink, grow) = scaleFor largest
             let d = Array.map (fun x -> x * shrink) a.Data
             let v = Array.init (n * n) (fun k -> if k / n = k % n then 1.0 else 0.0)
-            let threshold = epsilon * Vector.norm d
+            let threshold = Doubles.epsilon * Vector.norm d
 
             let offDiagonal () =
                 let entries: float[] = Array.zeroCreate (n * n - n)

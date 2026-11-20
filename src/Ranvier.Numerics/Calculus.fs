@@ -34,8 +34,7 @@ module Integrate =
     // The largest number of panels `adaptive` holds; a definition.
     let private maximumPanels = 200
 
-    // Machine epsilon 2^-52 and the smallest normal double: d1mach(4) and d1mach(1) of QUADPACK.
-    let private epmach = 2.220446049250313e-16
+    // The smallest normal double: d1mach(1) of QUADPACK; d1mach(4) is Doubles.epsilon.
     let private uflow = 2.2250738585072014e-308
 
     // From documentation: Piessens, de Doncker-Kapenga, Ueberhuber and Kahaner, QUADPACK (Springer, 1983), the data
@@ -116,8 +115,8 @@ module Integrate =
             let scaled = 200.0 * err / resasc
             err <- resasc * min 1.0 (scaled * sqrt scaled)
 
-        if resabs > uflow / (50.0 * epmach) then
-            err <- max (50.0 * epmach * resabs) err
+        if resabs > uflow / (50.0 * Doubles.epsilon) then
+            err <- max (50.0 * Doubles.epsilon * resabs) err
 
         struct (result, err)
 
@@ -286,43 +285,29 @@ module Integrate =
                 }
 
     // Double-double arithmetic (a value hi + lo with |lo| at most half an ulp of hi), after Dekker (1971) and Knuth's
-    // TwoSum; used only to compute Gauss–Legendre weights to full double accuracy.
-    let private twoSum (a: float) (b: float) : struct (float * float) =
-        let s = a + b
-        let bb = s - a
-        struct (s, (a - (s - bb)) + (b - bb))
-
+    // TwoSum, on the error-free transformations of `Doubles`; used only to compute Gauss–Legendre weights to full
+    // double accuracy.
     let private quickTwoSum (a: float) (b: float) : struct (float * float) =
         let s = a + b
         struct (s, b - (s - a))
 
-    let private twoProd (a: float) (b: float) : struct (float * float) =
-        let p = a * b
-        let ca = 134217729.0 * a
-        let ah = ca - (ca - a)
-        let al = a - ah
-        let cb = 134217729.0 * b
-        let bh = cb - (cb - b)
-        let bl = b - bh
-        struct (p, ((ah * bh - p) + ah * bl + al * bh) + al * bl)
-
     let private ddAdd (struct (ah, al): struct (float * float)) (struct (bh, bl): struct (float * float)) =
-        let struct (s, e) = twoSum ah bh
-        let struct (t, f) = twoSum al bl
+        let struct (s, e) = Doubles.twoSum ah bh
+        let struct (t, f) = Doubles.twoSum al bl
         let struct (s2, e2) = quickTwoSum s (e + t)
         quickTwoSum s2 (e2 + f)
 
     let private ddMul (struct (ah, al): struct (float * float)) (struct (bh, bl): struct (float * float)) =
-        let struct (p, e) = twoProd ah bh
+        let struct (p, e) = Doubles.twoProduct ah bh
         quickTwoSum p (e + (ah * bl + al * bh))
 
     let private ddMulFloat (struct (ah, al): struct (float * float)) (b: float) =
-        let struct (p, e) = twoProd ah b
+        let struct (p, e) = Doubles.twoProduct ah b
         quickTwoSum p (e + al * b)
 
     let private ddDivFloat (struct (ah, al): struct (float * float)) (b: float) =
         let q1 = ah / b
-        let struct (p, e) = twoProd q1 b
+        let struct (p, e) = Doubles.twoProduct q1 b
         let r = ((ah - p) - e) + al
         quickTwoSum q1 (r / b)
 
@@ -490,7 +475,7 @@ module Differentiate =
     let derivative (f: float -> float) (x: float) : Derivative =
         let failed = { Value = nan; ErrorEstimate = nan }
 
-        if Double.IsNaN x || Double.IsInfinity x then
+        if not (Doubles.isFinite x) then
             failed
         else
             let con = 1.4

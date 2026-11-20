@@ -199,10 +199,8 @@ module HigherMoments =
 
     /// True when the count is zero or every running total is finite.
     let internal isFinite (m: HigherMoments) : bool =
-        let finite (x: float) = abs x < infinity
-
         m.N = 0.0
-        || (finite (Sum.value m.Mean)
-            && finite (Sum.value m.M2)
-            && finite (Sum.value m.M3)
-            && finite (Sum.value m.M4))
+        || (Doubles.isFinite (Sum.value m.Mean)
+            && Doubles.isFinite (Sum.value m.M2)
+            && Doubles.isFinite (Sum.value m.M3)
+            && Doubles.isFinite (Sum.value m.M4))

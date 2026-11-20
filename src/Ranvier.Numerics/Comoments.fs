@@ -191,11 +191,9 @@ module Comoments =
 
     /// True when the count is zero or every running total is finite.
     let internal isFinite (m: Comoments) : bool =
-        let finite (x: float) = abs x < infinity
-
         m.N = 0.0
-        || (finite (Sum.value m.MeanX)
-            && finite (Sum.value m.MeanY)
-            && finite (Sum.value m.M2X)
-            && finite (Sum.value m.M2Y)
-            && finite (Sum.value m.C))
+        || (Doubles.isFinite (Sum.value m.MeanX)
+            && Doubles.isFinite (Sum.value m.MeanY)
+            && Doubles.isFinite (Sum.value m.M2X)
+            && Doubles.isFinite (Sum.value m.M2Y)
+            && Doubles.isFinite (Sum.value m.C))

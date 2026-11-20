@@ -344,26 +344,6 @@ module Special =
     let private twoOverSqrtPi = 1.1283791670955126
     let private oneOverSqrtPi = 0.5641895835477563
 
-    /// a + b = s + e exactly, with s the rounded sum (Knuth's TwoSum).
-    let private twoSum (a: float) (b: float) : struct (float * float) =
-        let s = a + b
-        let v = s - a
-        struct (s, (a - (s - v)) + (b - v))
-
-    /// Veltkamp's split of a into high + low, each half of the significand.
-    let private split (a: float) : struct (float * float) =
-        let c = 134217729.0 * a // 2²⁷ + 1
-        let high = c - (c - a)
-        struct (high, a - high)
-
-    /// a · b = p + e exactly, with p the rounded product (Dekker's product), where no partial product overflows or
-    /// underflows.
-    let private twoProduct (a: float) (b: float) : struct (float * float) =
-        let p = a * b
-        let struct (ah, al) = split a
-        let struct (bh, bl) = split b
-        struct (p, ((ah * bh - p) + ah * bl + al * bh) + al * bl)
-
     /// erf(x) for 0 ≤ x < 2 as a double-double high + low: (2/√π) e^(−y) Σₙ x (2y)ⁿ / (1 · 3 · … · (2n + 1)) with y the
     /// rounded x², summed until a term leaves the sum unchanged, with the terms, the sum and the products in
     /// double-double. NaN when a term still changes the sum after 500 terms.
@@ -382,21 +362,21 @@ module Special =
             n <- n + 1
             let d = float (2 * n + 1)
             // term · z / d: the product split exactly, then the quotient and its remainder.
-            let struct (p, pe) = twoProduct term z
+            let struct (p, pe) = Doubles.twoProduct term z
             let q = p / d
-            let struct (qd, qde) = twoProduct q d
+            let struct (qd, qde) = Doubles.twoProduct q d
             termLow <- ((p - qd) - qde + pe + termLow * z) / d
             term <- q
-            let struct (s, se) = twoSum sum term
+            let struct (s, se) = Doubles.twoSum sum term
             sumLow <- sumLow + se + termLow
             converged <- s = sum
             sum <- s
 
         if converged then
             let e = Math.Exp (-y)
-            let struct (p, pe) = twoProduct e sum
-            let struct (q, qe) = twoProduct twoOverSqrtPi p
-            twoSum q (qe + twoOverSqrtPi * (pe + e * sumLow))
+            let struct (p, pe) = Doubles.twoProduct e sum
+            let struct (q, qe) = Doubles.twoProduct twoOverSqrtPi p
+            Doubles.twoSum q (qe + twoOverSqrtPi * (pe + e * sumLow))
         else
             struct (nan, nan)
 
@@ -417,10 +397,10 @@ module Special =
             c <- x + a / c
             let delta = c * d
             f <- f * delta
-            converged <- abs (delta - 1.0) <= 2.220446049250313e-16 // 2⁻⁵²
+            converged <- abs (delta - 1.0) <= Doubles.epsilon
 
         if converged then
-            let struct (h, l) = twoProduct x x
+            let struct (h, l) = Doubles.twoProduct x x
             Math.Exp (-h) * Math.Exp (-l) * oneOverSqrtPi / f
         else
             nan
@@ -549,7 +529,7 @@ module Special =
             d <- 1.0 / d
             let delta = d * c
             h <- h * delta
-            converged <- abs (delta - 1.0) <= 2.220446049250313e-16 // 2⁻⁵²
+            converged <- abs (delta - 1.0) <= Doubles.epsilon
 
         if converged then gammaPrefactor a x * h else nan
 
@@ -787,11 +767,11 @@ module Special =
                 | OverA -> Math.Log a
                 | OverB -> Math.Log b
 
-            let struct (c, gamma) = twoSum a b
+            let struct (c, gamma) = Doubles.twoSum a b
             let x0 = a / c
             let y0 = b / c
-            let struct (p1, e1) = twoProduct x0 c
-            let struct (p2, e2) = twoProduct y0 c
+            let struct (p1, e1) = Doubles.twoProduct x0 c
+            let struct (p2, e2) = Doubles.twoProduct y0 c
             let rho1 = (p1 - a) + e1
             let rho2 = (p2 - b) + e2
             let dx = x - x0
@@ -830,10 +810,10 @@ module Special =
     /// two terms.
     let private betaContinuedFraction (a: float) (b: float) (x: float) : float =
         let tiny = 1e-300
-        let struct (qab, qabLow) = twoSum a b
-        let struct (qap, qapLow) = twoSum a 1.0
+        let struct (qab, qabLow) = Doubles.twoSum a b
+        let struct (qap, qapLow) = Doubles.twoSum a 1.0
         let qam = a - 1.0
-        let struct (p, pLow) = twoProduct qab x
+        let struct (p, pLow) = Doubles.twoProduct qab x
         let mutable c = 1.0
         let mutable d = ((qap - p) + qapLow - (pLow + qabLow * x)) / qap
 
@@ -876,7 +856,7 @@ module Special =
             d <- 1.0 / d
             let delta = d * c
             h <- h * delta
-            converged <- abs (delta - 1.0) <= 2.220446049250313e-16 // 2⁻⁵²
+            converged <- abs (delta - 1.0) <= Doubles.epsilon
 
         if converged then h else nan
 
@@ -1089,7 +1069,7 @@ module Special =
                         let nearer = min x (1.0 - x)
 
                         finished <-
-                            size < max (1e-15 * nearer) (max (2.220446049250313e-16 * x) 1e-323) // 2⁻⁵² x
+                            size < max (1e-15 * nearer) (max (Doubles.epsilon * x) 1e-323)
                             || (size < 1e-9 * nearer && size >= previous)
 
                         previous <- size
