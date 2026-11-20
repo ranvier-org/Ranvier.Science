@@ -23,22 +23,45 @@ type Expr =
 exception internal FormulaSyntax of string
 
 /// A one-line arithmetic notation over the identifiers of a `Model`: `+ - * /`, an integer power `^`, parentheses,
-/// the one-argument functions `sqrt abs exp ln log10`, the two-argument functions `min max`, unit literals
-/// `[unit text]` and `convert(expr, [unit text])`. A number followed by a literal is their product (`9.81 [m/s^2]`),
-/// and a `^` after that literal applies to the literal alone (`2 [m]^2` is 2 m²). A literal's text runs to the next
-/// `]`, is trimmed of spaces at either end, and is read by `UnitInfo.parse` against `Model.Catalogue`. `+`, `-`, `min`
-/// and `max` need operands of one unit and do not convert; `convert` does. `−`, `×`, `·` and `÷` read as `-`, `*`, `*`
-/// and `/`. Spaces outside literals are ignored. A `^` takes an integer exponent from -1000 to 1000.
+/// the one-argument functions `sqrt abs exp ln log10 sin cos tan asin acos atan sinh cosh tanh`, the two-argument
+/// functions `min max atan2 hypot`, the name `pi`, unit literals `[unit text]` and `convert(expr, [unit text])`. A
+/// number followed by a literal is their product (`9.81 [m/s^2]`), and a `^` after that literal applies to the literal
+/// alone (`2 [m]^2` is 2 m²). A literal's text runs to the next `]`, is trimmed of spaces at either end, and is read by
+/// `UnitInfo.parse` against `Model.Catalogue`. `+`, `-`, `min`, `max`, `atan2(y, x)` and `hypot(x, y)` need operands
+/// of one unit and do not convert; `convert` does. `atan2` is dimensionless and `hypot` has its operands' unit.
+/// `exp ln log10` and the trigonometric and hyperbolic functions take a dimensionless argument of any scale, read at
+/// scale 1 as its value times its unit's scale (`sin(30 [deg])` is sin(π/6)), and give a dimensionless result of
+/// scale 1; the inverse functions give radians. `pi` reads π, dimensionless, unless the model or an ancestor declares
+/// an entry `pi`, which it then reads. `−`, `×`, `·` and `÷` read as `-`, `*`, `*` and `/`. Spaces outside literals
+/// are ignored. A `^` takes an integer exponent from -1000 to 1000.
 module Formula =
+    /// The float function and its `Uncertain` counterpart of a one-argument function that takes a dimensionless
+    /// argument at scale 1 and gives a dimensionless result of scale 1.
+    let private pureFunction (name: string) : ((float -> float) * (Uncertain -> Uncertain)) voption =
+        match name with
+        | "exp" -> ValueSome((fun x -> Math.Exp x), (fun u -> Uncertain.Exp u))
+        | "ln" -> ValueSome((fun x -> Math.Log x), (fun u -> Uncertain.Log u))
+        | "log10" -> ValueSome((fun x -> Math.Log10 x), (fun u -> Uncertain.Log10 u))
+        | "sin" -> ValueSome((fun x -> Math.Sin x), (fun u -> Uncertain.Sin u))
+        | "cos" -> ValueSome((fun x -> Math.Cos x), (fun u -> Uncertain.Cos u))
+        | "tan" -> ValueSome((fun x -> Math.Tan x), (fun u -> Uncertain.Tan u))
+        | "asin" -> ValueSome((fun x -> Math.Asin x), (fun u -> Uncertain.Asin u))
+        | "acos" -> ValueSome((fun x -> Math.Acos x), (fun u -> Uncertain.Acos u))
+        | "atan" -> ValueSome((fun x -> Math.Atan x), (fun u -> Uncertain.Atan u))
+        | "sinh" -> ValueSome((fun x -> Math.Sinh x), (fun u -> Uncertain.Sinh u))
+        | "cosh" -> ValueSome((fun x -> Math.Cosh x), (fun u -> Uncertain.Cosh u))
+        | "tanh" -> ValueSome((fun x -> Math.Tanh x), (fun u -> Uncertain.Tanh u))
+        | _ -> ValueNone
+
     let private arity (name: string) : int voption =
         match name with
         | "sqrt"
-        | "abs"
-        | "exp"
-        | "ln"
-        | "log10" -> ValueSome 1
+        | "abs" -> ValueSome 1
         | "min"
-        | "max" -> ValueSome 2
+        | "max"
+        | "atan2"
+        | "hypot" -> ValueSome 2
+        | _ when (pureFunction name).IsSome -> ValueSome 1
         | _ -> ValueNone
 
     /// The largest exponent magnitude of `^`; a larger one is a syntax error.
@@ -329,8 +352,10 @@ module Formula =
         else
             Result.Error(operation + " needs operands of one unit, but met " + describe a + " and " + describe b + ".")
 
+    /// `UnitInfo.dimensionless` for a dimensionless operand of any scale; `Error` naming the function and the unit
+    /// otherwise.
     let private pureNumber (name: string) (u: UnitInfo) : Result<UnitInfo, string> =
-        if UnitInfo.sameUnit u UnitInfo.dimensionless then
+        if UnitInfo.sameDimension u UnitInfo.dimensionless then
             Result.Ok UnitInfo.dimensionless
         else
             Result.Error(name + " needs a dimensionless operand, but met " + describe u + ".")
@@ -378,6 +403,7 @@ module Formula =
         | Name id ->
             match context.Find id with
             | ValueSome entry -> Result.Ok entry.Unit
+            | ValueNone when id = "pi" -> Result.Ok UnitInfo.dimensionless
             | ValueNone -> Result.Error(missingName id)
         | UnitLiteral text -> literalUnit context.Catalogue text
         | Convert(a, text) -> unitOf a |> Result.bind (fun from -> conversion context.Catalogue from text) |> Result.map fst
@@ -391,8 +417,10 @@ module Formula =
             match name, arguments with
             | "sqrt", [ a ] -> unitOf a |> Result.bind (fun u -> guarded (fun () -> UnitInfo.sqrt u))
             | "abs", [ a ] -> unitOf a
-            | ("exp" | "ln" | "log10"), [ a ] -> unitOf a |> Result.bind (pureNumber name)
-            | ("min" | "max"), [ a; b ] -> both (unitOf a) (unitOf b) (oneUnit name)
+            | _, [ a ] when (pureFunction name).IsSome -> unitOf a |> Result.bind (pureNumber name)
+            | ("min" | "max" | "hypot"), [ a; b ] -> both (unitOf a) (unitOf b) (oneUnit name)
+            | "atan2", [ y; x ] ->
+                both (unitOf y) (unitOf x) (oneUnit name) |> Result.map (fun _ -> UnitInfo.dimensionless)
             | _ -> Result.Error(outsideNotation name arguments)
 
     /// The unit of `expr` over the identifiers of `model`, or a message naming the operation and the units it met.
@@ -400,8 +428,11 @@ module Formula =
     /// symbol, as "km^103". A unit literal has the unit `UnitInfo.parse` gives for its text over `model.Catalogue`, and
     /// an `Error` of that parse is prefixed with the literal ("The unit literal [xyz]: …"). `convert(e, [u])` has the
     /// unit u, or the `Error` of `UnitInfo.conversionFactor` from e's unit to u, which names both units: across
-    /// dimensions, and when the quotient of the scales is not finite or is 0. `+`, `-`, `min` and `max` of two units
-    /// that differ in scale alone are an `Error` that names both. Cost: one unit operation per node and one
+    /// dimensions, and when the quotient of the scales is not finite or is 0. `+`, `-`, `min`, `max`, `atan2` and
+    /// `hypot` of two units that differ in scale alone are an `Error` that names both. `exp ln log10` and the
+    /// trigonometric and hyperbolic functions give `UnitInfo.dimensionless` for a dimensionless argument of any scale,
+    /// and an `Error` naming the function and the unit for an argument with a dimension. `pi` is
+    /// `UnitInfo.dimensionless` when `model.TryFind "pi"` is `ValueNone`. Cost: one unit operation per node and one
     /// `UnitInfo.parse` per unit literal.
     let check (model: Model) (expr: Expr) : Result<UnitInfo, string> = checkIn (contextOf model) expr
 
@@ -417,6 +448,44 @@ module Formula =
         |> Result.bind (fun from -> conversion context.Catalogue from text)
         |> Result.map snd
         |> orRaise
+
+    /// The scale of the operand's unit, from the units `check` gives.
+    let private scaleIn (context: Context) (operand: Expr) : float = (checkIn context operand |> orRaise).Scale
+
+    /// √(x² + y²) without the squares of the operands: m·√(1 + (n/m)²) with m = max(|x|, |y|) and n = min(|x|, |y|);
+    /// 0 when m = 0, +∞ when either operand is infinite, NaN when either is NaN otherwise.
+    let private hypot (x: float) (y: float) : float =
+        let ax = Math.Abs x
+        let ay = Math.Abs y
+
+        if Double.IsInfinity ax || Double.IsInfinity ay then
+            Double.PositiveInfinity
+        elif Double.IsNaN ax || Double.IsNaN ay then
+            nan
+        else
+            let m = Math.Max(ax, ay)
+
+            if m = 0.0 then
+                0.0
+            else
+                let r = Math.Min(ax, ay) / m
+                m * Math.Sqrt(1.0 + r * r)
+
+    /// ∂atan2(y, x)/∂y = x/(x² + y²), as (x/h)/h with h = hypot(x, y); NaN at the origin.
+    let private atan2ByY (y: float) (x: float) : float =
+        let h = hypot x y
+        x / h / h
+
+    /// ∂atan2(y, x)/∂x = −y/(x² + y²), as (−y/h)/h with h = hypot(x, y); NaN at the origin.
+    let private atan2ByX (y: float) (x: float) : float =
+        let h = hypot x y
+        -y / h / h
+
+    /// ∂hypot(x, y)/∂x = x/h with h = hypot(x, y); NaN at the origin.
+    let private hypotByX (x: float) (y: float) : float = x / hypot x y
+
+    /// ∂hypot(x, y)/∂y = y/h with h = hypot(x, y); NaN at the origin.
+    let private hypotByY (x: float) (y: float) : float = y / hypot x y
 
     /// `x` to the integer power `n`, by repeated multiplication so both targets round alike.
     let private integerPower (x: float) (n: int) : float =
@@ -436,6 +505,7 @@ module Formula =
             | Name id ->
                 match context.Find id with
                 | ValueSome entry -> entry.Read
+                | ValueNone when id = "pi" -> fun () -> Math.PI
                 | ValueNone -> orRaise (Result.Error(missingName id))
             | UnitLiteral _ -> fun () -> 1.0
             | Convert(a, text) ->
@@ -468,34 +538,40 @@ module Formula =
                 | "abs", [ a ] ->
                     let f = build a
                     fun () -> Math.Abs(f ())
-                | "exp", [ a ] ->
+                | _, [ a ] when (pureFunction name).IsSome ->
+                    let apply, _ = (pureFunction name).Value
                     let f = build a
-                    fun () -> Math.Exp(f ())
-                | "ln", [ a ] ->
-                    let f = build a
-                    fun () -> Math.Log(f ())
-                | "log10", [ a ] ->
-                    let f = build a
-                    fun () -> Math.Log10(f ())
+                    let scale = scaleIn context a
+                    fun () -> apply (f () * scale)
                 | "min", [ a; b ] ->
                     let f, g = build a, build b
                     fun () -> Math.Min(f (), g ())
                 | "max", [ a; b ] ->
                     let f, g = build a, build b
                     fun () -> Math.Max(f (), g ())
+                | "atan2", [ y; x ] ->
+                    let f, g = build y, build x
+                    fun () -> Math.Atan2(f (), g ())
+                | "hypot", [ x; y ] ->
+                    let f, g = build x, build y
+                    fun () -> hypot (f ()) (g ())
                 | _ -> orRaise (Result.Error(outsideNotation name arguments))
 
         build expr
 
     /// A function that evaluates `expr` with tracked reads of the entries of `model`. A unit literal evaluates to 1,
     /// and `convert` multiplies its operand's value by `UnitInfo.conversionFactor` from the operand's unit to the
-    /// literal's, computed when the evaluator is built. Creates no node. Names resolve once, when the evaluator is
-    /// created: an evaluator that outlives the owner of an entry it reads keeps reading that entry's last value and
-    /// does not follow a later declaration of the identifier. Raises `ArgumentException` with the message of `check`
-    /// when `check` of `expr` is an `Error`: for an identifier `model` lacks, for units that do not combine, for a unit
-    /// literal that does not parse over `model.Catalogue`, and for a `Call` outside the notation (only a hand-built
-    /// `Expr` holds one).
-    /// Building costs one `check` of `expr` and one of each conversion's operand.
+    /// literal's, computed when the evaluator is built. `exp ln log10` and the trigonometric and hyperbolic functions
+    /// apply `Math.Exp`, `Math.Sin` and the rest to the argument's value times the scale `check` gives its unit. `pi`
+    /// without an entry evaluates to `Math.PI`. `hypot(x, y)` is m·√(1 + (n/m)²) with m = max(|x|, |y|) and
+    /// n = min(|x|, |y|): 0 when m = 0, +∞ when either operand is infinite, and NaN when either is NaN otherwise.
+    /// Creates no node. Names resolve once, when the evaluator is created: an evaluator that outlives the owner of an
+    /// entry it reads keeps reading that entry's last value and does not follow a later declaration of the identifier.
+    /// Raises `ArgumentException` with the message of `check` when `check` of `expr` is an `Error`: for an identifier
+    /// `model` lacks, for units that do not combine, for a unit literal that does not parse over `model.Catalogue`,
+    /// and for a `Call` outside the notation (only a hand-built `Expr` holds one).
+    /// Building costs one `check` of `expr`, one of each conversion's operand and one of each argument of `exp ln
+    /// log10` and the trigonometric and hyperbolic functions.
     let evaluator (model: Model) (expr: Expr) : unit -> float = evaluatorIn (contextOf model) expr
 
     /// True when the two floats are equal and, at zero, of one sign.
@@ -521,6 +597,9 @@ module Formula =
             | Name id ->
                 match context.Find id with
                 | ValueSome entry -> entry.Measured
+                | ValueNone when id = "pi" ->
+                    let pi = Uncertain.exact Math.PI
+                    fun () -> pi
                 | ValueNone -> orRaise (Result.Error(missingName id))
             | UnitLiteral _ ->
                 let one = Uncertain.exact 1.0
@@ -557,21 +636,24 @@ module Formula =
                 | "abs", [ a ] ->
                     let f = build a
                     fun () -> Uncertain.abs (f ())
-                | "exp", [ a ] ->
+                | _, [ a ] when (pureFunction name).IsSome ->
+                    let _, apply = (pureFunction name).Value
                     let f = build a
-                    fun () -> Uncertain.Exp(f ())
-                | "ln", [ a ] ->
-                    let f = build a
-                    fun () -> Uncertain.Log(f ())
-                | "log10", [ a ] ->
-                    let f = build a
-                    fun () -> Uncertain.Log10(f ())
+                    let scale = scaleIn context a
+                    // u * 1.0 has u's bits; skipping it spares a copy of the contributions.
+                    if scale = 1.0 then fun () -> apply (f ()) else fun () -> apply (f () * scale)
                 | "min", [ a; b ] ->
                     let f, g = build a, build b
                     fun () -> operandOf (fun x y -> Math.Min(x, y)) (f ()) (g ())
                 | "max", [ a; b ] ->
                     let f, g = build a, build b
                     fun () -> operandOf (fun x y -> Math.Max(x, y)) (f ()) (g ())
+                | "atan2", [ y; x ] ->
+                    let f, g = build y, build x
+                    fun () -> Uncertain.map2 (fun y x -> Math.Atan2(y, x)) atan2ByY atan2ByX (f ()) (g ())
+                | "hypot", [ x; y ] ->
+                    let f, g = build x, build y
+                    fun () -> Uncertain.map2 hypot hypotByX hypotByY (f ()) (g ())
                 | _ -> orRaise (Result.Error(outsideNotation name arguments))
 
         build expr
@@ -580,9 +662,12 @@ module Formula =
     /// value has the evaluator's bits, with first-order contributions by source (`Uncertain`). A number and a unit
     /// literal are exact; `convert` multiplies its operand by the evaluator's conversion factor, which carries no
     /// uncertainty; `x^0` is 1 with derivative 0 at every x, 0 included; `min` and `max` give the operand whose value
-    /// `Math.Min` and `Math.Max` give, the first when both have it, and an exact NaN when either value is NaN. Each
-    /// operation costs O(m + n) in its operands' numbers of sources. Creates no node. Names resolve once, when the
-    /// evaluator is created: an evaluator that outlives the owner of an entry it reads keeps reading that entry's last
-    /// value and does not follow a later declaration of the identifier. Raises `ArgumentException` as `evaluator` does,
-    /// and building costs what it does there.
+    /// `Math.Min` and `Math.Max` give, the first when both have it, and an exact NaN when either value is NaN. A
+    /// function of a dimensionless argument multiplies the argument by its unit's scale and applies the function's
+    /// `Uncertain` member (`Uncertain.Sin` and the rest); `pi` without an entry is exact. `atan2(y, x)` has the
+    /// derivatives x/(x² + y²) in y and −y/(x² + y²) in x, and `hypot(x, y)` x/h in x and y/h in y with
+    /// h = hypot(x, y); all four are NaN at the origin. Each operation costs O(m + n) in its operands' numbers of
+    /// sources. Creates no node. Names resolve once, when the evaluator is created: an evaluator that outlives the
+    /// owner of an entry it reads keeps reading that entry's last value and does not follow a later declaration of the
+    /// identifier. Raises `ArgumentException` as `evaluator` does, and building costs what it does there.
     let measuredEvaluator (model: Model) (expr: Expr) : unit -> Uncertain = measuredEvaluatorIn (contextOf model) expr
