@@ -30,7 +30,8 @@ type MonteCarloResult =
 /// scale 1 as its value times its unit's scale (`sin(30 [deg])` is sin(π/6)), and give a dimensionless result of
 /// scale 1; the inverse functions give radians. `pi` reads π, dimensionless, unless the model or an ancestor declares
 /// an entry `pi`, which it then reads. `−`, `×`, `·` and `÷` read as `-`, `*`, `*` and `/`. Spaces outside literals
-/// are ignored. A `^` takes an integer exponent from -1000 to 1000.
+/// are ignored. A `^` takes an integer exponent from -1000 to 1000. Parentheses, a call's and a conversion's included,
+/// nest at most 200 deep.
 module Formula =
     /// The float function and its `Uncertain` counterpart of a one-argument function that takes a dimensionless
     /// argument at scale 1 and gives a dimensionless result of scale 1.
@@ -66,10 +67,13 @@ module Formula =
     let private isLetter (c: char) =
         (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c = '_'
 
-    /// The tree of `text`, or a message with the 1-based character where reading stopped.
+    /// The tree of `text`, or a message with the 1-based character where reading stopped; null reads as "". Deeper
+    /// nesting than 200 levels of parentheses is an `Error` at the 201st opening parenthesis.
     let parse (text: string) : Result<Expr, string> =
+        let text = if isNull text then "" else text
         let length = text.Length
         let pos = ref 0
+        let depth = ref 0
 
         let fail (at: int) (what: string) : 'a =
             raise (FormulaSyntax(what + " at character " + string (at + 1) + "."))
@@ -96,6 +100,15 @@ module Formula =
                 | c -> ValueSome c
 
         let advance () = pos.Value <- pos.Value + 1
+
+        /// Enters the parentheses opened at character `at`; a syntax error beyond `Notation.maxNesting` levels.
+        let enter (at: int) =
+            if depth.Value >= Notation.maxNesting then
+                fail at ("Parentheses nest deeper than " + string Notation.maxNesting + " levels")
+
+            depth.Value <- depth.Value + 1
+
+        let leave () = depth.Value <- depth.Value - 1
 
         let readDigits () : unit =
             while pos.Value < length && isDigit text[pos.Value] do
@@ -213,9 +226,11 @@ module Formula =
             match peek () with
             | ValueSome c when isLetter c -> nameOrCall ()
             | ValueSome '(' ->
+                enter pos.Value
                 advance ()
                 let inner = expr ()
                 close ()
+                leave ()
                 inner
             | ValueSome '[' -> UnitLiteral(literal ())
             | _ -> fail pos.Value (describeAt pos.Value + ": a number, a name, \"(\" or \"[\" is expected")
@@ -245,6 +260,7 @@ module Formula =
 
         /// `convert(expr, [unit text])`, read from the `(` at the current position.
         and conversion () : Expr =
+            enter pos.Value
             advance ()
 
             let malformed () : unit =
@@ -274,6 +290,7 @@ module Formula =
                 malformed ()
 
             advance ()
+            leave ()
             Expr.Convert(operand, unitText)
 
         and close () : unit =
@@ -292,6 +309,7 @@ module Formula =
             match peek () with
             | ValueSome '(' when name = "convert" -> conversion ()
             | ValueSome '(' ->
+                enter pos.Value
                 advance ()
                 let arguments = ResizeArray<Expr>()
                 arguments.Add(expr ())
@@ -301,6 +319,7 @@ module Formula =
                     arguments.Add(expr ())
 
                 close ()
+                leave ()
 
                 match arity name with
                 | ValueNone -> fail start ("\"" + name + "\" is not a function of the notation")
@@ -616,12 +635,14 @@ module Formula =
     /// True when the two floats are equal and, at zero, of one sign.
     let private identical (x: float) (y: float) : bool = x = y && 1.0 / x = 1.0 / y
 
-    /// The operand whose value `pick` gives, the first when both have it; an exact NaN when either value is NaN.
+    /// The operand whose value `pick` gives, the first when both have it; when either value is NaN, NaN with a NaN
+    /// contribution from each source of either operand.
     let private operandOf (pick: float -> float -> float) (a: Uncertain) (b: Uncertain) : Uncertain =
         let x = Uncertain.value a
         let y = Uncertain.value b
 
-        if Double.IsNaN x || Double.IsNaN y then Uncertain.exact nan
+        if Double.IsNaN x || Double.IsNaN y then
+            Uncertain.map2 (fun _ _ -> nan) (fun _ _ -> nan) (fun _ _ -> nan) a b
         elif identical (pick x y) x then a
         else b
 
@@ -701,7 +722,8 @@ module Formula =
     /// value has the evaluator's bits, with first-order contributions by source (`Uncertain`). A number and a unit
     /// literal are exact; `convert` multiplies its operand by the evaluator's conversion factor, which carries no
     /// uncertainty; `x^0` is 1 with derivative 0 at every x, 0 included; `min` and `max` give the operand whose value
-    /// `Math.Min` and `Math.Max` give, the first when both have it, and an exact NaN when either value is NaN. A
+    /// `Math.Min` and `Math.Max` give, the first when both have it, and, when either value is NaN, NaN with a NaN
+    /// contribution from each source of either operand, so that its uncertainty reads NaN, not 0. A
     /// function of a dimensionless argument multiplies the argument by its unit's scale and applies the function's
     /// `Uncertain` member (`Uncertain.Sin` and the rest); `pi` without an entry is exact. `atan2(y, x)` has the
     /// derivatives x/(x² + y²) in y and −y/(x² + y²) in x, and `hypot(x, y)` x/h in x and y/h in y with
@@ -732,7 +754,9 @@ module Formula =
     /// and standard uncertainty, and leaves that share a source move together, linearly in it. `Mean` and
     /// `StandardDeviation` (divisor n − 1) are those of the compensated `Moments` of the draws; `Lower` and `Upper`
     /// are `OrderStatistic.quantileSorted` of the sorted draws at (1 − coverage)/2 and (1 + coverage)/2, the
-    /// probabilistically symmetric coverage interval. A draw that evaluates to NaN gives NaN in every float field.
+    /// probabilistically symmetric coverage interval. A draw that evaluates to NaN, +∞ or −∞ (an overflow, as
+    /// `exp(a)` above a = 709.78) gives NaN in every float field, since the mean and spread of such draws are not
+    /// finite numbers.
     /// `Draws` is `draws`. Two reads with equal leaf values and contributions give equal records.
     ///
     /// The reader creates no node and evaluates inside the node that reads it. A memo over it publishes its record on
@@ -834,7 +858,7 @@ module Formula =
 
                     let y = evaluate ()
 
-                    if Double.IsNaN y then
+                    if Double.IsNaN y || Double.IsInfinity y then
                         defined <- false
 
                     results[d] <- y

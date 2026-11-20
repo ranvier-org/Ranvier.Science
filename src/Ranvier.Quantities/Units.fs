@@ -155,6 +155,12 @@ module internal Notation =
     /// The largest exponent magnitude of `^`, and in unit text of superscript digits; a larger one is a syntax error.
     let maxExponent = 1000
 
+    /// The deepest nesting of parentheses either reader takes, a formula's calls and conversions included; a deeper
+    /// one is a syntax error, so that the recursive readers stay well inside the stack. Without it, `Formula.parse` of
+    /// 100,000 nested parentheses overflowed the stack and ended the process (measured here, 2026-11-20: a `dotnet fsi`
+    /// script calling it against the Release build).
+    let maxNesting = 200
+
     /// `x` to the integer power `n`, by repeated multiplication so both targets round alike. O(|n|).
     let integerPower (x: float) (n: int) : float =
         let mutable product = 1.0
@@ -326,7 +332,8 @@ module UnitInfo =
     ///     exponent := '^' ('-' | '−')? digits | '⁻'? superscript-digits
     ///     sep      := '·' | '*' | '.' | one or more spaces
     ///
-    /// where '/' associates to the left ("J/kg/K" is J·kg⁻¹·K⁻¹) and an exponent has magnitude 0 to 1000. A symbol is the
+    /// where '/' associates to the left ("J/kg/K" is J·kg⁻¹·K⁻¹), an exponent has magnitude 0 to 1000 and parentheses
+    /// nest at most 200 deep (deeper is an `Error` at the 201st opening parenthesis). A symbol is the
     /// longest run of characters that end none of the above (space, `· * . / ( ) ^ [ ] , - − × ÷`, ASCII digits and
     /// superscripts), and the catalogue must find it, by `UnitCatalogue.tryFind`'s rules. Spaces at either end and
     /// around '/', '^' and the parentheses are ignored. Each symbol keeps its written form, after the catalogue's
@@ -353,6 +360,17 @@ module UnitInfo =
         let advance () = pos.Value <- pos.Value + 1
 
         let atChar (c: char) = pos.Value < length && text[pos.Value] = c
+
+        let depth = ref 0
+
+        /// Enters the parentheses opened at character `at`; a syntax error beyond `Notation.maxNesting` levels.
+        let enter (at: int) =
+            if depth.Value >= Notation.maxNesting then
+                fail at ("Parentheses nest deeper than " + string Notation.maxNesting + " levels")
+
+            depth.Value <- depth.Value + 1
+
+        let leave () = depth.Value <- depth.Value - 1
 
         /// The unit `f` gives; raises UnitSyntax with the message of an exception `f` throws, which names no character.
         let arithmetic (f: unit -> UnitInfo) : UnitInfo =
@@ -462,6 +480,7 @@ module UnitInfo =
             if pos.Value >= length then
                 fail pos.Value (describeAt pos.Value + ": a unit symbol, \"1\" or \"(\" is expected")
             elif text[pos.Value] = '(' then
+                enter pos.Value
                 advance ()
                 skip ()
                 let inner = product ()
@@ -469,6 +488,7 @@ module UnitInfo =
 
                 if atChar ')' then
                     advance ()
+                    leave ()
                     inner
                 else
                     fail pos.Value (describeAt pos.Value + ": \")\" is expected")
