@@ -148,6 +148,8 @@ type UnitCatalogue internal (units: Map<string, struct (UnitInfo * bool)>) =
 
                 found
 
+exception internal UnitSyntax of string
+
 module UnitInfo =
     let dimensionless: UnitInfo = { Factors = []; Dimension = Dimension.none; Scale = 1.0 }
 
@@ -293,6 +295,230 @@ module UnitInfo =
                 )
             )
 
+    /// The largest exponent magnitude of `^` or of superscript digits; a larger one is a syntax error.
+    let private maxExponent = 1000
+
+    let private superscriptDigits = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+
+    let private isAsciiDigit (c: char) = c >= '0' && c <= '9'
+
+    let private isMinus (c: char) = c = '-' || c = '−'
+
+    /// Characters that end a symbol: the separators, brackets, operators, digits and the superscripts.
+    let private endsSymbol (c: char) =
+        c = ' '
+        || c = '·' || c = '*' || c = '.' || c = '/' || c = '(' || c = ')' || c = '^'
+        || c = '[' || c = ']' || c = ','
+        || isMinus c
+        || c = '×' || c = '÷'
+        || isAsciiDigit c
+        || c = '⁻'
+        || superscriptDigits.IndexOf c >= 0
+
+    /// The unit written in `text`, read against the catalogue, by the grammar
+    ///
+    ///     product  := factor (sep factor | '/' factor)*
+    ///     factor   := atom exponent?
+    ///     atom     := symbol | '1' | '(' product ')'
+    ///     exponent := '^' ('-' | '−')? digits | '⁻'? superscript-digits
+    ///     sep      := '·' | '*' | '.' | one or more spaces
+    ///
+    /// where '/' associates to the left ("J/kg/K" is J·kg⁻¹·K⁻¹) and an exponent has magnitude 0 to 1000. A symbol is the
+    /// longest run of characters that end none of the above (space, `· * . / ( ) ^ [ ] , - − × ÷`, ASCII digits and
+    /// superscripts), and the catalogue must find it, by `UnitCatalogue.tryFind`'s rules. Spaces at either end and
+    /// around '/', '^' and the parentheses are ignored. Each symbol keeps its written form, after the catalogue's
+    /// look-alike replacement, as a factor's name, so the symbol of "km/h" is "km/h". The error message states the
+    /// 1-based character where reading stopped and, for an unknown symbol, the symbol; a scale that overflows or is 0
+    /// (a product, a quotient or a power) is an `Error` with the message of its `ArithmeticException`. Cost O(n) in the
+    /// length of the text, plus O(|exponent|) for each power.
+    let parse (catalogue: UnitCatalogue) (text: string) : Result<UnitInfo, string> =
+        let text = if isNull text then "" else text
+        let length = text.Length
+        let pos = ref 0
+
+        let fail (at: int) (what: string) : 'a =
+            raise (UnitSyntax(what + " at character " + string (at + 1) + "."))
+
+        let describeAt (at: int) : string =
+            if at >= length then "Unexpected end of the text" else "Unexpected \"" + string text[at] + "\""
+
+        let skip () =
+            while pos.Value < length && text[pos.Value] = ' ' do
+                pos.Value <- pos.Value + 1
+
+        let advance () = pos.Value <- pos.Value + 1
+
+        let atChar (c: char) = pos.Value < length && text[pos.Value] = c
+
+        /// Raises UnitSyntax with the message of an exception thrown by `f`, at character `at`.
+        let arithmetic (f: unit -> UnitInfo) : UnitInfo =
+            let outcome =
+                try
+                    Result.Ok(f ())
+                with e ->
+                    Result.Error e.Message
+
+            match outcome with
+            | Result.Ok u -> u
+            | Result.Error message -> raise (UnitSyntax message)
+
+        /// Reads digits that `value` maps to 0-9 into an exponent magnitude; at least one is needed.
+        let magnitude (value: char -> int) : int =
+            let start = pos.Value
+
+            while pos.Value < length && value text[pos.Value] >= 0 do
+                pos.Value <- pos.Value + 1
+
+            if pos.Value = start then
+                fail pos.Value (describeAt pos.Value + ": an integer exponent is expected")
+
+            let mutable total = 0
+            let mutable tooLarge = false
+
+            for i in start .. pos.Value - 1 do
+                total <- total * 10 + value text[i]
+
+                if total > maxExponent then
+                    tooLarge <- true
+                    total <- maxExponent + 1
+
+            if tooLarge then
+                fail start ("An exponent must be from -" + string maxExponent + " to " + string maxExponent)
+
+            total
+
+        let asciiValue (c: char) = if isAsciiDigit c then int c - int '0' else -1
+        let superscriptValue (c: char) = superscriptDigits.IndexOf c
+
+        let rec product () : UnitInfo =
+            let mutable left = factor ()
+            let mutable more = true
+
+            while more do
+                let before = pos.Value
+                skip ()
+                let spaced = pos.Value > before
+
+                if pos.Value >= length || text[pos.Value] = ')' then
+                    more <- false
+                elif text[pos.Value] = '/' then
+                    advance ()
+                    skip ()
+                    let right = factor ()
+                    let l = left
+                    left <- arithmetic (fun () -> divide l right)
+                elif text[pos.Value] = '·' || text[pos.Value] = '*' || text[pos.Value] = '.' then
+                    advance ()
+                    skip ()
+                    let right = factor ()
+                    let l = left
+                    left <- arithmetic (fun () -> multiply l right)
+                elif spaced then
+                    let right = factor ()
+                    let l = left
+                    left <- arithmetic (fun () -> multiply l right)
+                else
+                    fail pos.Value (describeAt pos.Value + ": an operator or the end of the text is expected")
+
+            left
+
+        and factor () : UnitInfo =
+            let baseUnit = atom ()
+            let afterAtom = pos.Value
+            skip ()
+
+            if atChar '^' then
+                advance ()
+                skip ()
+                let negative = pos.Value < length && isMinus text[pos.Value]
+
+                if negative then
+                    advance ()
+                    skip ()
+
+                let n = magnitude asciiValue
+                let e = if negative then -n else n
+                arithmetic (fun () -> power baseUnit e)
+            else
+                pos.Value <- afterAtom
+
+                if atChar '⁻' || (pos.Value < length && superscriptValue text[pos.Value] >= 0) then
+                    let negative = atChar '⁻'
+
+                    if negative then
+                        advance ()
+
+                    let n = magnitude superscriptValue
+                    let e = if negative then -n else n
+                    arithmetic (fun () -> power baseUnit e)
+                else
+                    baseUnit
+
+        and atom () : UnitInfo =
+            if pos.Value >= length then
+                fail pos.Value (describeAt pos.Value + ": a unit symbol, \"1\" or \"(\" is expected")
+            elif text[pos.Value] = '(' then
+                advance ()
+                skip ()
+                let inner = product ()
+                skip ()
+
+                if atChar ')' then
+                    advance ()
+                    inner
+                else
+                    fail pos.Value (describeAt pos.Value + ": \")\" is expected")
+            elif text[pos.Value] = '1' then
+                advance ()
+                dimensionless
+            elif endsSymbol text[pos.Value] then
+                fail pos.Value (describeAt pos.Value + ": a unit symbol, \"1\" or \"(\" is expected")
+            else
+                let start = pos.Value
+
+                while pos.Value < length && not (endsSymbol text[pos.Value]) do
+                    pos.Value <- pos.Value + 1
+
+                let symbol = text.Substring(start, pos.Value - start)
+
+                match catalogue.TryFind symbol with
+                | ValueSome u -> u
+                | ValueNone -> fail start ("Unknown unit \"" + symbol + "\"")
+
+        try
+            skip ()
+            let result = product ()
+            skip ()
+
+            if pos.Value < length then
+                fail pos.Value (describeAt pos.Value + ": an operator or the end of the text is expected")
+
+            Result.Ok result
+        with UnitSyntax message ->
+            Result.Error message
+
+    let private nameOf (u: UnitInfo) : string =
+        match symbol u with
+        | "" -> "1"
+        | text -> text
+
+    /// `Ok` of `from.Scale / target.Scale`, the number of `target` in one `from`; Error naming both units when their
+    /// dimensions differ or the quotient is not finite or is 0.
+    let conversionFactor (from: UnitInfo) (target: UnitInfo) : Result<float, string> =
+        if from.Dimension <> target.Dimension then
+            Error("Cannot convert " + nameOf from + " to " + nameOf target + ": their dimensions differ.")
+        else
+            let factor = from.Scale / target.Scale
+
+            if Double.IsNaN factor || Double.IsInfinity factor || factor = 0.0 then
+                Error("The factor from " + nameOf from + " to " + nameOf target + " is not positive and finite.")
+            else
+                Ok factor
+
+    /// `Ok` of the value times `conversionFactor`; the same Error. A NaN value gives `Ok NaN`.
+    let convert (from: UnitInfo) (target: UnitInfo) (value: float) : Result<float, string> =
+        conversionFactor from target |> Result.map (fun factor -> value * factor)
+
 /// A unit of measure with the description its values carry at run time.
 [<Sealed>]
 type UnitOf<[<Measure>] 'u> internal (info: UnitInfo) =
@@ -318,6 +544,13 @@ module UnitOf =
             raise (ArgumentOutOfRangeException(nameof scale, "A unit's scale must be positive and finite."))
 
         UnitOf<'u>({ Factors = [ (symbol, 1) ]; Dimension = dimension; Scale = scale })
+
+    /// The value in `target`, as `UnitInfo.convert`: the value times the quotient of the scales. Raises ArgumentException
+    /// when the dimensions differ or the quotient of the scales is not finite or is 0; the message names both units.
+    let convert (from: UnitOf<'u>) (target: UnitOf<'v>) (value: float<'u>) : float<'v> =
+        match UnitInfo.convert from.Info target.Info (float value) with
+        | Ok converted -> LanguagePrimitives.FloatWithMeasure converted
+        | Error message -> raise (ArgumentException(message))
 
     /// The square, as `UnitInfo.power` with exponent 2. Raises ArithmeticException when the square's scale is not
     /// finite or is 0.

@@ -15,6 +15,7 @@ let all =
             testList "FormulaEntryTests.fs" [ Ranvier.Science.Tests.FormulaEntryTests.tests ]
             testList "LifetimeTests.fs" [ Ranvier.Science.Tests.LifetimeTests.tests ]
             testList "CatalogueTests.fs" [ Ranvier.Science.Tests.CatalogueTests.tests ]
+            testList "UnitTextTests.fs" [ Ranvier.Science.Tests.UnitTextTests.tests ]
             testList "AggregateTests.fs" [ Ranvier.Science.Tests.AggregateTests.tests ]
             testList "ToleranceTests.fs" [ Ranvier.Science.Tests.ToleranceTests.tests ]
             testList "UnitsTests.fs" [ Ranvier.Science.Tests.UnitsTests.tests ]
