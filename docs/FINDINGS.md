@@ -308,6 +308,8 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
      `theories/Heap/Ownership.v` (`heap_ownership_guarantees`). A registry kept by cleanups uses what they state; one
      held in `Owner` adds a field to `owner_state` (`CORRESPONDENCE.md`) and to the heap representation.
    - Counters: `create`, `dispose`, `create-on` and `dispose-on`, which create and dispose a root of rows.
+   - **0.2.0:** resolved by I6 in this repository: entries are scoped to their owner and leave the model with it
+     (`LifetimeTests.fs`); the core proposal itself is unchanged.
 7. **Enumeration of a node's sources in release builds.**
    - Offers: a read of the nodes a computation read in its last run, compiled into every build. Today the tracer that
      reports edges is compiled under `RANVIER_TRACE` only (`Ranvier/src/Ranvier/Trace.fs`, line 5), and a computation's
@@ -333,6 +335,24 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
    - Under the Expecto shim, `Expect.throwsT` for a `System` exception type accepts any exception, so the exception
      types the plans named are pinned on .NET only (*from documentation*: `docs/PROBES.md`, "Limits of the JavaScript
      suite", which reads `tests/Ranvier.Science.Tests.Fable/Expecto.fs`, 138-147).
+9. **The Fable compiler: `abs` on a non-numeric type compiles to `Math.abs` (Fickl 0.10.1, Fable 5.27).**
+   - Observed: F#'s `abs u` on a type with an `Abs` static member, `Uncertain` here, compiles to `Math.abs(u)` and
+     returns NaN, with no error and no warning (*measured here*, 2026-11-20: the generated call site
+     `["abs", (u_13) => Math.abs(u_13), ...]` and the first mocha run of `UncertainTests.fs`, Plan T1, Task 5).
+   - Where: Fable's `src/Fable.Transforms/Replacements.fs`, function `operators`, case `"Abs"`: a non-numeric argument
+     goes to `math`, which emits `Math.abs`, whereas the case `"Acos" | … | "Sqrt" | … | "Tanh"` sends it to `applyOp`,
+     which finds the type's static member (*from documentation*: that file on `main`, read 2026-11-20).
+   - Workaround here: `Uncertain.abs` (`src/Ranvier.Numerics/Uncertain.fs`), which library and test code call on both
+     targets.
+10. **The Fable compiler: struct tuples in an array pattern read 0 (Fickl 0.10.1, Fable 5.27).**
+    - Observed: `match xs with | [| struct (a, b); struct (c, d) |] -> …` compiles to
+      `const first = (new FSharpRef(() => matchValue[0], …))[0] | 0;`, which indexes a `FSharpRef` object and gives 0,
+      with no error and no warning (*measured here*, 2026-11-20: the failure `p's source first. Expected: 13
+      Actual: 0` in the first mocha run of `UncertainTests.fs`, Plan T1, Task 5). The cause in Fable was not read.
+    - Where: test code matching `Uncertain.contributions`, an array of `struct (int * float)`. Matching one element
+      (`| [| one |] -> let struct (id, c) = one`), comparing whole struct-tuple arrays and a lambda with a struct-tuple
+      parameter compile correctly (*measured here*, 2026-11-20, same run).
+    - Workaround here: project the array first, `Array.map (fun struct (id, _) -> id)`.
 
 ## 3. Interfaces to change before widening
 
@@ -340,21 +360,25 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
    (`src/Ranvier.Quantities/Units.fs`, 148 and 152-153); the formula checker uses the second (D3). Two rules answer one
    question. `equivalent` scales its tolerance by the second argument only, so the two argument orders can differ at the
    boundary, and no test sits at the boundary (Plan 2, Task 2's deferred minors).
+   **0.2.0:** resolved (I1: `UnitInfo.sameUnit` is the one rule and `equivalent` is removed; test `sameUnit at the relative bound, in both orders`, `UnitsTests.fs`).
 2. **The burn-in of the confidence sequence.** `ConfidenceSequence.ofMomentsAfter` takes the burn-in from each caller;
    the page passes `Monitor.BurnIn`, 30, and filters the band's samples by it separately (`Monitor.fs`, 121, 178 and
    348). Over the coverage test's 2,000 streams, read from t = 1 the sequence's miss fraction is 1.0, and from t ≥ 30
    it is 0.0415 (*measured here*: `docs/PROBES.md`, "Coverage"); coverage is known at two settings only (section 7).
    Before widening, the burn-in belongs with the sequence, with its coverage stated per setting.
+   **0.2.0:** resolved (I4: `SequenceSettings` and `ConfidenceSequence.interval`; coverage per setting is stated in the module's remarks; the two coverage tests, `the sequence covers under continuous monitoring and the fixed-sample interval does not` and `the sequence covers at the page's setting`, `ConfidenceSequenceTests.fs`).
 3. **The re-fold floor.** `FloatPolicy.withRefoldFloor` is 0 under `standard` and `fast`, and the page sets 64
    (`docs/PROBES.md`, "Raising from `subtract`"). A caller that sets no floor gets a re-fold on every read from a small
    aggregate whose rows all change (Q2). The drift test bounds the distance between re-folds at floor 0 (at most 2 ulp,
    *measured here*: `docs/measurements/aggregates.md`); at the page's floor its test bounds the re-fold count, not a
    distance in ulps. Before widening, decide whether `standard` carries a floor of its own and what bound holds between
    re-folds under it.
+   **0.2.0:** resolved (I3: `FloatPolicy.standard` carries `RefoldFloor = 64` with its measured bound; test `between re-folds under the standard floor a small sum stays within 2 ulp of the from-scratch fold`, `AggregateTests.fs`).
 4. **A quantity's unit is fixed at compile time and a formula's unit is known at run time.** `Quantity<'u>` carries an
    F# unit of measure; a formula's result is a `Memo<float>` with a `UnitInfo` beside it (Q3, item 4). A formula result
    is therefore no entry: no other formula, table or catalogue can read it as a quantity. A quantity typed by its
    run-time unit, with the F# measure as an optional view, would serve both.
+   **0.2.0:** resolved (I5: `Quantity.formula` declares a formula as an entry and `Quantity.view` gives it an F# measure; `FormulaEntryTests.fs`).
 5. **A model's entries outlive their nodes.** A model keeps every entry with no removal, and a second declaration of an
    identifier raises (`Model.fs`, 74-87). A disposed memo answers reads with its last value, and a failed one keeps its
    failure; the F# code gives the type's default for a memo that never ran (*from documentation*:
@@ -362,26 +386,34 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
    last value, or keeps its failure. The tracked pages build a new model per mount to avoid the raise (Plan 3's
    second-creation check). A page that mounts and unmounts, or a reload under the `dev` host, meets one or the other: a
    raise on re-declaration, or stale entries in a model kept from before (section 2, entry 6).
+   **0.2.0:** resolved (I6: entries are scoped to their owner and leave the model with it; `LifetimeTests.fs`).
 6. **The tracked pages repeat drawing code because the originals' helpers take a control row.** The original pages'
    drawing helpers take the page's `float[]` row and the plan forbade changing an original expression, so the drawing
    was written again against the nodes: `PagesTracked.fs` 59-108 and 163-176 (Decay), 234-259 and 296-347 (Attitude)
    (rulings P3-4, P3-9, P3-12). Every further port would repeat its page's drawing in the same way. Helpers that take
    values, not a row, would serve the original and the tracked page alike. The `Page` record keeps its row arguments,
    which the tracked pages ignore (the design, §8).
+   **0.2.0:** not applicable (the AstroShowcase pages left this repository on 2026-11-20).
 7. **What Plan 2 and Tasks 3 and 4 recorded.**
    - The page's record needed fields the plan did not give it: `Internals`, for the functions that act on the channels
      (R-N), and `Schema` (R-AD); the native session needed the graph (`Session.Graph`, R-S).
+      **0.2.0:** deferred (the delivery layer is a non-goal of 0.2.0).
    - The view's list construct takes an array, so the page reads the core's projection into an array, sorts it, and the
      view builds a second projection over the same keys (*from documentation*: `docs/PROBES.md`, "The core's
      projection read into an array for the view's `each`"). An `each` over a core projection would remove both.
+      **0.2.0:** deferred (the delivery layer is a non-goal of 0.2.0).
    - `Ranvier.D5.View` attaches seven listeners to every mark, so the chart keeps its mark keys fixed per channel
      (*from documentation*: `docs/PROBES.md`, "A mark that comes or goes costs a page update").
+      **0.2.0:** deferred (the delivery layer is a non-goal of 0.2.0).
    - `Run` has no counterpart of `Flow.Reset ()`, which the three-body page calls when it is left; its port needs a run
      created in the page's own owner (*from documentation*: `docs/PROBES.md`, "`Flow.Reset ()`").
+      **0.2.0:** deferred (`Run.ode`, §8.7, adds no reset).
    - A unit's scale is not checked for overflow through large or nested powers (`UnitInfo.power`; ruling R-L, left to
      the final review).
+      **0.2.0:** resolved (I2; test `a scale that overflows or vanishes raises`, `UnitsTests.fs`).
    - The tracked Attitude page's chart frame is one module-level value that reads no node, since nothing in it depends
      on a control (Task 4).
+      **0.2.0:** not applicable (the AstroShowcase pages left this repository on 2026-11-20).
 
 ## 4. The cost of adding a key
 
