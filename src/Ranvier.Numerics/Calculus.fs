@@ -140,10 +140,13 @@ module Integrate =
     /// converged result that is wrong by the whole integral; callers split the interval at such features. With both
     /// tolerances 0, or below about 50 · 2⁻⁵² · (the integral of |f|), the panel limit is always reached.
     ///
-    /// An infinite bound maps to (0, 1] with the infinite end at t = 0 (QUADPACK `dqagi`): [a, ∞) by x = a + (1 − t)/t,
-    /// (−∞, b] by x = b − (1 − t)/t, and (−∞, ∞) as f(x) + f(−x) with x = (1 − t)/t, each integrand multiplied by 1/t².
-    /// A node whose x is infinite contributes 0, so algebraic tails such as (1 + x)^−1.5 converge by bisecting at
-    /// t = 0. For b less than a the result is the negated integral over [b, a]. For a = b the result is 0, converged, with no evaluation. A NaN bound, or a NaN from the function, stops
+    /// An infinite bound maps to (0, 1] with the infinite end at t = 0 (QUADPACK `dqagi` half-line transform): [a, ∞) by
+    /// x = a + (1 − t)/t, (−∞, b] by x = b − (1 − t)/t, each integrand multiplied by 1/t². A node whose x is infinite
+    /// contributes 0, so algebraic tails such as (1 + x)^−1.5 converge by bisecting at t = 0. The whole line (−∞, ∞) is
+    /// the sum of the two half-line integrals, run as two starting panels that share the 200-panel limit and the
+    /// convergence test; it is the improper integral, not the principal value, so an odd integrand whose halves
+    /// diverge, such as x, reports `Converged = false`. For b less than a the result is the negated integral over
+    /// [b, a]. For a = b the result is 0, converged, with no evaluation. A NaN bound, or a NaN from the function, stops
     /// the integration at once with a NaN `Value` and `Converged = false`. A negative or NaN tolerance raises
     /// `ArgumentOutOfRangeException`.
     let adaptive (absolute: float) (relative: float) (f: float -> float) (a: float) (b: float) : Integral =
@@ -192,28 +195,40 @@ module Integrate =
                 elif not (Double.IsInfinity hi) then
                     (fun (t: float) -> finiteOrZero f (hi - (1.0 - t) / t) / (t * t)), 0.0, 1.0
                 else
-                    (fun (t: float) ->
+                    // The whole line: s in (−1, 0) is the half-line x = −(1 − t)/t and s in (0, 1) the half-line
+                    // x = (1 − t)/t, with t = |s|; two starting panels meet at s = 0, the infinite end of both.
+                    (fun (s: float) ->
+                        let t = abs s
                         let x = (1.0 - t) / t
-                        (finiteOrZero f x + finiteOrZero f -x) / (t * t)),
-                    0.0,
+                        finiteOrZero f (if s < 0.0 then -x else x) / (t * t)),
+                    -1.0,
                     1.0
+
+            let split = Double.IsInfinity lo && Double.IsInfinity hi
 
             let pa = Array.zeroCreate<float> maximumPanels
             let pb = Array.zeroCreate<float> maximumPanels
             let pv = Array.zeroCreate<float> maximumPanels
             let pe = Array.zeroCreate<float> maximumPanels
-            let mutable count = 1
-            let mutable evaluated = 1
-            pa[0] <- ta
-            pb[0] <- tb
-            let struct (v0, e0) = qk15 g ta tb
-            pv[0] <- v0
-            pe[0] <- e0
-            let mutable nanSeen = Double.IsNaN v0 || Double.IsNaN e0
+            let mutable count = 0
+            let mutable evaluated = 0
+            let mutable nanSeen = false
+
+            for (x0, x1) in (if split then [ (-1.0, 0.0); (0.0, 1.0) ] else [ (ta, tb) ]) do
+                if not nanSeen then
+                    let struct (v0, e0) = qk15 g x0 x1
+                    evaluated <- evaluated + 1
+                    pa[count] <- x0
+                    pb[count] <- x1
+                    pv[count] <- v0
+                    pe[count] <- e0
+                    count <- count + 1
+                    nanSeen <- Double.IsNaN v0 || Double.IsNaN e0
+
             let mutable converged = false
             let mutable fin = nanSeen
-            let mutable value = v0
-            let mutable error = e0
+            let mutable value = nan
+            let mutable error = nan
 
             while not fin do
                 value <- 0.0
@@ -364,8 +379,7 @@ module Integrate =
     /// Integral of the function over [a, b] by the n-point Gauss–Legendre rule, exact for polynomials up to degree
     /// 2n − 1. The nodes and weights are computed on each call by Newton's method on the Legendre polynomial Pₙ from
     /// cos(π(i − ¼)/(n + ½)), with the weights taken from a double-double evaluation of Pₙ₋₁; the cost is O(n²) for them
-    /// plus n evaluations. For b less than a the result is negated. A NaN
-    /// bound or integrand gives NaN. Fewer than one point raises `ArgumentOutOfRangeException`.
+    /// plus n evaluations. For b less than a the result is negated. A NaN bound or integrand gives NaN. Fewer than one point raises `ArgumentOutOfRangeException`.
     let gaussLegendre (points: int) (f: float -> float) (a: float) (b: float) : float =
         if points < 1 then
             raise (

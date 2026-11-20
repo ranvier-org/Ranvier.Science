@@ -92,6 +92,17 @@ let tests =
                     (fun e -> Expect.equal e.Message "boom" "propagated unchanged")
             }
 
+            test "the whole line is the improper integral, not the principal value" {
+                let whole (f: float -> float) =
+                    Integrate.adaptive absolute relative f Double.NegativeInfinity Double.PositiveInfinity
+
+                Expect.isFalse (whole (fun x -> x)).Converged "x diverges"
+                Expect.isFalse (whole (fun x -> x / (1.0 + x * x))).Converged "x/(1 + x²) diverges"
+                let odd = whole (fun x -> x * exp (-(x * x)))
+                Expect.isTrue odd.Converged "x e^(−x²) converges"
+                Expect.isLessThanOrEqual (abs odd.Value) absolute "x e^(−x²) is odd, so 0"
+            }
+
             test "a NaN in a later panel stops the integration" {
                 let r = Integrate.adaptive absolute relative (fun x -> if x < 1e-3 then nan else 1.0 / sqrt x) 0.0 1.0
                 Expect.isTrue (Double.IsNaN r.Value) "NaN value"
