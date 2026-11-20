@@ -676,6 +676,24 @@ let tests =
                     let x = Special.betaRegularizedInverse a b p
                     let at = sprintf "a = %.17g, b = %.17g, p = %.17g, x = %.17g" a b p x
                     expectClose 1e-12 0.0 p (Special.betaRegularized a b x) at
+
+                // Tiny shapes, where the starting point as first written cancelled to 0 or fell below 0 (the review of
+                // this task). The roots, by mpmath bisection, are normal doubles: 0.9, 0.9, 0.2264, 0.00244, ½ and
+                // 1.35e-48. For a tiny a with p near 1, I_x(a, b) is so flat that doubles far from the root meet the
+                // bound as well.
+                for a, b, p in
+                    [
+                        0.3, 7e-19, 3.6083087287046146e-18
+                        0.3, 6.999999999999999e-300, 3.608308728704614e-299
+                        1e-17, 0.1, 0.9999999999999999
+                        7e-18, 0.1, 0.9999999999999999
+                        6.999999999999999e-17, 0.001, 0.99999999999993
+                        1e-19, 0.001, 0.9999999999999999
+                    ] do
+                    let x = Special.betaRegularizedInverse a b p
+                    let at = sprintf "a = %.17g, b = %.17g, p = %.17g, x = %.17g" a b p x
+                    Expect.isTrue (x >= 2.2250738585072014e-308) ("the result is a normal double " + at)
+                    expectClose 1e-12 0.0 p (Special.betaRegularized a b x) at
             }
 
             test "the beta inverse near 1 for b below 1" {
@@ -688,6 +706,9 @@ let tests =
                         1.8616811097043242, 0.005844168300205897, 0.1799916473362808
                         351.6137553093089, 0.018377542727907845, 0.23162757870093953
                         1000.0, 0.5, 0.9999999999
+                        // The review's case where the starting point as first written cancelled to 0; the root,
+                        // 0.99999989633 by mpmath bisection, lies where adjacent doubles step I by 80 times the bound.
+                        7.236969982398896, 1.3670246232982652e-19, 1.858652750036213e-18
                     ] do
                     let x = Special.betaRegularizedInverse a b p
                     let at = sprintf "a = %.17g, b = %.17g, p = %.17g, x = %.17g" a b p x

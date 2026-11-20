@@ -909,7 +909,7 @@ module Special =
     /// a ≤ 0, b ≤ 0, a or b is +∞, or x is outside [0, 1], even with another argument NaN. Relative error at most 1e-12
     /// over 0 < a, b ≤ 1000 where I_x(a, b) ≥ 1e-300, pinned by the `Special` tests against
     /// `tests/reference/special.py` (measured here). Cost: a continued fraction of at most 10 000 steps, and for b < 1
-    /// a series of as many terms, NaN past them; a dense scan of a, b ≤ 1000 took at most 92 steps and 53 terms
+    /// a series of as many terms, NaN past them; a dense scan of a, b ≤ 1000 took at most 92 steps and 54 terms
     /// (measured here).
     let betaRegularized (a: float) (b: float) (x: float) : float =
         checkBetaShapes a b
@@ -931,9 +931,11 @@ module Special =
     /// is a/(a + b e^(2w)), with w from the normal quantile of p (Abramowitz and Stegun 26.5.22, the quantile by
     /// 26.2.22), held to bounds of the root: for p < ½ to at least (p a B(a, b))^(1/a), since
     /// I_x(a, b) ≤ xᵃ/(a B(a, b)) when b ≥ 1, and for p ≥ ½ to at most 1 − ((1 − p) b B(a, b))^(1/b), since
-    /// 1 − I_x(a, b) ≤ (1 − x)ᵇ/(b B(a, b)) when a ≥ 1. Otherwise, with w = (a/(a + b))ᵃ/a + (b/(a + b))ᵇ/b, it is
-    /// (a w p)^(1/a) when p < (a/(a + b))ᵃ/(a w), and 1 − (b w (1 − p))^(1/b) above. A starting point that rounds to 1
-    /// becomes the largest double below 1.
+    /// 1 − I_x(a, b) ≤ (1 − x)ᵇ/(b B(a, b)) when a ≥ 1. Otherwise, with w = t + u for t = (a/(a + b))ᵃ/a and
+    /// u = (b/(a + b))ᵇ/b, it is (a w p)^(1/a) when p < t/w, and 1 − (b w (1 − p))^(1/b) above, both formed in
+    /// logarithms: ln(a w) = a ln(a/(a + b)) + ln(1 + u/t), ln(b w) = b ln(b/(a + b)) + ln(1 + t/u), and the second as
+    /// −(e^((ln(b w) + ln(1 − p))/b) − 1) by `expm1`, so that a tiny shape neither cancels the start to 0 nor pushes
+    /// it below 0. The starting point is held to [5e-324, 1 − 2⁻⁵³].
     let private betaInverseGuess (a: float) (b: float) (p: float) : float =
         let x =
             if a >= 1.0 && b >= 1.0 then
@@ -956,31 +958,39 @@ module Special =
                 else
                     min normal (1.0 - Math.Exp ((Math.Log (1.0 - p) + Math.Log b + lnB) / b))
             else
-                let t = Math.Exp (a * Math.Log (a / (a + b))) / a
-                let u = Math.Exp (b * Math.Log (b / (a + b))) / b
-                let w = t + u
+                let lnA = Math.Log a
+                let lnB = Math.Log b
+                let lnC = Math.Log (a + b)
+                let atLn = a * (lnA - lnC) // ln(a t)
+                let buLn = b * (lnB - lnC) // ln(b u)
+                let ratioLn = (atLn - lnA) - (buLn - lnB) // ln(t/u)
+                // ln(1 + e^z), without overflow.
+                let softplus (z: float) = if z > 0.0 then z + log1p (Math.Exp (-z)) else log1p (Math.Exp z)
 
-                if p < t / w then
-                    Math.Pow (a * w * p, 1.0 / a)
+                if p < 1.0 / (1.0 + Math.Exp (-ratioLn)) then
+                    Math.Exp ((atLn + softplus (-ratioLn) + Math.Log p) / a)
                 else
-                    1.0 - Math.Pow (b * w * (1.0 - p), 1.0 / b)
+                    -(expm1 ((buLn + softplus ratioLn + log1p (-p)) / b))
 
-        if x >= 1.0 then 0.9999999999999999 else x // 1 − 2⁻⁵³
+        if x > 0.9999999999999999 then 0.9999999999999999 // 1 − 2⁻⁵³
+        elif x >= 5e-324 then x
+        else 5e-324
 
     /// The x in [0, 1] with I_x(a, b) = p, for a, b > 0 finite and 0 ≤ p ≤ 1: 0 at p = 0, 1 at p = 1, NaN when a, b or
     /// p is NaN. Raises `ArgumentOutOfRangeException` when a ≤ 0, b ≤ 0, a or b is +∞, or p is outside [0, 1], even
     /// with another argument NaN. From the starting point of Numerical Recipes, 3rd edition, §6.14.1 (`invbetai`, from
-    /// documentation), held to bounds of the root in the tails, it takes Halley steps on I_x(a, b) − p, or Newton steps
-    /// on ln I_x(a, b) against ln x while p < ½ and I_x(a, b) is off p by more than a factor e, and halves the distance
-    /// to 0 or 1 where a step would leave (0, 1). It stops when a step is below 1e-15 of the distance from x to the
-    /// nearer end of (0, 1) or below 2⁻⁵² x, when a step below 1e-9 of that distance is no smaller than the one
-    /// before, when I_x(a, b) is within 1e-14 p of p, or after 100 steps. It gives 0 where the starting point
-    /// underflows, 1 where the root lies above the largest double below 1, and NaN where `betaRegularized` gives NaN
-    /// on the way. I_x(a, b) at the result is within relative 1e-12 of p over 0 < a, b ≤ 1000 where the result is a
-    /// normal double and the doubles beside the root resolve p; near 1 for b < 1, where I_x(a, b) can step by more than
-    /// 1e-12 p between adjacent doubles, the root lies within one double of the result. Both are pinned by the
-    /// `Special` tests, and a dense scan found the root below the least positive double wherever the result was 0
-    /// (measured here). Cost: at most 100 evaluations of `betaRegularized`; the scan took at most 12 (measured here).
+    /// documentation), held to bounds of the root in the tails and to [5e-324, 1 − 2⁻⁵³], it takes Halley steps on
+    /// I_x(a, b) − p, or, for p < ½, Newton steps on ln I_x(a, b) against ln x where I_x(a, b) is off p by more than a
+    /// factor e or the Halley step would leave (0, 1), and halves the distance to 0 or 1 where a step would still leave
+    /// (0, 1). It stops when a step is below 1e-15 of the distance from x to the nearer end of (0, 1) or below 2⁻⁵² x,
+    /// when a step below 1e-9 of that distance is no smaller than the one before, when I_x(a, b) is within 1e-14 p of
+    /// p (keeping that last step only inside (0, 1)), or after 100 steps. It gives 0 only where I_x(a, b) exceeds p at
+    /// the least positive double, 1 only where I_x(a, b) falls short of p at the largest double below 1, and NaN only
+    /// where `betaRegularized` gives NaN at a step. I_x(a, b) at the result is within relative 1e-12 of p over
+    /// 0 < a, b ≤ 1000 where the root is a normal double and the doubles beside it resolve p; near 1 for b < 1, where
+    /// I_x(a, b) can step by more than 1e-12 p between adjacent doubles, the root lies within one double of the
+    /// result. Both are pinned by the `Special` tests and a dense scan with shapes from 5e-324 to 1000 (measured here).
+    /// Cost: at most 100 evaluations of `betaRegularized`; the scan took at most 15 (measured here).
     let betaRegularizedInverse (a: float) (b: float) (p: float) : float =
         checkBetaShapes a b
 
@@ -1012,32 +1022,46 @@ module Special =
                     let error = value - p
                     let logRatio = Math.Log (value / p)
 
-                    let step =
-                        if p < 0.5 && value > 0.0 && factor > 0.0 && abs logRatio > 1.0 then
-                            // d ln I/d ln x = xI′/I = F/((1 − x)I), with F = xᵃ(1 − x)ᵇ/B(a, b).
-                            x - x * Math.Exp (-logRatio * y * value / factor)
+                    // With F = xᵃ(1 − x)ᵇ/B(a, b), I′ = F/(x(1 − x)) and I″/I′ = (a − 1)/x − (b − 1)/(1 − x), the
+                    // Halley step u/(1 − ½uI″/I′) for u = (I − p)/I′, written with r = (I − p)/F so that x and 1 − x
+                    // are only factors. Where F underflows, r is infinite and the step takes the sign of r.
+                    let r = error / factor
+                    let halley = r * x * y / (1.0 - 0.5 * min 1.0 (r * ((a - 1.0) * y - (b - 1.0) * x)))
+
+                    let halleyNext =
+                        if Double.IsNaN halley && not (Double.IsNaN r) then
+                            (if r > 0.0 then -infinity else infinity)
                         else
-                            // With I′ = F/(x(1 − x)) and I″/I′ = (a − 1)/x − (b − 1)/(1 − x), the Halley step
-                            // u/(1 − ½uI″/I′) for u = (I − p)/I′, written with r = (I − p)/F so that x and 1 − x are
-                            // only factors. Where F underflows, r is infinite and the step takes the sign of r.
-                            let r = error / factor
-                            let halley = r * x * y / (1.0 - 0.5 * min 1.0 (r * ((a - 1.0) * y - (b - 1.0) * x)))
+                            x - halley
 
-                            if Double.IsNaN halley && not (Double.IsNaN r) then
-                                (if r > 0.0 then infinity else -infinity)
-                            else
-                                halley
+                    let next =
+                        if
+                            p < 0.5
+                            && value > 0.0
+                            && factor > 0.0
+                            && (abs logRatio > 1.0 || not (halleyNext > 0.0 && halleyNext < 1.0))
+                        then
+                            // d ln I/d ln x = xI′/I = F/((1 − x)I).
+                            x * Math.Exp (-logRatio * y * (value / factor))
+                        else
+                            halleyNext
 
-                    let next = x - step
-                    x <- if next <= 0.0 then 0.5 * x elif next >= 1.0 then 0.5 * (x + 1.0) else next
-                    let size = abs step
-                    let nearer = min x (1.0 - x)
+                    let size = abs (x - next)
 
-                    finished <-
-                        size < max (1e-15 * nearer) (max (2.220446049250313e-16 * x) 1e-323) // 2⁻⁵² x
-                        || (size < 1e-9 * nearer && size >= previous)
-                        || abs error <= 1e-14 * p
+                    if abs error <= 1e-14 * p then
+                        // Within the noise of I: the last step stands only where it stays inside (0, 1).
+                        if next > 0.0 && next < 1.0 then
+                            x <- next
 
-                    previous <- size
+                        finished <- true
+                    else
+                        x <- if next <= 0.0 then 0.5 * x elif next >= 1.0 then 0.5 * (x + 1.0) else next
+                        let nearer = min x (1.0 - x)
+
+                        finished <-
+                            size < max (1e-15 * nearer) (max (2.220446049250313e-16 * x) 1e-323) // 2⁻⁵² x
+                            || (size < 1e-9 * nearer && size >= previous)
+
+                        previous <- size
 
             x
