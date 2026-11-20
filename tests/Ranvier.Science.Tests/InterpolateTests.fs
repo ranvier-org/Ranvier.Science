@@ -123,4 +123,69 @@ let tests =
                         Expect.isTrue (Double.IsNaN(Interpolant.derivative f 3.5)) (sprintf "%s %g: derivative far from the bad y" name bad)
                         Expect.isTrue (Double.IsNaN(Interpolant.evaluate f 4.0)) (sprintf "%s %g: last knot" name bad)
             }
+
+            test "non-finite xs and overflowing widths raise" {
+                for name, make in kinds do
+                    let raises (what: string) (xs: float[]) =
+                        Expect.throwsT<ArgumentException> (fun () -> make xs [| 0.; 2. |] |> ignore) (name + ": " + what)
+
+                    raises "infinite last x" [| 0.; infinity |]
+                    raises "infinite first x" [| -infinity; 0. |]
+                    raises "width overflows" [| -1e308; 1e308 |]
+            }
+
+            test "equality with a non-finite y" {
+                let xs = [| 0.; 1.; 2. |]
+
+                for name, make in kinds do
+#if !FABLE_COMPILER
+                    // Float equality makes a NaN y unequal to itself on .NET; Fable compares a value with itself as equal.
+                    let withNaN = make xs [| 0.; nan; 1. |]
+                    Expect.isFalse (withNaN = withNaN) (name + ": NaN y")
+#endif
+                    let withInf = make xs [| 0.; infinity; 1. |]
+                    Expect.isTrue (withInf = make xs [| 0.; infinity; 1. |]) (name + ": infinite y")
+            }
+
+            test "extreme spacing gives the unscaled interpolant" {
+                let baseXs = [| 0.; 1.; 2.5; 3.; 4.2 |]
+                let ys = [| 1.3; -0.4; 2.2; 0.9; 1.7 |]
+                let fractions = [| 0.1; 0.5; 1.0; 1.7; 2.5; 2.75; 3.0; 3.6; 4.1 |]
+
+                for name, make in kinds do
+                    let reference = make baseXs ys
+
+                    for scale in [ 1e-300; 1e-160; 1e300 ] do
+                        let scaled = make (baseXs |> Array.map (fun x -> x * scale)) ys
+                        let label = sprintf "%s at scale %g" name scale
+
+                        for k in 0 .. baseXs.Length - 1 do
+                            Expect.equal (Interpolant.evaluate scaled (baseXs[k] * scale)) ys[k] (sprintf "%s: knot %d" label k)
+
+                        for f in fractions do
+                            expectClose 1e-13 1e-13 (Interpolant.evaluate reference f) (Interpolant.evaluate scaled (f * scale)) (sprintf "%s: value at %g" label f)
+                            expectClose 1e-13 1e-13 (Interpolant.derivative reference f) (Interpolant.derivative scaled (f * scale) * scale) (sprintf "%s: slope at %g" label f)
+            }
+
+            test "monotone cubic takes the mean and the scaling branches" {
+                // Secants 1, 99, 1: each interior slope is the mean 50, and both outer intervals have
+                // alpha^2 + beta^2 = 1 + 2500 > 9, so their slope pairs are scaled by tau = 3 / sqrt 2501.
+                let f = Interpolate.monotoneCubic [| 0.; 1.; 2.; 3. |] [| 0.; 1.; 100.; 101. |]
+                let tau = 3.0 / sqrt 2501.0
+                expectClose 1e-14 1e-14 tau (Interpolant.derivative f 0.0) "slope at 0 is tau"
+                expectClose 1e-14 1e-14 (50.0 * tau) (Interpolant.derivative f 1.0) "slope at 1 is 50 tau"
+                expectClose 1e-14 1e-14 (50.0 * tau) (Interpolant.derivative f 2.0) "slope at 2 is 50 tau"
+                expectClose 1e-14 1e-14 tau (Interpolant.derivative f 3.0) "slope at 3 is tau"
+
+                let values = Array.init 3001 (fun k -> Interpolant.evaluate f (3.0 * float k / 3000.0))
+
+                for k in 1..3000 do
+                    Expect.isTrue (values[k] >= values[k - 1]) (sprintf "non-decreasing at step %d" k)
+
+                Expect.isTrue (values |> Array.forall (fun v -> v >= 0.0 && v <= 101.0)) "within the data range"
+
+                // Secants 1 and 2: the interior slope is the mean 1.5 and alpha^2 + beta^2 = 3.25 <= 9 leaves it alone.
+                let g = Interpolate.monotoneCubic [| 0.; 1.; 2. |] [| 0.; 1.; 3. |]
+                Expect.equal (Interpolant.derivative g 1.0) 1.5 "mean slope without scaling"
+            }
         ]

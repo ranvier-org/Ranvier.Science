@@ -10,15 +10,16 @@ type InterpolationKind =
 
 /// A piecewise interpolant through knots (x, y), made by `Interpolate.linear`, `Interpolate.naturalCubic` or
 /// `Interpolate.monotoneCubic`. Immutable; it holds copies of the arrays it was built from. `=` compares the kind, the
-/// knots and the per-knot coefficients with float equality, so two interpolants built from equal arrays are equal, and
-/// one built from a NaN or infinite y equals nothing. Built from a y that is NaN or infinite, it evaluates and
-/// differentiates to NaN everywhere.
+/// knots and the per-knot coefficients with float equality, so two interpolants built from equal arrays are equal. One
+/// built from a NaN y is, on .NET, not `=` to anything, itself included, as NaN is not (under Fable the same value
+/// compared with itself was equal, measured here by the mocha run of InterpolateTests); one built from an infinite y
+/// compares as its arrays do. Built from a y that is NaN or infinite, it evaluates and differentiates to NaN everywhere.
 type Interpolant =
     internal
         { Kind: InterpolationKind
           Xs: float[]
           Ys: float[]
-          /// Natural cubic: the second derivative at each knot. Monotone cubic: the slope at each knot. Empty for linear.
+          /// Cubics: the slope at each knot. Empty for linear.
           Coefficients: float[]
           NonFinite: bool }
 
@@ -66,11 +67,7 @@ module Interpolant =
                     let a = (xs[i + 1] - x) / h
                     let b = (x - xs[i]) / h
                     a * ys[i] + b * ys[i + 1]
-                | NaturalCubic ->
-                    let m = interpolant.Coefficients
-                    let a = (xs[i + 1] - x) / h
-                    let b = (x - xs[i]) / h
-                    a * ys[i] + b * ys[i + 1] + ((a * a * a - a) * m[i] + (b * b * b - b) * m[i + 1]) * (h * h) / 6.0
+                | NaturalCubic
                 | MonotoneCubic ->
                     let d = interpolant.Coefficients
                     let t = (x - xs[i]) / h
@@ -100,24 +97,20 @@ module Interpolant =
 
                 match interpolant.Kind with
                 | Linear -> (ys[i + 1] - ys[i]) / h
-                | NaturalCubic ->
-                    let m = interpolant.Coefficients
-                    let a = (xs[i + 1] - x) / h
-                    let b = (x - xs[i]) / h
-                    (ys[i + 1] - ys[i]) / h - (3.0 * a * a - 1.0) * h * m[i] / 6.0 + (3.0 * b * b - 1.0) * h * m[i + 1] / 6.0
+                | NaturalCubic
                 | MonotoneCubic ->
                     let d = interpolant.Coefficients
                     let t = (x - xs[i]) / h
                     let t2 = t * t
-                    let dh00 = 6.0 * t2 - 6.0 * t
-                    let dh10 = 3.0 * t2 - 4.0 * t + 1.0
                     let dh01 = -6.0 * t2 + 6.0 * t
+                    let dh10 = 3.0 * t2 - 4.0 * t + 1.0
                     let dh11 = 3.0 * t2 - 2.0 * t
-                    (dh00 * ys[i] + dh10 * h * d[i] + dh01 * ys[i + 1] + dh11 * h * d[i + 1]) / h
+                    dh01 * ((ys[i + 1] - ys[i]) / h) + dh10 * d[i] + dh11 * d[i + 1]
 
 /// Builders of `Interpolant`s from knots. Each raises `ArgumentException` when xs is not strictly increasing (a NaN
-/// breaks it), when it has fewer than two points, or when ys has another length than xs (the message names both
-/// lengths). A NaN or infinite y is not an error: the interpolant evaluates to NaN everywhere. Each builder copies
+/// breaks it), when an interval width x[i + 1] - x[i] is infinite (so an infinite x, or two finite knots further
+/// apart than the largest float, raises, and the message names the interval), when it has fewer than two points, or
+/// when ys has another length than xs (the message names both lengths). A NaN or infinite y is not an error: the interpolant evaluates to NaN everywhere. Each builder copies
 /// its arrays, so later mutation of the inputs does not reach the interpolant. Cost O(n) to build (general
 /// knowledge). With two points every kind is the straight line through them.
 module Interpolate =
@@ -152,6 +145,19 @@ module Interpolate =
                     )
                 )
 
+            if Double.IsInfinity(xs[i + 1] - xs[i]) then
+                raise (
+                    ArgumentException(
+                        sprintf
+                            "%s needs finite interval widths; the interval from xs[%d] = %g to xs[%d] = %g is wider than a float."
+                            name
+                            i
+                            xs[i]
+                            (i + 1)
+                            xs[i + 1]
+                    )
+                )
+
         let xs = Array.copy xs
         let ys = Array.copy ys
         let nonFinite = ys |> Array.exists (fun y -> Double.IsNaN y || Double.IsInfinity y)
@@ -165,35 +171,41 @@ module Interpolate =
     /// The piecewise-linear interpolant. Continuous, with a derivative that jumps at each interior knot.
     let linear (xs: float[]) (ys: float[]) : Interpolant = build "linear" Linear (fun _ _ -> [||]) xs ys
 
-    let private naturalSecondDerivatives (xs: float[]) (ys: float[]) : float[] =
+    let private naturalSlopes (xs: float[]) (ys: float[]) : float[] =
         let n = xs.Length
-        let m: float[] = Array.zeroCreate n
+        let h = Array.init (n - 1) (fun i -> xs[i + 1] - xs[i])
+        let delta = Array.init (n - 1) (fun i -> (ys[i + 1] - ys[i]) / h[i])
+        // Tridiagonal rows in the scaling of de Boor, so every term scales as y or y / h: the natural end rows
+        // 2 s[0] + s[1] = 3 delta[0] and s[n - 2] + 2 s[n - 1] = 3 delta[n - 2], and for 0 < i < n - 1
+        // h[i] s[i - 1] + 2 (h[i - 1] + h[i]) s[i] + h[i - 1] s[i + 1] = 3 (h[i] delta[i - 1] + h[i - 1] delta[i]).
+        let lower = Array.init n (fun i -> if i = 0 then 0.0 elif i = n - 1 then 1.0 else h[i])
+        let diagonal = Array.init n (fun i -> if i = 0 || i = n - 1 then 2.0 else 2.0 * (h[i - 1] + h[i]))
+        let upper = Array.init n (fun i -> if i = 0 then 1.0 elif i = n - 1 then 0.0 else h[i - 1])
 
-        if n > 2 then
-            let k = n - 2
-            // Row r (knot r + 1): h[r] M[r] + 2 (h[r] + h[r + 1]) M[r + 1] + h[r + 1] M[r + 2] = 6 (delta[r + 1] - delta[r]).
-            let h = Array.init (n - 1) (fun i -> xs[i + 1] - xs[i])
-            let delta = Array.init (n - 1) (fun i -> (ys[i + 1] - ys[i]) / h[i])
-            let diagonal = Array.init k (fun r -> 2.0 * (h[r] + h[r + 1]))
-            let rhs = Array.init k (fun r -> 6.0 * (delta[r + 1] - delta[r]))
+        let rhs =
+            Array.init n (fun i ->
+                if i = 0 then 3.0 * delta[0]
+                elif i = n - 1 then 3.0 * delta[n - 2]
+                else 3.0 * (h[i] * delta[i - 1] + h[i - 1] * delta[i]))
 
-            for r in 1 .. k - 1 do
-                let w = h[r] / diagonal[r - 1]
-                diagonal[r] <- diagonal[r] - w * h[r]
-                rhs[r] <- rhs[r] - w * rhs[r - 1]
+        for i in 1 .. n - 1 do
+            let w = lower[i] / diagonal[i - 1]
+            diagonal[i] <- diagonal[i] - w * upper[i - 1]
+            rhs[i] <- rhs[i] - w * rhs[i - 1]
 
-            m[k] <- rhs[k - 1] / diagonal[k - 1]
+        let s: float[] = Array.zeroCreate n
+        s[n - 1] <- rhs[n - 1] / diagonal[n - 1]
 
-            for r in k - 2 .. -1 .. 0 do
-                m[r + 1] <- (rhs[r] - h[r + 1] * m[r + 2]) / diagonal[r]
+        for i in n - 2 .. -1 .. 0 do
+            s[i] <- (rhs[i] - upper[i] * s[i + 1]) / diagonal[i]
 
-        m
+        s
 
     /// The natural cubic spline: twice continuously differentiable, with zero second derivative at both end knots,
-    /// found by the Thomas algorithm on the tridiagonal system of the interior second derivatives. It can overshoot
-    /// monotone data.
+    /// found by the Thomas algorithm on the tridiagonal system of the knot slopes, scaled so that no term overflows
+    /// for finite knots however small or large the spacing. It can overshoot monotone data.
     let naturalCubic (xs: float[]) (ys: float[]) : Interpolant =
-        build "naturalCubic" NaturalCubic naturalSecondDerivatives xs ys
+        build "naturalCubic" NaturalCubic naturalSlopes xs ys
 
     let private monotoneSlopes (xs: float[]) (ys: float[]) : float[] =
         let n = xs.Length
