@@ -639,7 +639,9 @@ same fractions, 0.0415 and 0.5735, on both targets (*measured here*, by the comm
 
 Test `the recorded stream gives pinned numbers` (`tests/Ranvier.Science.Tests/CrossTargetTests.fs`) folds the 1,000
 doubles of `Recorded.fs` with `Moments.add true`. The stream was made once on .NET with
-`Generator.normals 0.84 3.0 1000 (Generator.create 20261119)` and is checked in as data.
+`Generator.normals 0.84 3.0 1000 (Generator.create 20261119)` and is checked in as data. On .NET a second test checks the generator's output against the recorded stream to within 4 ulp,
+because the C math library behind `log` and `cos` differs between platforms; the moments and bounds in the table come
+from the recorded data, so they are the same on every platform.
 
 | Value | .NET | JavaScript |
 |---|---|---|

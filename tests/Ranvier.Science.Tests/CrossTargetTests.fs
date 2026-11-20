@@ -25,11 +25,29 @@ let tests =
             }
 
 #if !FABLE_COMPILER
-            // .NET only: the stream is the generator's output today. Under JavaScript `log` and `cos`
-            // may differ in the last place, so the same comparison there could fail without any defect.
-            test "the recorded stream is what the generator gives on .NET" {
+            // The stream was recorded on Windows. `log` and `cos` come from the platform's math
+            // library, so another platform may differ in the last places.
+            test "the recorded stream is the generator's output to within 4 ulp on .NET" {
                 let struct (xs, _) = Generator.normals 0.84 3.0 1000 (Generator.create 20261119)
-                Expect.equal xs Recorded.stream "same 1000 doubles"
+                Expect.equal xs.Length Recorded.stream.Length "same length"
+
+                let ulps (a: float) (b: float) =
+                    let ia = BitConverter.DoubleToInt64Bits a
+                    let ib = BitConverter.DoubleToInt64Bits b
+                    if (ia < 0L) <> (ib < 0L) then Int64.MaxValue else abs (ia - ib)
+
+                let distances = Array.map2 ulps xs Recorded.stream
+                let differing = distances |> Array.filter (fun d -> d > 0L) |> Array.length
+                let worst = Array.max distances
+                let worstAt = Array.findIndex (fun d -> d = worst) distances
+
+                printfn
+                    "Recorded stream against the generator on .NET (%s): %d of 1000 differ, at most %d ulp"
+                    System.Runtime.InteropServices.RuntimeInformation.OSDescription
+                    differing
+                    worst
+
+                Expect.isTrue (worst <= 4L) (sprintf "largest distance %d ulp at index %d" worst worstAt)
             }
 #endif
         ]
