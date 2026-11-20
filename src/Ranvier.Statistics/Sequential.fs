@@ -9,10 +9,14 @@ open Ranvier.Numerics
 /// </summary>
 /// <remarks>
 /// The p-value is the running minimum, from the burn-in on, of 1 / Λ, where Λ is the Gaussian mixture likelihood
-/// ratio whose boundary is the interval of <c>ConfidenceSequence.interval</c> at the same settings. The test rejects
-/// exactly when some interval from the burn-in on excluded the null value: the duality of Johari, Pekelis and
-/// Walsh, "Always valid inference", with the confidence sequence of Waudby-Smith et al., arXiv 2103.06476 (general
-/// knowledge). Its validity is the sequence's: asymptotic, with no statement at any finite count. A paired
+/// ratio whose boundary is the interval of <c>ConfidenceSequence.interval</c> at the same settings. The verdict agrees
+/// with whether some interval from the burn-in on excluded the null value (the duality of Johari, Pekelis and
+/// Walsh, "Always valid inference", with the confidence sequence of Waudby-Smith et al., arXiv 2103.06476; general
+/// knowledge), except where the null value lies within rounding of an interval's endpoint: the verdict is the
+/// p-value's, computed from the likelihood ratio, and the interval's from a rounded mean and radius. On streams of 40
+/// observations with relative spread about 1e-15 and the null value within 3 ulps of the mean, 33,953 of 140,000
+/// comparisons disagreed (measured here by the review probe probe.fsx, in the scratchpad folder
+/// agents\T3-task-9-review; no such disagreement arose in the duality tests at ordinary spreads). Its validity is the sequence's: asymptotic, with no statement at any finite count. A paired
 /// two-sample test folds the differences. The record publishes a new instance on every <c>add</c> and claims no
 /// cut-off under structural equality. Build it with <c>SequentialTest.create</c>.
 /// </remarks>
@@ -49,7 +53,7 @@ module SequentialTest =
         let m = Moments.add compensated t.Moments x
 
         let p =
-            if Double.IsNaN t.PValue || Double.IsNaN (Moments.mean m) then
+            if Double.IsNaN t.PValue || Double.IsNaN x || Double.IsInfinity x || Double.IsNaN (Moments.mean m) then
                 nan
             elif Moments.count m < t.Settings.BurnIn then
                 t.PValue
@@ -92,8 +96,9 @@ module SequentialTest =
 /// of its input and capped at 1.
 /// </summary>
 /// <remarks>
-/// A NaN entry stays NaN and is not counted: m is the number of non-NaN entries, where R's default counts every
-/// entry (from documentation: p.adjust.R in R's source, <c>n = length(p)</c>). Each method raises
+/// A NaN entry stays NaN and is not counted: m is the number of non-NaN entries, as R's default n is (from
+/// documentation: p.adjust.R lines 22 to 33, where <c>n = length(p)</c> is first forced after the NA entries are
+/// dropped, and p.adjust.Rd lines 149 to 153 of R's source, whose example sets two of 50 p-values NA). Each method raises
 /// ArgumentOutOfRangeException when a non-NaN entry lies outside [0, 1]. Tied p-values give tied results. Cost
 /// O(m log m), O(m) for Bonferroni. Holm and Bonferroni control the familywise error rate under any dependence;
 /// Hochberg needs independence or non-negative dependence; Benjamini–Hochberg controls the false discovery rate

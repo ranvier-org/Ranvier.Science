@@ -71,7 +71,7 @@ let tests =
                     Expect.isLessThanOrEqual (SequentialTest.pValue t) previous "non-increasing"
                     previous <- SequentialTest.pValue t)
 
-            testCase "rejects exactly when an interval from the burn-in on excluded theta0" (fun () ->
+            testCase "rejects as an interval from the burn-in on excludes theta0" (fun () ->
                 let mutable rejectingPoints = 0
                 let mutable holdingPoints = 0
                 let mutable mismatches = 0
@@ -92,13 +92,46 @@ let tests =
                         if SequentialTest.rejects t <> excluded then
                             mismatches <- mismatches + 1
 
-                        if excluded then
-                            rejectingPoints <- rejectingPoints + 1
-                        else
-                            holdingPoints <- holdingPoints + 1
+                        if Moments.count m >= 30.0 then
+                            if excluded then
+                                rejectingPoints <- rejectingPoints + 1
+                            else
+                                holdingPoints <- holdingPoints + 1
 
                 Expect.equal mismatches 0 "points where rejects and the interval disagree"
-                Expect.isGreaterThan rejectingPoints 0 "some points reject, so the equality is not vacuous"
+                Expect.isGreaterThan rejectingPoints 0 "some points from the burn-in on reject, so the equality is not vacuous"
+                Expect.isGreaterThan holdingPoints 0 "some points from the burn-in on do not reject")
+
+            testCase "rejects as an interval excludes a non-zero theta0, away from rounding ties" (fun () ->
+                let settings = ConfidenceSequence.tunedFor 0.1 500.0 20.0
+                let mutable rejectingPoints = 0
+                let mutable holdingPoints = 0
+                let mutable mismatches = 0
+
+                for seed in 1..40 do
+                    let mutable t = SequentialTest.create settings 10.0
+                    let mutable m = Moments.zero
+                    let mutable excluded = false
+                    let struct (xs, _) = Generator.normals 10.2 2.0 1500 (Generator.create seed)
+
+                    for x in xs do
+                        t <- SequentialTest.add true t x
+                        m <- Moments.add true m x
+
+                        if Moments.count m >= 20.0 then
+                            let i = ConfidenceSequence.interval settings m
+                            excluded <- excluded || 10.0 < i.Lower || 10.0 > i.Upper
+
+                            if excluded then
+                                rejectingPoints <- rejectingPoints + 1
+                            else
+                                holdingPoints <- holdingPoints + 1
+
+                        if SequentialTest.rejects t <> excluded then
+                            mismatches <- mismatches + 1
+
+                Expect.equal mismatches 0 "points where rejects and the interval disagree"
+                Expect.isGreaterThan rejectingPoints 0 "some points reject"
                 Expect.isGreaterThan holdingPoints 0 "some points do not reject")
 
             testCase "a NaN observation gives a NaN p-value and no rejection" (fun () ->
@@ -114,11 +147,17 @@ let tests =
                             Expect.isTrue (Double.IsNaN (SequentialTest.pValue t)) "NaN from the observation on"
                             Expect.isFalse (SequentialTest.rejects t) "NaN does not reject")
 
-            testCase "an infinite observation gives a NaN p-value" (fun () ->
-                for bad in [| infinity; -infinity |] do
-                    let t = SequentialTest.add true (fold (stream 1.0 60 2)) bad
-                    Expect.isTrue (Double.IsNaN (SequentialTest.pValue t)) "NaN"
-                    Expect.isFalse (SequentialTest.rejects t) "no rejection")
+            testCase "an infinite observation gives a NaN p-value at once, before and after the burn-in" (fun () ->
+                for compensated in [| true; false |] do
+                    for bad in [| infinity; -infinity |] do
+                        for count in [| 10; 59 |] do
+                            let before = Array.fold (SequentialTest.add compensated) (SequentialTest.create s 0.0) (stream 1.0 count 2)
+                            let t = SequentialTest.add compensated before bad
+                            let label = string compensated + " " + string bad + " at " + string (count + 1)
+                            Expect.isTrue (Double.IsNaN (SequentialTest.pValue t)) ("NaN on the observation, " + label)
+                            Expect.isFalse (SequentialTest.rejects t) ("no rejection, " + label)
+                            let later = SequentialTest.add compensated t 0.0
+                            Expect.isTrue (Double.IsNaN (SequentialTest.pValue later)) ("NaN for good, " + label))
 
             testCase "zero spread at theta0 keeps the p-value at 1" (fun () ->
                 let t = fold (Array.create 40 0.0)
