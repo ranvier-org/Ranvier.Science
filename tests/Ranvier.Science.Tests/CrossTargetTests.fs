@@ -94,6 +94,17 @@ let tests =
                 Expect.equal (Interpolant.derivative monotone 2.5) (-1.4911242603550297) "monotone derivative 2.5"
             }
 
+            // Literals: Fourier.forward printed with ToString("R") on .NET; the power-of-two path is an exact kernel, so
+            // JavaScript must match bit for bit.
+            test "power-of-two butterflies give the same bits on both targets" {
+                let struct (re, im) =
+                    Fourier.forward
+                        [| 0.1; 0.7; -1.3; 2.9; 0.25; -0.6; 1.1; 3.3 |]
+                        [| 0.; 0.5; 0.; -0.25; 0.; 0.; 1.; 0. |]
+                Expect.equal re [| 6.449999999999999; 0.2288582233137677; 1.2999999999999998; -0.1753048327204937; -6.149999999999999; -2.5288582233137675; -0.20000000000000007; 1.8753048327204938 |] "re"
+                Expect.equal im [| 1.25; 2.2939339828220184; 5.1; -3.566726188957804; 0.75; 2.5060660171779823; -7.1; -1.2332738110421968 |] "im"
+            }
+
 #if !FABLE_COMPILER
             // The stream was recorded on Windows. `log` and `cos` come from the platform's math
             // library, so another platform may differ in the last places.
