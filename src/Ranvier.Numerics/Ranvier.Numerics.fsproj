@@ -12,6 +12,7 @@
         <Compile Include="Special.fs" />
         <Compile Include="LinearAlgebra.fs" />
         <Compile Include="Roots.fs" />
+        <Compile Include="LeastSquares.fs" />
         <Compile Include="FloatPolicy.fs" />
         <Compile Include="Aggregate.fs" />
         <Compile Include="Tolerance.fs" />
