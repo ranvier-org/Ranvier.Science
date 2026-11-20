@@ -132,6 +132,45 @@ let tests =
                 Expect.isFalse later.Converged "NaN met later: not converged"
             }
 
+            test "brent over a bracket wider than the largest double" {
+                // sign change at 1e300; x / 1e10 − 1 has its root at 1e10 (closed forms)
+                let step (x: float) = float (sign (x - 1e300))
+                let r = Roots.brent 0.0 step -1.7e308 1.7e308 |> expectOk "step"
+                Expect.isFalse (Double.IsInfinity r || Double.IsNaN r) "finite"
+                expectClose 1e-14 0.0 1e300 r "step root"
+
+                for bound in [ 1.7e308; 1e308 ] do
+                    let line (x: float) = x / 1e10 - 1.0
+                    let r = Roots.brent 1e-3 line -bound bound |> expectOk (sprintf "line, bound %g" bound)
+                    expectClose 0.0 2e-3 1e10 r (sprintf "line root, bound %g" bound)
+            }
+
+            test "Minimize.brent raises when the interval width overflows" {
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> Minimize.brent 1e-8 id -1.7e308 1.7e308 |> ignore)
+                    "[-1.7e308, 1.7e308]"
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> Minimize.brent 1e-8 id -1e308 1e308 |> ignore)
+                    "[-1e308, 1e308]"
+            }
+
+            test "nelderMead does not converge on NaN everywhere" {
+                let m: MinimumN = Minimize.nelderMead NelderMeadOptions.standard (fun _ -> nan) [| 0.0; 0.0 |]
+                Expect.isFalse m.Converged "all NaN"
+                Expect.equal m.Value Double.PositiveInfinity "NaN is ordered as +∞"
+                let inf: MinimumN = Minimize.nelderMead NelderMeadOptions.standard (fun _ -> infinity) [| 0.0 |]
+                Expect.isFalse inf.Converged "all +∞"
+            }
+
+            test "nelderMead leaves a NaN region" {
+                // NaN for x < 0.5, so x0 = 0.45 is NaN and its only neighbour 0.55 is finite; the minimum is at 1
+                let f (x: float[]) = if x[0] < 0.5 then nan else (x[0] - 1.0) * (x[0] - 1.0)
+                let m: MinimumN = Minimize.nelderMead NelderMeadOptions.standard f [| 0.45 |]
+                Expect.isTrue m.Converged "converged"
+                expectClose 0.0 1e-5 1.0 m.X[0] "X"
+            }
+
             test "nelderMead minimises Rosenbrock" {
                 let x0 = [| -1.2; 1.0 |]
                 let m: MinimumN = Minimize.nelderMead NelderMeadOptions.standard rosenbrock x0

@@ -151,9 +151,10 @@ module Roots =
     /// signs, or one of them exactly 0 (that endpoint is returned). Stops when the bracket's half-width is at most
     /// 2ε|b| + tolerance/2 with ε = 2⁻⁵² (the netlib zeroin.f form, with the term floored at the smallest positive
     /// double so that tolerance 0 still ends), so the final bracket is at most tolerance + 4ε|x| wide. At most 1000
-    /// iterations (a definition), then an `Error` naming the cap; one evaluation of f per iteration. A root of
-    /// multiplicity above 1 exactly at 0 with tolerance 0 converges only linearly and may reach the cap (measured
-    /// here: x³ on [−1, 2] did, x⁵ took 569 evaluations). Error when the endpoints are not bracketing
+    /// iterations (a definition), then an `Error` naming the cap; one evaluation of f per iteration. A bracket whose
+    /// width exceeds the largest double is first bisected at a/2 + b/2 until its width is finite, those evaluations
+    /// counting toward the cap, so an `Ok` value is always finite. A root of multiplicity above 1 converges only
+    /// linearly and may reach the cap at small tolerances. Error when the endpoints are not bracketing
     /// ("not bracketed") or f returns NaN ("f returned NaN").
     let brent (tolerance: float) (f: float -> float) (a: float) (b: float) : Result<float, string> =
         checkTolerance tolerance
@@ -166,12 +167,30 @@ module Roots =
             let mutable b = hi
             let mutable fa = flo
             let mutable fb = fhi
+            let mutable result: Result<float, string> option = None
+            let mutable iterations = 0
+
+            // A bracket wider than the largest double is bisected at a/2 + b/2 until its width is finite.
+            while result.IsNone && Double.IsInfinity(b - a) && iterations < 1000 do
+                iterations <- iterations + 1
+                let m = a / 2.0 + b / 2.0
+                let fm = f m
+
+                if Double.IsNaN fm then
+                    result <- Some(nanAt m)
+                elif fm = 0.0 then
+                    result <- Some(Ok m)
+                elif (fm > 0.0) = (fa > 0.0) then
+                    a <- m
+                    fa <- fm
+                else
+                    b <- m
+                    fb <- fm
+
             let mutable c = a
             let mutable fc = fa
             let mutable d = b - a
             let mutable e = d
-            let mutable result: Result<float, string> option = None
-            let mutable iterations = 0
 
             while result.IsNone && iterations < 1000 do
                 iterations <- iterations + 1
@@ -282,13 +301,13 @@ module Minimize =
     /// A local minimum of f on [a, b] by Brent's localmin (Brent 1973, Algorithms for Minimization without
     /// Derivatives, chapter 5: golden section and parabolic interpolation; from documentation). `tolerance` is the
     /// absolute part t of the stopping rule: it stops when the interval around the best point is within
-    /// 2(√ε|x| + t/3), ε = 2⁻⁵². Needs finite a < b, else raises `ArgumentOutOfRangeException`; a NaN endpoint gives NaN
+    /// 2(√ε|x| + t/3), ε = 2⁻⁵². Needs finite a < b with b − a finite, else raises `ArgumentOutOfRangeException`; a NaN endpoint gives NaN
     /// fields with `Converged = false`. At most 500 iterations (a definition), then `Converged = false` with the best
     /// point so far; one evaluation of f per iteration. When f returns NaN the search returns at once with
     /// `Converged = false` and both `X` and `Value` NaN, since comparisons with NaN would otherwise misdirect it. The
     /// minimum is local, f need not be unimodal, and an endpoint is never evaluated. A minimum at exactly 0, such as
-    /// x on [0, 1], has no relative scale: with tolerance 0 it reaches the cap and reports `Converged = false`
-    /// (measured here: `dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter "Roots"` failed on it).
+    /// x on [0, 1], has no relative scale: at a very small tolerance the search reaches the cap and reports
+    /// `Converged = false`.
     let brent (tolerance: float) (f: float -> float) (a: float) (b: float) : Minimum =
         if not (tolerance >= 0.0) then
             raise (ArgumentOutOfRangeException("tolerance", sprintf "The tolerance must be at least 0; it is %g." tolerance))
@@ -296,8 +315,8 @@ module Minimize =
         if Double.IsNaN a || Double.IsNaN b then
             { X = nan; Value = nan; Iterations = 0; Converged = false }
         else
-            if Double.IsInfinity a || Double.IsInfinity b || not (a < b) then
-                raise (ArgumentOutOfRangeException("a", sprintf "The interval needs finite endpoints with a < b; a = %g, b = %g." a b))
+            if Double.IsInfinity a || Double.IsInfinity b || not (a < b) || Double.IsInfinity(b - a) then
+                raise (ArgumentOutOfRangeException("a", sprintf "The interval needs finite endpoints with a < b and a finite width; a = %g, b = %g." a b))
 
             let golden = 0.5 * (3.0 - sqrt 5.0)
             let eps = sqrt macheps
@@ -386,12 +405,13 @@ module Minimize =
     /// `InitialStep` along each axis; a NaN value of f is ordered as +∞. It converges when, over all vertices, the
     /// largest |fᵢ − f_best| is at most Tolerance · max(1, |f_best|) and the largest ‖xᵢ − x_best‖∞ is at most
     /// Tolerance · max(1, ‖x_best‖∞). An iteration is one reflection cycle (reflect, then expand, contract or shrink);
+    /// When the best vertex is +∞ (every vertex NaN or +∞) it stops at once with `Converged = false`.
     /// `Evaluations` counts calls of f. At most `MaximumIterations` iterations, then `Converged = false` with the best
     /// vertex so far. The method is derivative-free and local: it may stall on a non-smooth function or stop on a
     /// flat simplex away from a minimum. x0 is not modified and `X` is a fresh array. Raises `ArgumentException` for
     /// an empty x0, and `ArgumentOutOfRangeException` for a Tolerance below 0 or NaN, an InitialStep not above 0 or a
-    /// MaximumIterations below 1. Cost O(n) per iteration besides the evaluations of f (one or two, or n + 1 on a
-    /// shrink), plus an O(n²) ordering of the n + 1 vertices.
+    /// MaximumIterations below 1. Cost O(n²) per iteration (centroid, convergence test, shrink and worst-case
+    /// ordering of the n + 1 vertices) besides the evaluations of f (one or two, or n + 1 on a shrink).
     let nelderMead (options: NelderMeadOptions) (f: float[] -> float) (x0: float[]) : MinimumN =
         if x0.Length = 0 then
             raise (ArgumentException("The start x0 must have at least one coordinate.", "x0"))
@@ -467,7 +487,10 @@ module Minimize =
         while not finished do
             order ()
 
-            if converged () then
+            if values[0] = Double.PositiveInfinity then
+                // every vertex is NaN or +∞: nothing to converge to
+                finished <- true
+            elif converged () then
                 isConverged <- true
                 finished <- true
             elif iterations >= options.MaximumIterations then
