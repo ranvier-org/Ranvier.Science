@@ -87,6 +87,42 @@ let tests =
                 | Result.Ok e -> failtestf "expected an error, got %A" e
             }
 
+            test "null text reads as empty text" {
+                match Formula.parse null with
+                | Result.Error message -> Expect.stringContains message "at character 1" "an error at character 1"
+                | Result.Ok e -> failtestf "expected an error, got %A" e
+
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    Expect.isTrue (isError (Quantity.formula model "f" "F" null)) "Quantity.formula with null text"
+                    Expect.isEmpty model.Entries "declares nothing")
+            }
+
+            test "parentheses nest to 200 levels" {
+                let nested (depth: int) (inner: string) (close: string) =
+                    String.replicate depth "(" + inner + String.replicate depth close
+
+                Expect.isFalse (isError (Formula.parse (nested 200 "x" ")"))) "200 levels of parentheses"
+                Expect.isFalse (isError (Formula.parse (nested 199 "abs(x)" ")"))) "199 parentheses around a call: 200 levels"
+
+                // The 201st opening parenthesis is character 201 of "((…", 4 · 200 + 4 = 804 of "abs(abs(…" and
+                // 8 · 200 + 8 = 1608 of "convert(convert(…".
+                for kind, text, position in
+                    [
+                        "parentheses", nested 201 "x" ")", 201
+                        "calls", String.replicate 201 "abs(" + "x" + String.replicate 201 ")", 804
+                        "conversions", String.replicate 201 "convert(" + "x" + String.replicate 201 ", [m])", 1608
+                    ] do
+                    match Formula.parse text with
+                    | Result.Error message ->
+                        Expect.stringContains message "200" (kind + ": the message names the limit")
+                        Expect.stringContains message ("at character " + string position + ".") (kind + ": the position")
+                    | Result.Ok _ -> failtestf "%s: expected an error for 201 levels" kind
+
+                // Without the limit, 100,000 levels overflowed the stack and ended the process.
+                Expect.isTrue (isError (Formula.parse (nested 100000 "x" ")"))) "100,000 levels are an error"
+            }
+
             test "units of the page's formula" {
                 withGraph (fun () ->
                     match unitOf (pageModel ()) pageFormula with

@@ -91,6 +91,16 @@ let tests =
                 Expect.stringContains (err "km^200") "km^200" "km^200 overflows the scale"
             }
 
+            test "parentheses nest to 200 levels" {
+                let nested (depth: int) = String.replicate depth "(" + "m" + String.replicate depth ")"
+                Expect.equal (ok (nested 200)).Factors [ ("m", 1) ] "200 levels"
+                let message = err (nested 201)
+                Expect.stringContains message "200" "the message names the limit"
+                Expect.stringContains message "at character 201." "the 201st parenthesis"
+                // Without the limit, 100,000 levels would recurse 100,000 deep.
+                err (nested 100000) |> ignore
+            }
+
             test "conversion factors" {
                 Expect.equal (UnitInfo.conversionFactor (ok "km") (ok "m")) (Ok 1000.0) "km to m"
                 Expect.equal (UnitInfo.conversionFactor (ok "m") (ok "km")) (Ok(1.0 / 1000.0)) "m to km"

@@ -161,6 +161,18 @@ let tests =
                     expectUndefined (run model "sqrt(a)"))
             }
 
+            test "a draw that overflows gives NaN fields" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    // exp(x) overflows to +∞ above ln(1.797e308) = 709.78 (closed form of the largest double): every
+                    // draw of a = 800 ± 1, and about one draw in five of b = 709 ± 1 (P(Z > 0.78) = 0.22), which 20,000
+                    // draws all miss with probability 0.78^20000.
+                    Quantity.inputWithUncertainty model "a" "A" Units.one 800.0 1.0 |> ignore
+                    Quantity.inputWithUncertainty model "b" "B" Units.one 709.0 1.0 |> ignore
+                    expectUndefined (run model "exp(a)")
+                    expectUndefined (run model "exp(b)"))
+            }
+
             test "a second read gives an equal record" {
                 withGraph (fun () ->
                     let model = Model.create "m"

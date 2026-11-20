@@ -96,6 +96,24 @@ let tests =
                             (text + ": the sign of the evaluator's zero"))
             }
 
+            test "measuredEvaluator's min and max of a NaN have an unknown uncertainty" {
+                withGraph (fun () ->
+                    let model = Model.create "p"
+                    let a = Quantity.inputWithUncertainty model "a" "A" Units.one 1.0 0.1
+                    Quantity.inputWithUncertainty model "b" "B" Units.one 2.0 0.2 |> ignore
+                    a.Set nan
+
+                    for text in [ "min(a, b)"; "max(a, b)"; "min(b, a)"; "max(b, a)" ] do
+                        let measured = Formula.measuredEvaluator model (parsed text) ()
+                        Expect.isTrue (Double.IsNaN (Uncertain.value measured)) (text + ": the value is NaN")
+
+                        Expect.isTrue
+                            (Double.IsNaN (Uncertain.standardUncertainty measured))
+                            (text + ": the uncertainty is NaN, not 0")
+
+                        Expect.equal (Uncertain.contributions measured).Length 2 (text + ": a contribution from each source"))
+            }
+
             test "measuredEvaluator propagates" {
                 withGraph (fun () ->
                     let model = Model.create "p"
