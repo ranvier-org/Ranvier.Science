@@ -45,6 +45,9 @@ type private Rig(x0Initial: float, rateInitial: float) =
     member this.RunWith(maxStep: float) =
         Run.createWith maxStep (fun () -> clock.Value) this.Start this.Advance
 
+let private odeTight: Ranvier.Numerics.OdeOptions =
+    { Ranvier.Numerics.OdeOptions.standard with AbsoluteTolerance = 1e-10; RelativeTolerance = 1e-10 }
+
 [<Tests>]
 let tests =
     testList
@@ -505,5 +508,107 @@ let tests =
                     run.State |> ignore
                     rig.Clock.Value <- 5.0
                     Expect.equal run.State.X (4.0 + 2.0 * 3.0) "maxStep infinity takes the whole gap")
+            }
+
+            test "an ode run starts at time 0 with a copy of the start state" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let y0 = createSignal 1.0
+                    let k = createSignal 0.5
+                    let rhs = fun _ (y: float[]) -> [| -k.Value * y[0] |]
+                    let run = Run.ode odeTight (fun () -> clock.Value) (fun () -> [| y0.Value |]) rhs
+                    Expect.equal run.State.Time 0.0 "time starts at 0"
+                    Expect.equal run.State.State [| 1.0 |] "the start state"
+
+                    let held = [| 1.0 |]
+                    let heldRun = Run.ode odeTight (fun () -> clock.Value) (fun () -> held) rhs
+                    Expect.equal heldRun.State.State [| 1.0 |] "the held start state"
+                    held[0] <- 9.0
+                    Expect.equal heldRun.State.State[0] 1.0 "the run's state is a copy of the start array")
+            }
+
+            test "a clock gap integrates the state" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let y0 = createSignal 1.0
+                    let k = createSignal 0.5
+                    let rhs = fun _ (y: float[]) -> [| -k.Value * y[0] |]
+                    let run = Run.ode odeTight (fun () -> clock.Value) (fun () -> [| y0.Value |]) rhs
+                    run.State |> ignore
+                    clock.Value <- 2.0
+                    // closed form y = exp (-k t) with k = 0.5, t = 2
+                    Expect.equal run.State.Time 2.0 "time after the first gap"
+                    expectClose 0.0 1e-9 (exp -1.0) run.State.State[0] "y at t = 2"
+                    clock.Value <- 3.0
+                    Expect.equal run.State.Time 3.0 "time after the second gap"
+                    expectClose 0.0 1e-9 (exp -1.5) run.State.State[0] "y at t = 3")
+            }
+
+            test "a repeated clock value leaves the time and state unchanged" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let k = createSignal 0.5
+                    let rhs = fun _ (y: float[]) -> [| -k.Value * y[0] |]
+                    let run = Run.ode odeTight (fun () -> clock.Value) (fun () -> [| 1.0 |]) rhs
+                    run.State |> ignore
+                    clock.Value <- 2.0
+                    let time = run.State.Time
+                    let state = run.State.State[0]
+                    Expect.equal time 2.0 "advanced to the clock"
+                    clock.Value <- 2.0
+                    Expect.equal run.State.Time time "time is unchanged at a repeated clock value"
+                    Expect.equal run.State.State[0] state "state is unchanged at a repeated clock value")
+            }
+
+            test "a value read by start restarts the run" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let y0 = createSignal 1.0
+                    let k = createSignal 0.5
+                    let rhs = fun _ (y: float[]) -> [| -k.Value * y[0] |]
+                    let run = Run.ode odeTight (fun () -> clock.Value) (fun () -> [| y0.Value |]) rhs
+                    run.State |> ignore
+                    clock.Value <- 2.0
+                    Expect.equal run.State.Time 2.0 "advanced"
+                    y0.Value <- 4.0
+                    Expect.equal run.State.Time 0.0 "restarted at time 0"
+                    Expect.equal run.State.State [| 4.0 |] "restarted from the new start state")
+            }
+
+            test "reads inside rhs do not restart the run" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let y0 = createSignal 1.0
+                    let k = createSignal 0.5
+                    let rhs = fun _ (y: float[]) -> [| -k.Value * y[0] |]
+                    let run = Run.ode odeTight (fun () -> clock.Value) (fun () -> [| y0.Value |]) rhs
+                    run.State |> ignore
+                    clock.Value <- 1.0
+                    Expect.equal run.State.Time 1.0 "time after the first gap"
+                    k.Value <- 1.0
+                    Expect.equal run.State.Time 1.0 "a change of k keeps the time"
+                    clock.Value <- 2.0
+                    // 0.5 over [0, 1] then 1.0 over [1, 2]
+                    expectClose 0.0 1e-9 (exp -0.5 * exp -1.0) run.State.State[0] "y at t = 2")
+            }
+
+            test "a failed solve fails the read and a later clock retries" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let k = createSignal 0.5
+                    let poisoned = ref true
+
+                    let rhs =
+                        fun _ (y: float[]) -> if poisoned.Value then [| nan |] else [| -k.Value * y[0] |]
+
+                    let options = { odeTight with MaximumSteps = 50 }
+                    let run = Run.ode options (fun () -> clock.Value) (fun () -> [| 1.0 |]) rhs
+                    run.State |> ignore
+                    clock.Value <- 1.0
+                    Expect.throwsT<System.InvalidOperationException> (fun () -> run.State |> ignore) "the failed solve raises"
+                    poisoned.Value <- false
+                    clock.Value <- 2.0
+                    Expect.equal run.State.Time 2.0 "the retry integrates from the last recorded clock"
+                    expectClose 0.0 1e-9 (exp -1.0) run.State.State[0] "y at t = 2")
             }
         ]
