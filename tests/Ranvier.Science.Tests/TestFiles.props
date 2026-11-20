@@ -34,6 +34,7 @@
         <Compile Include="$(MSBuildThisFileDirectory)OdeTests.fs" Link="OdeTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)InterpolateTests.fs" Link="InterpolateTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)FourierTests.fs" Link="FourierTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)ComomentsTests.fs" Link="ComomentsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />

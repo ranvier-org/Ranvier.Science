@@ -37,6 +37,7 @@ let all =
             testList "OdeTests.fs" [ Ranvier.Science.Tests.OdeTests.tests ]
             testList "InterpolateTests.fs" [ Ranvier.Science.Tests.InterpolateTests.tests ]
             testList "FourierTests.fs" [ Ranvier.Science.Tests.FourierTests.tests ]
+            testList "ComomentsTests.fs" [ Ranvier.Science.Tests.ComomentsTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]

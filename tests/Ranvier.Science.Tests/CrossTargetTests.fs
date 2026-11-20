@@ -24,6 +24,22 @@ let tests =
                 Expect.isTrue (rel i.Upper 1.1971941207108174 <= 1e-12) (sprintf "upper %.17g" i.Upper)
             }
 
+            // Literals: printed with ToString("R") on .NET from the pairs (stream[i], stream[999 - i]); JavaScript must match.
+            test "comoments give the same bits on both targets" {
+                let c =
+                    Array.fold
+                        (fun m i -> Comoments.add true m Recorded.stream.[i] Recorded.stream.[999 - i])
+                        Comoments.zero
+                        [| 0..999 |]
+
+                Expect.equal (Comoments.count c) 1000.0 "count"
+                Expect.equal (Comoments.meanX c) 0.9199618814567002 "meanX"
+                Expect.equal (Comoments.meanY c) 0.9199618814567002 "meanY"
+                Expect.equal (Comoments.covariance c) 0.25940535451472313 "covariance"
+                Expect.equal (Comoments.correlation c) 0.03109165887938769 "correlation"
+                Expect.equal (Comoments.slope c) 0.03109165887938769 "slope"
+            }
+
             // Literals: Matrix.solve and CholeskyDecomposition.solve printed with ToString("R") on .NET; JavaScript must match.
             test "LU solve gives the same bits on both targets" {
                 let a4 =
