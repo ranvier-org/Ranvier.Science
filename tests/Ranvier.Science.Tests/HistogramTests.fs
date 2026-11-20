@@ -28,6 +28,16 @@ let tests =
                 Expect.equal e[3] 0.3 "last edge is exactly upper"
             }
 
+            test "uniform over a wide or narrow interval" {
+                let e = Histogram.edges (Histogram.uniform -1e308 1e308 4)
+                Expect.equal e.Length 5 "five edges"
+                Expect.equal e[0] -1e308 "first edge"
+                Expect.equal e[4] 1e308 "last edge"
+                Expect.isTrue (Array.forall2 (fun (a: float) b -> a < b) e[0..3] e[1..4]) "strictly increasing"
+                // An interval three doubles wide (3 * 2^-52 above 1.0) cannot hold ten bins.
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Histogram.uniform 1.0 (1.0 + 3.0 * 2.220446049250313e-16) 10 |> ignore) "too many bins"
+            }
+
             test "remove, merge and unmerge" {
                 let a = fill (Histogram.uniform 0.0 4.0 4) [| 0.5; 1.5; 1.7; 9.0; -1.0; nan |]
                 let b = fill (Histogram.uniform 0.0 4.0 4) [| 0.1; 3.9; 4.0; 9.0; nan |]
@@ -117,5 +127,15 @@ let tests =
                 let e = feed e (Array.init 10 float)
                 Expect.isTrue (Double.IsNaN(QuantileEstimate.value e)) "NaN observation poisons"
                 Expect.equal (QuantileEstimate.count e) 12.0 "count includes it"
+            }
+
+            test "an infinite observation makes the estimate NaN" {
+                let finite = Array.init 10 (fun i -> float i + 0.5)
+                let early = feed (feed (QuantileEstimate.create 0.5) [| 1.0; 2.0; infinity; 3.0 |]) finite
+                Expect.isTrue (Double.IsNaN(QuantileEstimate.value early)) "+infinity among the first five"
+                let afterFive = feed (feed (QuantileEstimate.create 0.5) [| 1.0; 2.0; 3.0; 4.0; 5.0; 6.0; -infinity |]) finite
+                Expect.isTrue (Double.IsNaN(QuantileEstimate.value afterFive)) "-infinity after the fifth"
+                let late = feed (feed (QuantileEstimate.create 0.5) (Array.init 1000 float)) (Array.append [| infinity |] finite)
+                Expect.isTrue (Double.IsNaN(QuantileEstimate.value late)) "+infinity after 1000 finite values"
             }
         ]

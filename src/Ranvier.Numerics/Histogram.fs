@@ -40,9 +40,10 @@ module Histogram =
             Missing = 0
         }
 
-    /// An empty histogram of equal-width bins from lower to upper: edge i is lower + i * (upper - lower) / bins, and the
-    /// last edge is exactly upper. Raises `ArgumentOutOfRangeException` unless lower and upper are finite with
-    /// lower < upper and bins is at least 1.
+    /// An empty histogram of equal-width bins from lower to upper: edge i is lower + (upper - lower) * i / bins, or
+    /// 2 * (lower / 2 + (upper / 2 - lower / 2) * (i / bins)) where upper - lower overflows, and the last edge is exactly
+    /// upper. Raises `ArgumentOutOfRangeException` unless lower and upper are finite with lower < upper and bins is at
+    /// least 1, and when the interval holds too few doubles for the edges to be strictly increasing.
     let uniform (lower: float) (upper: float) (bins: int) : Histogram =
         if Double.IsNaN lower || Double.IsInfinity lower || Double.IsNaN upper || Double.IsInfinity upper || not (lower < upper) then
             raise (ArgumentOutOfRangeException("lower", "The bounds must be finite with lower below upper."))
@@ -51,7 +52,18 @@ module Histogram =
             raise (ArgumentOutOfRangeException("bins", "A histogram needs at least one bin."))
 
         let width = upper - lower
-        let edges = Array.init (bins + 1) (fun i -> if i = bins then upper else lower + float i * width / float bins)
+
+        let edge i =
+            if i = bins then upper
+            elif Double.IsInfinity width then 2.0 * (lower / 2.0 + (upper / 2.0 - lower / 2.0) * (float i / float bins))
+            else lower + width * float i / float bins
+
+        let edges = Array.init (bins + 1) edge
+
+        for i in 1..bins do
+            if not (edges[i] > edges[i - 1]) then
+                raise (ArgumentOutOfRangeException("bins", "The interval is too narrow for that many distinct edges."))
+
         create edges
 
     // The bin of a non-NaN x: -1 below the first edge, Counts.Length above the last, else the index i with
@@ -163,7 +175,8 @@ module Histogram =
         Array.sum h.Counts + h.Underflow + h.Overflow + h.Missing
 
 /// The P-squared streaming estimate of one quantile (Jain and Chlamtac, Comm. ACM 28(10), 1985): five markers, no
-/// stored sample. Add only.
+/// stored sample. Add only. A NaN or infinite observation, at any position, makes `value` NaN from then on, since an
+/// infinite marker height turns the parabolic step into infinity minus infinity.
 type QuantileEstimate =
     private
         {
@@ -199,10 +212,10 @@ module QuantileEstimate =
 
     let private sign (d: float) = if d >= 0.0 then 1.0 else -1.0
 
-    /// The estimate with one more observation. A NaN observation makes `value` NaN from then on. O(1): the state of
+    /// The estimate with one more observation. A NaN or infinite observation makes `value` NaN from then on. O(1): the state of
     /// 15 numbers is copied.
     let add (e: QuantileEstimate) (x: float) : QuantileEstimate =
-        if e.Poisoned || Double.IsNaN x then
+        if e.Poisoned || Double.IsNaN x || Double.IsInfinity x then
             { e with N = e.N + 1; Poisoned = true }
         elif e.N < 4 then
             let q = Array.copy e.Heights
@@ -265,10 +278,10 @@ module QuantileEstimate =
 
             { e with N = e.N + 1; Heights = q; Positions = n; Desired = nd }
 
-    /// The number of observations added, NaN ones included.
+    /// The number of observations added, non-finite ones included.
     let count (e: QuantileEstimate) : float = float e.N
 
-    /// The estimate: NaN when empty or after a NaN observation; below five observations the type-7 quantile of the
+    /// The estimate: NaN when empty or after a non-finite observation; below five observations the type-7 quantile of the
     /// sorted observations (`OrderStatistic.quantileSorted`); from the fifth, the height of the middle marker, an
     /// estimate with no error bound given here.
     let value (e: QuantileEstimate) : float =
