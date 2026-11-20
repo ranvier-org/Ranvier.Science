@@ -115,6 +115,42 @@ let tests =
                 Expect.isTrue (okValue (UnitInfo.conversionFactor (ok "m") (ok "m")) = 1.0) "m to m"
             }
 
+            test "a custom unit keeps the symbol as written" {
+                // 1 kWh = 1000 W · 3600 s = 3.6e6 J (closed form of the catalogue's scales).
+                let catalogue = UnitCatalogue.si |> UnitCatalogue.add "kWh" (Units.kilowatt * Units.hour).Info false
+
+                let parsed (text: string) =
+                    match UnitInfo.parse catalogue text with
+                    | Ok u -> u
+                    | Error e -> failwith $"expected \"{text}\" to parse, got Error {e}"
+
+                let kWh = parsed "kWh"
+                Expect.equal kWh.Factors [ ("kWh", 1) ] "one factor, the symbol"
+                Expect.equal (UnitInfo.symbol kWh) "kWh" "the symbol as written"
+                Expect.equal kWh.Dimension Units.joule.Info.Dimension "the dimension of energy"
+                Expect.equal kWh.Scale 3.6e6 "1000 · 3600"
+
+                match UnitInfo.sqrt (parsed "kWh^2") with
+                | Ok root ->
+                    Expect.equal (UnitInfo.symbol root) "kWh" "the root of kWh^2"
+                    Expect.isTrue (UnitInfo.sameUnit root kWh) "the root of kWh^2 is kWh"
+                | Error e -> failwith $"expected the root of kWh^2, got Error {e}"
+
+                let model = Model.createWith catalogue "m"
+
+                match Formula.parse "sqrt([kWh^2])" |> Result.bind (Formula.check model) with
+                | Ok u -> Expect.isTrue (UnitInfo.sameUnit u kWh) "sqrt([kWh^2]) checks as kWh"
+                | Error e -> failwith $"expected sqrt([kWh^2]) to check, got Error {e}"
+
+                // A hectare of 10^4 m² (closed form: 100 m by 100 m) added as m^2 is still one factor, ha.
+                let hectare = { (UnitOf.squared Units.metre).Info with Scale = 1e4 }
+                let withHectare = UnitCatalogue.si |> UnitCatalogue.add "ha" hectare false
+
+                match UnitInfo.parse withHectare "ha" |> Result.bind UnitInfo.sqrt with
+                | Error e -> Expect.stringContains e "ha" "the root of ha needs an even exponent of ha"
+                | Ok u -> failwith $"expected an Error, got the root {UnitInfo.symbol u}"
+            }
+
             test "UnitOf.convert" {
                 Expect.equal (UnitOf.convert Units.kilometre Units.metre 2.5<km>) 2500.0<m> "km to m"
                 Expect.equal (UnitOf.convert Units.hour Units.second 1.5<h>) 5400.0<s> "h to s"
