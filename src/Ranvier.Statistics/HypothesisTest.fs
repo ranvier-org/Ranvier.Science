@@ -494,3 +494,242 @@ module HypothesisTest =
             else nan
 
         countResult oddsRatio p
+
+    // Σ(t³ − t) over the groups of t equal ranks, and the size of the largest group. Each term is (t − 1) t (t + 1), so
+    // no intermediate exceeds the true term, which is below 1e29 for any array length.
+    let private tieGroups (ranks: float[]) : struct (float * float) =
+        let sorted = Array.sort ranks
+        let mutable sum = 0.0
+        let mutable largest = 0.0
+        let mutable start = 0
+
+        while start < sorted.Length do
+            let mutable stop = start
+
+            while stop + 1 < sorted.Length && sorted[stop + 1] = sorted[start] do
+                stop <- stop + 1
+
+            let t = float (stop - start + 1)
+            sum <- sum + (t - 1.0) * t * (t + 1.0)
+            largest <- Math.Max(largest, t)
+            start <- stop + 1
+
+        struct (sum, largest)
+
+    // The p-value of a rank statistic by the normal approximation with R's continuity correction: z = (statistic −
+    // mean − c)/σ with c = 1/2 for Greater, −1/2 for Less, and sign(statistic − mean)/2 two-sided.
+    let private rankPValue (alternative: Alternative) (statistic: float) (mean: float) (variance: float) : float =
+        let correction =
+            match alternative with
+            | Greater -> 0.5
+            | Less -> -0.5
+            | TwoSided -> if statistic > mean then 0.5 elif statistic < mean then -0.5 else 0.0
+
+        PValue.normal alternative ((statistic - mean - correction) / sqrt variance)
+
+    let private hasNaN (xs: float[]) : bool = Array.exists (fun x -> Double.IsNaN x) xs
+
+    /// <summary>
+    /// The Mann–Whitney (Wilcoxon rank-sum) test of the first sample against the second by the normal approximation,
+    /// following R's <c>wilcox.test(exact = FALSE, correct = TRUE)</c> (read from wilcox.test.R at
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/wilcox.test.R, from documentation).
+    /// Statistic is U = R − n(n + 1)/2, with R the sum of the first sample's average ranks in the pooled sample and n
+    /// its size. The null distribution has mean n m/2 and variance (n m/12)((N + 1) − Σ(t³ − t)/(N(N − 1))) with
+    /// N = n + m and t the sizes of the groups of tied values; z = (U − n m/2 − c)/σ with c = 1/2 for Greater, −1/2 for
+    /// Less and sign(U − n m/2)/2 two-sided. Less means the first sample's location is below the second's. Where
+    /// every observation is tied the variance is 0 and the p-value is NaN (R's trunk returns 1, from documentation, wilcox.test.R). Either sample empty or holding
+    /// a NaN gives every field NaN and raises nothing; both degrees-of-freedom fields are NaN. Values of any
+    /// magnitude, infinities included, enter only through their order. Cost: O((n + m) log(n + m)). The p-value is an
+    /// approximation: R computes it exactly where both samples hold fewer than 50 observations and has no ties
+    /// (from documentation, wilcox.test.R). Relative error of the p-value at most 1e-12 against the approximating
+    /// formula over the three data sets of the test "Mann–Whitney against the reference" (ties and U on each side of
+    /// its mean, and U at its mean), which pins it against the script <c>tests/reference/special.py</c>, section ranks.
+    /// </summary>
+    let mannWhitney (alternative: Alternative) (x: float[]) (y: float[]) : TestResult =
+        if x.Length = 0 || y.Length = 0 || hasNaN x || hasNaN y then
+            TestSupport.nanResult
+        else
+            let n = float x.Length
+            let m = float y.Length
+            let ranks = Describe.ranks (Array.append x y)
+            let mutable rankSum = 0.0
+
+            for i in 0 .. x.Length - 1 do
+                rankSum <- rankSum + ranks[i]
+
+            let u = rankSum - n * (n + 1.0) / 2.0
+            let struct (ties, largest) = tieGroups ranks
+            let total = n + m
+
+            let p =
+                if largest = total then
+                    nan
+                else
+                    let variance = n * m / 12.0 * ((total + 1.0) - ties / (total * (total - 1.0)))
+                    rankPValue alternative u (n * m / 2.0) variance
+
+            { TestSupport.nanResult with
+                Statistic = u
+                PValue = p }
+
+    /// <summary>
+    /// The Wilcoxon signed-rank test of the differences against 0 by the normal approximation, following R's
+    /// <c>wilcox.test(exact = FALSE, correct = TRUE)</c> (read from wilcox.test.R at
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/wilcox.test.R, from documentation).
+    /// Zeros are dropped; Statistic is V, the sum of the average ranks of |d| over the positive differences. With n
+    /// the number of non-zero differences the null distribution has mean n(n + 1)/4 and variance
+    /// n(n + 1)(2n + 1)/24 − Σ(t³ − t)/48, t the sizes of the groups of tied |d|, and the continuity correction of
+    /// <c>mannWhitney</c> applies; Less means the differences' location is below 0. Where every difference is zero
+    /// Statistic is 0 and the p-value NaN. An empty array or a NaN gives every field NaN and raises nothing; both
+    /// degrees-of-freedom fields are NaN. Cost: O(n log n). The p-value is an approximation: R computes it exactly where
+    /// n is below 50 and the differences have no ties or zeros (from documentation, wilcox.test.R). Relative error of
+    /// the p-value at most 1e-12 against the approximating formula over the three data sets of the tests "Wilcoxon on
+    /// the sleep differences" and "Wilcoxon against the reference" (ties and a zero, a zero without ties, V at its
+    /// mean), and against closed forms over 100000 differences of ±1 in "the continuity correction and the tie
+    /// correction by closed forms", which pin it against the script <c>tests/reference/special.py</c>, section ranks.
+    /// </summary>
+    let wilcoxonSignedRank (alternative: Alternative) (differences: float[]) : TestResult =
+        if differences.Length = 0 || hasNaN differences then
+            TestSupport.nanResult
+        else
+            let kept = differences |> Array.filter (fun d -> d <> 0.0)
+            let n = float kept.Length
+
+            if kept.Length = 0 then
+                { TestSupport.nanResult with Statistic = 0.0 }
+            else
+                let ranks = Describe.ranks (kept |> Array.map (fun d -> Math.Abs d))
+                let mutable v = 0.0
+
+                for i in 0 .. kept.Length - 1 do
+                    if kept[i] > 0.0 then
+                        v <- v + ranks[i]
+
+                let struct (ties, _) = tieGroups ranks
+                let variance = n * (n + 1.0) * (2.0 * n + 1.0) / 24.0 - ties / 48.0
+
+                { TestSupport.nanResult with
+                    Statistic = v
+                    PValue = rankPValue alternative v (n * (n + 1.0) / 4.0) variance }
+
+    // Q(λ) = P(K > λ) of the Kolmogorov distribution. Below 1.18 it is 1 − (√(2π)/λ) Σ_{k≥1} exp(−(2k − 1)²π²/(8λ²)),
+    // from there 2 Σ_{k≥1} (−1)^(k−1) exp(−2k²λ²). Each sum stops when the next term is at most 2^-53 of the sum. Below
+    // 0.04 the first theta term is below the smallest double and Q is 1.
+    let private kolmogorovSurvival (lambda: float) : float =
+        let tolerance = 1.1102230246251565e-16
+
+        if lambda < 0.04 then
+            1.0
+        elif lambda < 1.18 then
+            let c = Math.PI * Math.PI / (8.0 * lambda * lambda)
+            let term (k: int) = Math.Exp(-(float ((2 * k - 1) * (2 * k - 1))) * c)
+            let mutable sum = 0.0
+            let mutable k = 1
+
+            let mutable more = true
+
+            while more do
+                sum <- sum + term k
+                k <- k + 1
+                more <- term k > tolerance * sum
+
+            Math.Max(0.0, 1.0 - sqrt (2.0 * Math.PI) / lambda * sum)
+        else
+            let term (k: int) = Math.Exp(-2.0 * float (k * k) * lambda * lambda)
+            let mutable sum = 0.0
+            let mutable k = 1
+
+            let mutable more = true
+
+            while more do
+                sum <- sum + (if k % 2 = 1 then term k else -(term k))
+                k <- k + 1
+                more <- term k > tolerance * sum
+
+            Math.Min(1.0, 2.0 * sum)
+
+    // The result of a Kolmogorov–Smirnov test: D and the Q at lambda.
+    let private kolmogorovResult (d: float) (lambda: float) : TestResult =
+        { TestSupport.nanResult with
+            Statistic = d
+            PValue = kolmogorovSurvival lambda }
+
+    /// <summary>
+    /// The one-sample Kolmogorov–Smirnov test of the sample against the continuous cdf, two-sided, following R's
+    /// <c>ks.test(exact = FALSE)</c> (read from ks.test.R at
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/ks.test.R, from documentation).
+    /// Statistic is D = max over the sorted sample of max(i/n − F(x_i), F(x_i) − (i − 1)/n), the largest gap between the
+    /// empirical cdf and F; the p-value is Q(√n D), Q the survival function of the Kolmogorov distribution, summed as
+    /// the alternating series 2 Σ(−1)^(k−1) exp(−2k²λ²) from λ = 1.18 and as 1 − (√(2π)/λ) Σ exp(−(2k − 1)²π²/(8λ²))
+    /// below it (general knowledge), each sum stopping when the next term is at most 2^-53 of the sum: at most 3 terms
+    /// for λ from 0.04 to 6 (measured here: <c>python -I tests/reference/special.py ranks</c> asserts it on a grid of
+    /// step 0.001), and 1 beyond. Q is 1 below λ = 0.04 and underflows to 0 above λ of about 19 (general knowledge).
+    /// An empty sample, a NaN, or a cdf value that is NaN or outside [0, 1] gives every field NaN and raises nothing;
+    /// both degrees-of-freedom fields are NaN. Cost: O(n log n) and n calls of the cdf. The p-value is an
+    /// approximation: R computes it exactly for n below 100 without ties (from documentation, ks.test.R), and it is not
+    /// valid for tied observations or a cdf fitted to the sample. Relative error of the p-value at most 1e-12 against
+    /// the series over the tests "one-sample Kolmogorov–Smirnov" and "the Kolmogorov series on each side of the switch
+    /// at lambda 1.18" (λ of 0.52, 1.17 and 1.19), and "Kolmogorov–Smirnov at small and large lambda", which pin it
+    /// against the script <c>tests/reference/special.py</c>, section ranks.
+    /// </summary>
+    let kolmogorovSmirnov (cdf: float -> float) (xs: float[]) : TestResult =
+        if xs.Length = 0 || hasNaN xs then
+            TestSupport.nanResult
+        else
+            let sorted = Array.sort xs
+            let n = float sorted.Length
+            let mutable d = 0.0
+            let mutable valid = true
+
+            for i in 0 .. sorted.Length - 1 do
+                let f = cdf sorted[i]
+
+                if f >= 0.0 && f <= 1.0 then
+                    d <- Math.Max(d, Math.Max(float (i + 1) / n - f, f - float i / n))
+                else
+                    valid <- false
+
+            if valid then
+                kolmogorovResult d (sqrt n * d)
+            else
+                TestSupport.nanResult
+
+    /// <summary>
+    /// The two-sample Kolmogorov–Smirnov test of the two samples' distributions, two-sided, following R's
+    /// <c>ks.test(exact = FALSE)</c> (read from ks.test.R at
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/ks.test.R, from documentation).
+    /// Statistic is D, the largest gap between the two empirical cdfs, evaluated after every tied value is included;
+    /// the p-value is Q(√(n m/(n + m)) D) with the series, term count and underflow of
+    /// <c>kolmogorovSmirnov</c>. An empty sample or a NaN gives every field NaN and raises nothing; both
+    /// degrees-of-freedom fields are NaN. Cost: O((n + m) log(n + m)). The p-value is an approximation: R computes it
+    /// exactly where n m is below 10000 (from documentation, ks.test.R). Relative error of the p-value at most 1e-12
+    /// against the series over the data sets of the test "two-sample Kolmogorov–Smirnov" (λ of 0.89 and 1.73, with a
+    /// tied value), which pins it against the script <c>tests/reference/special.py</c>, section ranks.
+    /// </summary>
+    let kolmogorovSmirnovTwoSample (x: float[]) (y: float[]) : TestResult =
+        if x.Length = 0 || y.Length = 0 || hasNaN x || hasNaN y then
+            TestSupport.nanResult
+        else
+            let a = Array.sort x
+            let b = Array.sort y
+            let n = float a.Length
+            let m = float b.Length
+            let mutable i = 0
+            let mutable j = 0
+            let mutable d = 0.0
+
+            while i < a.Length || j < b.Length do
+                let v =
+                    if i = a.Length then b[j]
+                    elif j = b.Length then a[i]
+                    else Math.Min(a[i], b[j])
+
+                while i < a.Length && a[i] = v do
+                    i <- i + 1
+
+                while j < b.Length && b[j] = v do
+                    j <- j + 1
+
+                d <- Math.Max(d, Math.Abs(float i * m - float j * n) / (n * m))
+
+            kolmogorovResult d (sqrt (n * m / (n + m)) * d)

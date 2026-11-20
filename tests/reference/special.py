@@ -2028,6 +2028,182 @@ def section_counts() -> None:
         [(a, b, c, d) + exact_test_row(masses, a)],
     )
 
+MW_X = [1.1, 2.2, 2.2, 3.5, 4.0]
+MW_Y = [2.2, 3.0, 5.1, 6.3, 6.3, 7.0]
+MW_NO_TIES_X = [1.0, 4.0]
+MW_NO_TIES_Y = [2.0, 3.0]
+WILCOXON_D = [1.5, -0.5, 2.0, 3.0, -1.0, 2.5, 4.0, 0.0, 3.5]
+WILCOXON_AT_MEAN = [3.0, -1.0, -2.0]
+KS_ONE_SAMPLE = [[0.1, 0.4, 0.7], [0.0, 0.173], [0.0, 0.158]]
+KS_TWO_SAMPLE = [
+    ([1.0, 2.0, 3.0, 4.0], [3.0, 4.0, 5.0, 6.0, 7.0]),
+    ([float(i) for i in range(1, 7)], [float(i) for i in range(7, 13)]),
+]
+KS_SWITCH = 1.18
+FLOAT_TOLERANCE = 2.0**-53
+
+
+def average_ranks(values: list[Fraction]) -> list[Fraction]:
+    """The 1-based ranks of the values, tied values sharing the average of their positions."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [Fraction(0)] * len(values)
+    start = 0
+    while start < len(order):
+        stop = start
+        while stop + 1 < len(order) and values[order[stop + 1]] == values[order[start]]:
+            stop += 1
+        for k in range(start, stop + 1):
+            ranks[order[k]] = Fraction(start + stop, 2) + 1
+        start = stop + 1
+    return ranks
+
+
+def tie_sum(ranks: list[Fraction]) -> int:
+    """The sum of t^3 - t over the groups of t equal ranks."""
+    return sum(t**3 - t for t in (ranks.count(r) for r in set(ranks)))
+
+
+def normal_tests(statistic: Fraction, mean: Fraction, variance: Fraction) -> tuple:
+    """(statistic, Less, Greater, TwoSided) of a rank statistic by the normal approximation with R's continuity
+    correction: z = (statistic - mean - c) / sigma, c = -1/2 for Less, 1/2 for Greater, sign(statistic - mean) / 2
+    two-sided."""
+    sigma = dec(variance).sqrt()
+
+    def z(c: Fraction) -> Decimal:
+        return dec(statistic - mean - c) / sigma
+
+    sign = (statistic > mean) - (statistic < mean)
+    less = normal_cdf(z(Fraction(-1, 2)))
+    greater = normal_sf(z(Fraction(1, 2)))
+    two = z(Fraction(sign, 2))
+    return (dec(statistic), less, greater, min(Decimal(1), 2 * min(normal_cdf(two), normal_sf(two))))
+
+
+def mann_whitney_test(xs: list[float], ys: list[float]) -> tuple:
+    nx, ny = len(xs), len(ys)
+    total = nx + ny
+    ranks = average_ranks([Fraction(v) for v in xs + ys])
+    u = sum(ranks[:nx], Fraction(0)) - Fraction(nx * (nx + 1), 2)
+    variance = Fraction(nx * ny, 12) * (total + 1 - Fraction(tie_sum(ranks), total * (total - 1)))
+    return normal_tests(u, Fraction(nx * ny, 2), variance)
+
+
+def wilcoxon_test(differences: list[float]) -> tuple:
+    kept = [Fraction(d) for d in differences if d != 0.0]
+    n = len(kept)
+    ranks = average_ranks([abs(d) for d in kept])
+    v = sum((r for r, d in zip(ranks, kept) if d > 0), Fraction(0))
+    variance = Fraction(n * (n + 1) * (2 * n + 1), 24) - Fraction(tie_sum(ranks), 48)
+    return normal_tests(v, Fraction(n * (n + 1), 4), variance)
+
+
+def kolmogorov_q(lam: Decimal) -> Decimal:
+    """Q(lam) = 2 sum_{k>=1} (-1)^(k-1) exp(-2 k^2 lam^2), summed until a term falls below 1e-60."""
+    total = Decimal(0)
+    k = 1
+    while True:
+        term = (-2 * k * k * lam * lam).exp()
+        total += term if k % 2 else -term
+        if term < TRUNCATION:
+            return 2 * total
+        k += 1
+
+
+def kolmogorov_theta_q(lam: Decimal) -> Decimal:
+    """Q(lam) = 1 - (sqrt(2 pi) / lam) sum_{k>=1} exp(-(2k - 1)^2 pi^2 / (8 lam^2)), summed until a term falls below
+    1e-60."""
+    total = Decimal(0)
+    k = 1
+    while True:
+        term = (-((2 * k - 1) ** 2) * pi() * pi() / (8 * lam * lam)).exp()
+        total += term
+        if term < TRUNCATION:
+            return 1 - (2 * pi()).sqrt() / lam * total
+        k += 1
+
+
+def float_series_terms(lam: float) -> int:
+    """The number of terms the double-precision Q of the library sums at lam: it stops when the next term is not above
+    2^-53 of the sum (the theta series below the switch, the alternating series from it)."""
+    theta = lam < KS_SWITCH
+    c = math.pi**2 / (8.0 * lam * lam)
+
+    def term(k: int) -> float:
+        return math.exp(-((2 * k - 1) ** 2) * c) if theta else math.exp(-2.0 * k * k * lam * lam)
+
+    total = 0.0
+    k = 1
+    while True:
+        total += term(k) if theta or k % 2 else -term(k)
+        if term(k + 1) <= FLOAT_TOLERANCE * total:
+            return k
+        k += 1
+
+
+def check_kolmogorov_helpers() -> None:
+    """Exits 1 unless the two forms of Q agree to 1e-50 at 60 digits at four points, and unless the double series needs
+    at most 3 terms over lam from 0.04 to 6 in steps of 0.001 (the bound the doc comment of the library states)."""
+    with localcontext() as ctx:
+        ctx.prec = DIGITS
+        for lam in ("0.5", "1.18", "1.5", "3"):
+            difference = kolmogorov_q(Decimal(lam)) - kolmogorov_theta_q(Decimal(lam))
+            if abs(difference) > Decimal("1e-50"):
+                sys.exit(f"check failed: the two forms of Q differ by {difference} at lam = {lam}")
+    worst = max(float_series_terms(0.04 + i * 0.001) for i in range(5961))
+    if worst > 3:
+        sys.exit(f"check failed: the double series needs {worst} terms")
+
+
+def ks_d_one_sample(xs: list[float]) -> Fraction:
+    """The largest gap between the empirical cdf and F(x) = min(1, max(0, x)), exact."""
+    values = sorted(Fraction(x) for x in xs)
+    n = len(values)
+    gaps = []
+    for i, x in enumerate(values, start=1):
+        f = min(Fraction(1), max(Fraction(0), x))
+        gaps += [Fraction(i, n) - f, f - Fraction(i - 1, n)]
+    return max(gaps)
+
+
+def ks_d_two_sample(xs: list[float], ys: list[float]) -> Fraction:
+    """The largest gap between the two empirical cdfs, evaluated at every distinct value, exact."""
+    n, m = len(xs), len(ys)
+    return max(
+        abs(Fraction(sum(x <= v for x in xs), n) - Fraction(sum(y <= v for y in ys), m)) for v in set(xs + ys)
+    )
+
+
+def ks_p(ratio: Fraction, d: Fraction) -> Decimal:
+    """Q(sqrt(ratio) * d)."""
+    return kolmogorov_q(dec(ratio).sqrt() * dec(d))
+
+
+def ks_row(ratio: Fraction, d: Fraction) -> tuple[float, float]:
+    return float(d), value(ks_p, ratio, d)
+
+
+def section_ranks() -> None:
+    print("// python -I tests/reference/special.py ranks")
+    print("// Mann-Whitney and Wilcoxon: the statistic, then the Less, Greater and TwoSided p-values")
+    print("// Kolmogorov-Smirnov: D, then the p-value Q(lambda), lambda = sqrt(n) D or sqrt(n m / (n + m)) D")
+    print()
+    check_kolmogorov_helpers()
+    emit(
+        "mannWhitneyCases",
+        [
+            row_values(mann_whitney_test, MW_X, MW_Y),
+            row_values(mann_whitney_test, MW_Y, MW_X),
+            row_values(mann_whitney_test, MW_NO_TIES_X, MW_NO_TIES_Y),
+        ],
+    )
+    emit("wilcoxonCases", [row_values(wilcoxon_test, d) for d in (SLEEP_DIFFERENCES, WILCOXON_D, WILCOXON_AT_MEAN)])
+    emit("ksOneSampleCases", [ks_row(Fraction(len(xs)), ks_d_one_sample(xs)) for xs in KS_ONE_SAMPLE])
+    emit(
+        "ksTwoSampleCases",
+        [ks_row(Fraction(len(xs) * len(ys), len(xs) + len(ys)), ks_d_two_sample(xs, ys)) for xs, ys in KS_TWO_SAMPLE],
+    )
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -2048,6 +2224,7 @@ SECTIONS = {
     "intervals": section_intervals,
     "parametric": section_parametric,
     "counts": section_counts,
+    "ranks": section_ranks,
 }
 
 if __name__ == "__main__":

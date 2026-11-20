@@ -99,6 +99,66 @@ let private anovaGroups: float[][] =
         [| 13.0; 9.0; 11.0; 8.0; 7.0; 12.0 |]
     |]
 
+// python -I tests/reference/special.py ranks
+// Mann-Whitney and Wilcoxon: the statistic, then the Less, Greater and TwoSided p-values.
+// Kolmogorov-Smirnov: D, then the p-value Q(lambda), lambda = sqrt(n) D or sqrt(n m / (n + m)) D.
+// The data sets of each table are listed beside it, in the order of its rows.
+let private mannWhitneyCases: struct (float * float * float * float)[] =
+    [|
+        struct (5.0, 0.039671841598857505, 0.9737610105144929, 0.07934368319771501)
+        struct (25.0, 0.9737610105144929, 0.039671841598857505, 0.07934368319771501)
+        struct (2.0, 0.6507323208483307, 0.6507323208483307, 1.0)
+    |]
+
+// x then y: ties, U below its mean (correction -1/2); the same samples swapped, U above its mean (correction +1/2);
+// no ties, U at its mean (correction 0).
+let private mannWhitneyData: (float[] * float[])[] =
+    [|
+        [| 1.1; 2.2; 2.2; 3.5; 4.0 |], [| 2.2; 3.0; 5.1; 6.3; 6.3; 7.0 |]
+        [| 2.2; 3.0; 5.1; 6.3; 6.3; 7.0 |], [| 1.1; 2.2; 2.2; 3.5; 4.0 |]
+        [| 1.0; 4.0 |], [| 2.0; 3.0 |]
+    |]
+
+let private wilcoxonCases: struct (float * float * float * float)[] =
+    [|
+        struct (0.0, 0.004545349007962531, 0.9968062667242578, 0.009090698015925063)
+        struct (33.0, 0.9850130132067221, 0.021157637452856988, 0.042315274905713976)
+        struct (3.0, 0.6053659869328594, 0.6053659869328594, 1.0)
+    |]
+
+// the sleep differences (ties, one zero dropped, V below its mean); no ties, one zero dropped; V at its mean
+let private wilcoxonData: float[][] =
+    [|
+        sleepDifferences
+        [| 1.5; -0.5; 2.0; 3.0; -1.0; 2.5; 4.0; 0.0; 3.5 |]
+        [| 3.0; -1.0; -2.0 |]
+    |]
+
+// D = 0.3 at lambda = sqrt 3 * 0.3; D = 0.827 and 0.842 at lambda = 1.1696 and 1.1908, on each side of the switch 1.18
+let private ksOneSampleCases: struct (float * float)[] =
+    [|
+        struct (0.30000000000000004, 0.949996191357454)
+        struct (0.827, 0.1296597517756618)
+        struct (0.842, 0.11731287429923752)
+    |]
+
+let private ksOneSampleData: float[][] = [| [| 0.1; 0.4; 0.7 |]; [| 0.0; 0.173 |]; [| 0.0; 0.158 |] |]
+
+// lambda = sqrt(20/9) * 0.6 (below the switch) and sqrt 3 (above it)
+let private ksTwoSampleCases: struct (float * float)[] =
+    [|
+        struct (0.6, 0.40047103620845775)
+        struct (1.0, 0.004957504277830026)
+    |]
+
+let private ksTwoSampleData: (float[] * float[])[] =
+    [|
+        [| 1.0; 2.0; 3.0; 4.0 |], [| 3.0; 4.0; 5.0; 6.0; 7.0 |]
+        [| 1.0 .. 6.0 |], [| 7.0 .. 12.0 |]
+    |]
+
+let private unitCdf (x: float) : float = max 0.0 (min 1.0 x)
+
 let private isNaN (x: float) : bool = Double.IsNaN x
 
 // Within 1e-12 of the expected value, relative.
@@ -472,4 +532,155 @@ let tests =
             testCase "a zero row of a table gives NaN fields" (fun () ->
                 allNaN "zero row" (HypothesisTest.chiSquaredIndependence [| [| 0.0; 0.0 |]; [| 3.0; 4.0 |] |])
                 allNaN "zero column" (HypothesisTest.chiSquaredIndependence [| [| 0.0; 2.0 |]; [| 0.0; 4.0 |] |]))
+
+            testCase "Mann–Whitney against the reference" (fun () ->
+                for i in 0 .. mannWhitneyCases.Length - 1 do
+                    let struct (u, less, greater, two) = mannWhitneyCases[i]
+                    let x, y = mannWhitneyData[i]
+                    let run alt = HypothesisTest.mannWhitney alt x y
+                    let r = run TwoSided
+                    close ("U of case " + string i) r.Statistic u
+                    Expect.isTrue (isNaN r.DegreesOfFreedom) "DegreesOfFreedom is NaN"
+                    Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+                    pValues ("Mann–Whitney case " + string i) run less greater two)
+
+            testCase "Wilcoxon on the sleep differences" (fun () ->
+                // The tie-corrected normal approximation of the ten differences, one of them zero and dropped.
+                // R's printed V = 0, p-value = 0.009091 for wilcox.test(extra ~ group, data = sleep, paired = TRUE) is
+                // not asserted: no R output was read here. Python's statistics.NormalDist from the tie-corrected
+                // formula gave 0.0090907 (measured by the plan author, not re-run here); the script's value is below.
+                let struct (v, less, greater, two) = wilcoxonCases[0]
+                let run alt = HypothesisTest.wilcoxonSignedRank alt sleepDifferences
+                let r = run TwoSided
+                Expect.equal r.Statistic 0.0 "V, the sum of the positive ranks"
+                Expect.equal v 0.0 "the script agrees"
+                Expect.isTrue (isNaN r.DegreesOfFreedom) "DegreesOfFreedom is NaN"
+                Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+                pValues "sleep" run less greater two)
+
+            testCase "Wilcoxon against the reference" (fun () ->
+                for i in 1 .. wilcoxonCases.Length - 1 do
+                    let struct (v, less, greater, two) = wilcoxonCases[i]
+                    let run alt = HypothesisTest.wilcoxonSignedRank alt wilcoxonData[i]
+                    close ("V of case " + string i) (run TwoSided).Statistic v
+                    pValues ("Wilcoxon case " + string i) run less greater two)
+
+            testCase "the continuity correction and the tie correction by closed forms" (fun () ->
+                // 100000 differences of +1 and -1: one tie group of |d|, V = 50000 * 50000.5 = n (n + 1) / 4 exactly.
+                // Every rank is (n + 1) / 2, so the variance of V over the sign flips is n ((n + 1) / 2)^2 / 4 and
+                // sigma = (n + 1) sqrt n / 4; the library's n (n + 1) (2n + 1) / 24 - (n^3 - n) / 48 gives the same.
+                let n = 100000.0
+                let alternating = Array.init 100000 (fun i -> if i % 2 = 0 then 1.0 else -1.0)
+                let sigma = (n + 1.0) * sqrt n / 4.0
+                let standardNormal = Continuous.normal 0.0 1.0
+                let r = HypothesisTest.wilcoxonSignedRank TwoSided alternating
+                Expect.equal r.Statistic 2500025000.0 "V"
+                Expect.equal r.PValue 1.0 "V at its mean: no correction, two-sided 1"
+
+                let less = (HypothesisTest.wilcoxonSignedRank Less alternating).PValue
+                let expected = Continuous.cdf standardNormal (0.5 / sigma)
+                Expect.isLessThanOrEqual (abs (less - expected)) (1e-13 * expected) "Less, correction -1/2"
+
+                let greater = (HypothesisTest.wilcoxonSignedRank Greater alternating).PValue
+                Expect.isLessThanOrEqual (abs (greater - expected)) (1e-13 * expected) "Greater, correction +1/2")
+
+            testCase "one-sample Kolmogorov–Smirnov" (fun () ->
+                let xs = [| 0.1; 0.4; 0.7 |]
+                let r = HypothesisTest.kolmogorovSmirnov unitCdf xs
+                // By hand: the largest of i/n - F and F - (i - 1)/n is 1 - 0.7 at the last point.
+                Expect.isLessThanOrEqual (abs (r.Statistic - 0.3)) 1e-15 "D is 0.3"
+                Expect.isTrue (isNaN r.DegreesOfFreedom) "DegreesOfFreedom is NaN"
+                Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+                let struct (_, p) = ksOneSampleCases[0]
+                close "p-value Q(sqrt 3 * 0.3)" r.PValue p)
+
+            testCase "the Kolmogorov series on each side of the switch at lambda 1.18" (fun () ->
+                // lambda = sqrt 2 * D: 1.1696 (theta series) and 1.1908 (alternating series), the p-values 0.1297 and 0.1173
+                for i in 1 .. ksOneSampleCases.Length - 1 do
+                    let struct (d, p) = ksOneSampleCases[i]
+                    let r = HypothesisTest.kolmogorovSmirnov unitCdf ksOneSampleData[i]
+                    Expect.isLessThanOrEqual (abs (r.Statistic - d)) 1e-15 ("D of case " + string i)
+                    close ("p-value of case " + string i) r.PValue p)
+
+            testCase "two-sample Kolmogorov–Smirnov" (fun () ->
+                for i in 0 .. ksTwoSampleCases.Length - 1 do
+                    let struct (d, p) = ksTwoSampleCases[i]
+                    let x, y = ksTwoSampleData[i]
+                    let r = HypothesisTest.kolmogorovSmirnovTwoSample x y
+                    // By hand, the first pair: after the tied value 4 the cdfs are 4/4 and 2/5, a gap of 0.6.
+                    // The second pair is fully separated: D = 1.
+                    Expect.isLessThanOrEqual (abs (r.Statistic - d)) 1e-15 ("D of case " + string i)
+                    Expect.isTrue (isNaN r.DegreesOfFreedom) "DegreesOfFreedom is NaN"
+                    Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+                    close ("p-value of case " + string i) r.PValue p)
+
+            testCase "two-sample Kolmogorov–Smirnov is symmetric in the samples" (fun () ->
+                let x, y = ksTwoSampleData[0]
+                let a = HypothesisTest.kolmogorovSmirnovTwoSample x y
+                let b = HypothesisTest.kolmogorovSmirnovTwoSample y x
+                Expect.equal a.Statistic b.Statistic "D"
+                Expect.equal a.PValue b.PValue "p-value")
+
+            testCase "Kolmogorov–Smirnov at small and large lambda" (fun () ->
+                // Midpoints of 10000 equal cells against the uniform cdf: D = 1 / (2n) and lambda = 0.005, Q = 1.
+                let n = 10000
+                let midpoints = Array.init n (fun i -> (float i + 0.5) / float n)
+                let small = HypothesisTest.kolmogorovSmirnov unitCdf midpoints
+                Expect.isLessThanOrEqual (abs (small.Statistic - 0.5 / float n)) 1e-15 "D"
+                Expect.equal small.PValue 1.0 "Q(0.005) is 1 to the last bit"
+
+                // Equal samples: D = 0, lambda = 0.
+                let same = HypothesisTest.kolmogorovSmirnovTwoSample [| 1.0; 2.0; 3.0 |] [| 1.0; 2.0; 3.0 |]
+                Expect.equal same.Statistic 0.0 "D of equal samples"
+                Expect.equal same.PValue 1.0 "Q(0) is 1"
+
+                // Two separated samples of 5000: lambda = 50 and Q = 2 exp(-5000) underflows to 0; the p-value is 0, not NaN.
+                let far =
+                    HypothesisTest.kolmogorovSmirnovTwoSample [| 1.0 .. 5000.0 |] [| 5001.0 .. 10000.0 |]
+
+                Expect.equal far.Statistic 1.0 "D of separated samples"
+                Expect.equal far.PValue 0.0 "Q(50) underflows")
+
+            testCase "an invalid cdf gives NaN fields" (fun () ->
+                allNaN "cdf of 2" (HypothesisTest.kolmogorovSmirnov (fun _ -> 2.0) [| 0.1; 0.2 |])
+                allNaN "cdf of -1" (HypothesisTest.kolmogorovSmirnov (fun _ -> -1.0) [| 0.1; 0.2 |])
+                allNaN "cdf of NaN" (HypothesisTest.kolmogorovSmirnov (fun _ -> nan) [| 0.1; 0.2 |]))
+
+            testCase "rank tests do not depend on the magnitude of the data" (fun () ->
+                let huge = [| -1e308; 1e308; infinity; -infinity |]
+                let other = [| 5e307; -5e307; 1.0 |]
+
+                for alt in [| TwoSided; Less; Greater |] do
+                    let m = HypothesisTest.mannWhitney alt huge other
+                    Expect.isTrue (m.PValue >= 0.0 && m.PValue <= 1.0) "Mann–Whitney p-value is a probability"
+                    let w = HypothesisTest.wilcoxonSignedRank alt (Array.append huge other)
+                    Expect.isTrue (w.PValue >= 0.0 && w.PValue <= 1.0) "Wilcoxon p-value is a probability"
+
+                let ks = HypothesisTest.kolmogorovSmirnovTwoSample huge other
+                Expect.isTrue (ks.PValue >= 0.0 && ks.PValue <= 1.0) "Kolmogorov–Smirnov p-value is a probability")
+
+            testCase "all observations tied give a NaN p-value" (fun () ->
+                for alt in [| TwoSided; Less; Greater |] do
+                    let m = HypothesisTest.mannWhitney alt [| 1.0; 1.0 |] [| 1.0; 1.0; 1.0 |]
+                    Expect.equal m.Statistic 3.0 "U, the mean"
+                    Expect.isTrue (isNaN m.PValue) "Mann–Whitney p-value is NaN"
+                    let w = HypothesisTest.wilcoxonSignedRank alt [| 0.0; 0.0 |]
+                    Expect.equal w.Statistic 0.0 "V of no differences"
+                    Expect.isTrue (isNaN w.PValue) "Wilcoxon p-value is NaN")
+
+            testCase "NaN or empty samples give NaN fields" (fun () ->
+                for alt in [| TwoSided; Less; Greater |] do
+                    allNaN "mannWhitney NaN x" (HypothesisTest.mannWhitney alt [| 1.0; nan |] [| 2.0; 3.0 |])
+                    allNaN "mannWhitney NaN y" (HypothesisTest.mannWhitney alt [| 1.0; 2.0 |] [| nan |])
+                    allNaN "mannWhitney empty x" (HypothesisTest.mannWhitney alt [||] [| 2.0; 3.0 |])
+                    allNaN "mannWhitney empty y" (HypothesisTest.mannWhitney alt [| 1.0 |] [||])
+                    allNaN "wilcoxon NaN" (HypothesisTest.wilcoxonSignedRank alt [| 1.0; nan; -2.0 |])
+                    allNaN "wilcoxon empty" (HypothesisTest.wilcoxonSignedRank alt [||])
+
+                allNaN "ks NaN" (HypothesisTest.kolmogorovSmirnov unitCdf [| 0.1; nan |])
+                allNaN "ks empty" (HypothesisTest.kolmogorovSmirnov unitCdf [||])
+                allNaN "ks two-sample NaN x" (HypothesisTest.kolmogorovSmirnovTwoSample [| 1.0; nan |] [| 2.0 |])
+                allNaN "ks two-sample NaN y" (HypothesisTest.kolmogorovSmirnovTwoSample [| 1.0 |] [| nan |])
+                allNaN "ks two-sample empty x" (HypothesisTest.kolmogorovSmirnovTwoSample [||] [| 2.0 |])
+                allNaN "ks two-sample empty y" (HypothesisTest.kolmogorovSmirnovTwoSample [| 1.0 |] [||]))
         ]
