@@ -74,7 +74,7 @@ let tests =
             test "each source is new and independent" {
                 let a = Uncertain.source 0.3 1.0
                 let b = Uncertain.source 0.3 1.0
-                // sqrt (fl (u * u)) = u for a binary float without overflow or underflow.
+                // One contribution u gives |u|·√1 = u exactly.
                 Expect.equal (Uncertain.standardUncertainty a) 0.3 "a's standard uncertainty"
                 Expect.equal (Uncertain.standardUncertainty b) 0.3 "b's standard uncertainty"
                 Expect.equal (contributionOf a) 0.3 "a's one contribution"
@@ -248,6 +248,46 @@ let tests =
                 within 1e-14 c[1] (8.0 * log 2.0 * 0.2) "q's contribution"
             }
 
+            test "a zero exponent has derivative 0 at a base of 0" {
+                // x^0 = 1 at every x, so ∂(x^0)/∂x = 0 there too, where y·x^(y−1) would be 0 · (+∞).
+                let x = Uncertain.source 1.0 0.0
+                let r = x ** 0.0
+                Expect.equal (Uncertain.value r) 1.0 "0 ** 0.0 is 1"
+                Expect.equal (Uncertain.standardUncertainty r) 0.0 "x ** 0.0 at 0 ± 1 has uncertainty 0"
+            }
+
+            test "an uncertain exponent at a base of 0" {
+                // ∂(x^y)/∂y = x^y·ln x with ln 0 = −∞: 0 · (−∞) = NaN for y > 0, 1 · (−∞) = −∞ for y = 0 and
+                // (+∞) · (−∞) = −∞ for y < 0. ∂(x^y)/∂x = y·x^(y−1) is 0 at y = 0.
+                let x = Uncertain.source 0.1 0.0
+                let at (y: float) = amountsOf (x ** Uncertain.source 0.2 y)
+                let positive = at 2.0
+                let zero = at 0.0
+                let negative = at -1.0
+                Expect.isTrue (Double.IsNaN positive[1]) "y = 2: NaN in the exponent"
+                Expect.equal zero[1] -infinity "y = 0: −∞ in the exponent"
+                Expect.equal negative[1] -infinity "y = −1: −∞ in the exponent"
+                Expect.equal zero[0] 0.0 "y = 0: 0 in the base"
+            }
+
+            test "standardUncertainty neither underflows nor overflows" {
+                // One contribution c gives m·√((c/m)²) = m·√1 = |c| exactly, with m = |c|.
+                for c in [ 1e-170; 1e155 ] do
+                    Expect.equal (Uncertain.standardUncertainty (Uncertain.source c 1.0)) c (sprintf "one contribution %g" c)
+
+                // 3, 4 and 5 scaled by 1e-170 and 1e155: √(3² + 4²) = 5 (closed form).
+                for scale in [ 1e-170; 1e155 ] do
+                    let a = Uncertain.source (3.0 * scale) 0.0
+                    let b = Uncertain.source (4.0 * scale) 0.0
+                    let actual = Uncertain.standardUncertainty (a + b)
+
+                    Expect.isTrue
+                        (rel actual (5.0 * scale) <= 1e-15)
+                        (sprintf "%.17g within relative 1e-15 of %.17g" actual (5.0 * scale))
+
+                Expect.equal (Uncertain.standardUncertainty (Uncertain.source infinity 1.0)) infinity "+∞ propagates"
+            }
+
             test "map and map2" {
                 let x = Uncertain.source 0.1 3.0
                 let y = Uncertain.source 0.2 4.0
@@ -278,8 +318,11 @@ let tests =
             }
 
             test "equal arithmetic gives equal values" {
-                let x = Uncertain.source 0.1 3.0
-                Expect.equal (x + 1.0) (x + 1.0) "x + 1.0 = x + 1.0"
+                let a = Uncertain.source 0.1 3.0
+                let b = Uncertain.source 0.2 4.0
+                // Each a + b merges the two sources into new arrays: only a comparison of their contents finds the
+                // two sums equal.
+                Expect.equal (a + b) (a + b) "a + b = a + b"
                 Expect.notEqual (Uncertain.source 0.1 1.0) (Uncertain.source 0.1 1.0) "two sources differ"
             }
         ]
