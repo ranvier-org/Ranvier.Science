@@ -1,6 +1,7 @@
 namespace Ranvier.Quantities
 
 open System
+open Ranvier
 open Ranvier.Numerics
 
 /// The physical constants `Constants.declare` adds to a model, each an entry of the model under the identifier in its
@@ -50,6 +51,11 @@ type PhysicalConstants =
 module Constants =
     let private codata = "CODATA 2022, https://physics.nist.gov/cuu/Constants/"
 
+    /// The identifiers `declare` adds, in the order it adds them.
+    let private identifiers =
+        [ "c"; "h"; "hbar"; "e"; "k_B"; "N_A"; "G"; "m_e"; "m_p"; "m_n"; "m_u"; "alpha"; "R"; "sigma"; "a_0"; "mu_0"
+          "epsilon_0"; "g_n"; "au" ]
+
     /// The constants of CODATA 2022 as entries of `model`, with the identifiers `c h hbar e k_B N_A G epsilon_0 mu_0
     /// m_e m_p m_n m_u alpha R sigma a_0 g_n au`, and each entry's `Name` NIST's name of the quantity. The defining
     /// constants c, h, e, k_B, N_A and the standard acceleration of gravity are exact, as are the constants computed
@@ -57,12 +63,20 @@ module Constants =
     /// m_n, m_u and a_0 are `Quantity.measuredConstant`s with NIST's standard uncertainty, each its own uncertainty
     /// source. μ0 = 2αh/(e²c) and ε0 = 1/(μ0c²) are `Quantity.deriveMeasured` over the `Entry.Measured` of α and of
     /// μ0, so both share α's source: they are correlated with α and with each other (correlation +1 and −1). CODATA
-    /// publishes correlations among several of the measured constants (for example m_e, m_p and m_u); 0.2.0 does not
-    /// keep them, so values computed from two of them treat them as independent. The astronomical unit is exactly
-    /// the scale of `Units.astronomicalUnit`. Creates 19 entries and 4 memos (2 per derived entry), all owned by the
-    /// current owner. Raises `ArgumentException`, as `Quantity.input` does, for an identifier the model already
-    /// declares.
+    /// publishes correlations among several of the measured constants (general knowledge: for example m_e, m_p and
+    /// m_u); 0.2.0 does not keep them, so values computed from two of them treat them as independent. The
+    /// astronomical unit is exactly the scale of `Units.astronomicalUnit`. Creates 19 entries and 4 memos (2 per
+    /// derived entry), all owned by the current owner, so it needs an active graph. Before it declares anything it
+    /// raises `ArgumentException`, as `Quantity.input` does, when the model already declares one of the 19
+    /// identifiers, and `InvalidOperationException` when no graph is active (`Graph.TryCurrent` is `ValueNone`); the
+    /// model is then unchanged. Inside a pure body it raises as every declaration does, also before adding an entry.
     let declare (model: Model) : PhysicalConstants =
+        for id in identifiers do
+            model.Check id
+
+        if Graph.TryCurrent.IsNone then
+            raise (InvalidOperationException "Constants.declare needs an active graph: mu_0 and epsilon_0 are memos.")
+
         let c = 299792458.0
         let h = 6.62607015e-34
         let e = 1.602176634e-19
