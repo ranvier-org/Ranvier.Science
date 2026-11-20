@@ -386,7 +386,7 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
    last value, or keeps its failure. The tracked pages build a new model per mount to avoid the raise (Plan 3's
    second-creation check). A page that mounts and unmounts, or a reload under the `dev` host, meets one or the other: a
    raise on re-declaration, or stale entries in a model kept from before (section 2, entry 6).
-   **0.2.0:** resolved (I6: entries are scoped to their owner and leave the model with it; `LifetimeTests.fs`).
+   **0.2.0:** resolved (I6: entries are scoped to their owner and leave the model with it; a removed entry reads its last value, or keeps its failure, and one removed before its memo ran raises `InvalidOperationException` instead of reading the type's default, a rule added in the T1 final review; `LifetimeTests.fs`).
 6. **The tracked pages repeat drawing code because the originals' helpers take a control row.** The original pages'
    drawing helpers take the page's `float[]` row and the plan forbade changing an original expression, so the drawing
    was written again against the nodes: `PagesTracked.fs` 59-108 and 163-176 (Decay), 234-259 and 296-347 (Attitude)

@@ -728,7 +728,10 @@ second runs only when read. Its unit is the unit `Formula.check` gives.
 Each declaration (input, constant, derived, formula, block) registers a cleanup with the current owner that removes the
 entry, or the block's reserved identifier, from its model. After the owner is cleaned up the identifier may be declared
 again, and `TryFind` no longer finds the entry. A read through a removed entry's functions behaves as the core's
-disposed node does. What "the current owner" is, from core v0.2.1 (`Api.fs` `onCleanup`; `Core.fs` `currentOwner`,
+disposed node does: it answers with the last outcome its memo computed. A memo that never ran has none (the core answers
+with the type's default, a plausible wrong number), so a read through it after the removal raises
+`InvalidOperationException` ("the entry … was removed before it was computed"), and `Status` reports `Failed` with that
+exception; a block's `Value` follows the same rule (changed in the T1 final review). What "the current owner" is, from core v0.2.1 (`Api.fs` `onCleanup`; `Core.fs` `currentOwner`,
 `AddCleanup`, `Graph.Current`, as the T1 plan read them; the author's ruling on the plan's finding):
 
 - Under a graph and outside any root, effect or owning scope, the owner is the graph's root scope, so the entry leaves
@@ -741,7 +744,9 @@ disposed node does. What "the current owner" is, from core v0.2.1 (`Api.fs` `onC
 
 Names resolve once, when an entry or evaluator is created (as in 0.1.0), and do not follow a later declaration of the
 same identifier. So a formula entry, a `measuredEvaluator` or a `monteCarlo` reader that outlives the owner of an entry
-it names keeps reading that entry's last value. The doc comments of `Model`, `Quantity.formula` and the evaluators say
+it names keeps reading that entry's last value, or raises as above when the entry was removed before it was computed; a
+`monteCarlo` reader evaluates a removed formula entry it inlines from its leaves (changed in the T1 final review). The
+doc comments of `Model`, `Quantity.formula` and the evaluators say
 so, and a test pins it. Declaring a page's entries under the page's owner, as the Monitor does, re-creates them all
 together on a re-mount; following re-declarations would make `TryFind` a tracked read and is a candidate for a later
 round. Declarations inside an effect are removed before each re-run of the effect, because the core runs an effect's

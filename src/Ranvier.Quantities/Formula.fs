@@ -621,7 +621,8 @@ module Formula =
     /// without an entry evaluates to `Math.PI`. `hypot(x, y)` is m·√(1 + (n/m)²) with m = max(|x|, |y|) and
     /// n = min(|x|, |y|): 0 when m = 0, +∞ when either operand is infinite, and NaN when either is NaN otherwise.
     /// Creates no node. Names resolve once, when the evaluator is created: an evaluator that outlives the owner of an
-    /// entry it reads keeps reading that entry's last value and does not follow a later declaration of the identifier.
+    /// entry it reads reads that entry's last value, or raises `InvalidOperationException` when the entry was removed
+    /// before it was computed (`Model`'s remarks), and does not follow a later declaration of the identifier.
     /// Raises `ArgumentException` with the message of `check` when `check` of `expr` is an `Error`: for an identifier
     /// `model` lacks, for units that do not combine, for a unit literal that does not parse over `model.Catalogue`,
     /// and for a `Call` outside the notation (only a hand-built `Expr` holds one).
@@ -723,8 +724,9 @@ module Formula =
     /// derivatives x/(x² + y²) in y and −y/(x² + y²) in x, and `hypot(x, y)` x/h in x and y/h in y with
     /// h = hypot(x, y); all four are NaN at the origin. Each operation costs O(m + n) in its operands' numbers of
     /// sources. Creates no node. Names resolve once, when the evaluator is created: an evaluator that outlives the
-    /// owner of an entry it reads keeps reading that entry's last value and does not follow a later declaration of the
-    /// identifier. Raises `ArgumentException` as `evaluator` does, and building costs what it does there.
+    /// owner of an entry it reads reads that entry's last measured value, or raises as `evaluator` does for an entry
+    /// removed before it was computed, and does not follow a later declaration of the identifier. Raises
+    /// `ArgumentException` as `evaluator` does, and building costs what it does there.
     let measuredEvaluator (model: Model) (expr: Expr) : unit -> Uncertain = measuredEvaluatorIn (contextOf model) expr
 
     let private undefined (draws: int) : MonteCarloResult =
@@ -753,8 +755,10 @@ module Formula =
     /// The reader creates no node and evaluates inside the node that reads it. A memo over it publishes its record on
     /// every recomputation, since the core's default equality compares a record by reference. The reader holds its
     /// leaves' values of the current draw, so reads of one reader run one at a time. Names resolve once, when
-    /// the reader is created: a reader that outlives the owner of an entry it reads keeps reading that entry's last
-    /// value and does not follow a later declaration of the identifier. A read costs O(draws · (sources + Σ leaf
+    /// the reader is created: a reader that outlives the owner of a leaf reads that leaf's last measured value, or
+    /// raises as `evaluator` does for a leaf removed before it was computed, and evaluates a removed formula entry it
+    /// inlines from its leaves, not from the entry's last value; it does not follow a later declaration of the
+    /// identifier. A read costs O(draws · (sources + Σ leaf
     /// contributions + size of the inlined expression)) plus a sort of the draws, and allocates an array of the draws.
     /// Creating the reader costs what building `evaluator` does for `expr` and for each inlined formula, and O(l²) in
     /// the number l of leaves. Raises `ArgumentOutOfRangeException` for fewer than 2 draws and for a coverage outside

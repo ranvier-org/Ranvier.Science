@@ -26,12 +26,13 @@ type Entry =
         Kind: QuantityKind
         /// The reference a constant was taken from; "" otherwise.
         Source: string
-        /// A tracked read of the value as a plain number in `Unit`. Raises as the node's read does.
+        /// A tracked read of the value as a plain number in `Unit`. Raises as the node's read does, and
+        /// `InvalidOperationException` after the entry's removal when its node never computed (`Model`'s remarks).
         Read: unit -> float
         /// A tracked read of the status. Never raises.
         Status: unit -> QuantityStatus
         /// A tracked read of the standard uncertainty in `Unit`: 0 for an exact value, NaN when unknown. The read of an
-        /// entry of `Quantity.deriveMeasured` or `Quantity.formula` raises as `Read` does.
+        /// entry of `Quantity.deriveMeasured` or `Quantity.formula` raises as `Measured` does.
         Uncertainty: unit -> float
         /// A tracked read of the value with its contributions by source: `Uncertain.exact` of the value for an input
         /// or a constant while its standard uncertainty is 0. Raises as `Read` does.
@@ -79,15 +80,21 @@ type internal FormulaRecord =
 /// model unchanged.</description></item>
 /// </list>
 /// <para>
-/// A read through a removed entry's functions behaves as the core's disposed node does: a disposed memo answers with its
-/// last computed outcome and stops tracking (core 0.2.1 <c>Core.fs</c>, <c>Memo.Dispose</c>). An input's signals belong
-/// to the graph, not to an owner, and stay settable and tracked.
+/// A read through a removed entry's functions answers as the core's disposed memo does, with the last outcome it
+/// computed, and stops tracking (core 0.2.1 <c>Core.fs</c>, <c>Memo.Dispose</c>). A memo that never ran has no outcome
+/// (the core answers with the type's default), so once an entry is removed, a read through a memo of it that never ran
+/// raises <c>InvalidOperationException</c> (the entry was removed before it was computed): <c>Read</c> and
+/// <c>Measured</c> raise, <c>Status</c> is <c>Failed</c> with that exception, and so for <c>Uncertainty</c> where it
+/// reads a memo. Each memo of an entry over two (<c>Quantity.deriveMeasured</c>, <c>Quantity.formula</c>) answers for
+/// itself, and a block's <c>Value</c> follows the same rule. An input's signals belong to the graph, not to an owner,
+/// and stay settable and tracked; a constant holds no node.
 /// </para>
 /// <para>
 /// Names resolve once, when an entry, an evaluator or a <c>Formula.monteCarlo</c> reader is created. A formula entry,
-/// evaluator or reader that outlives the owner of an entry it reads keeps reading that entry's last value and does not
-/// follow a later declaration of the identifier. A reader inlines a formula entry with the names the entry resolved at
-/// its declaration.
+/// evaluator or reader that outlives the owner of an entry it reads reads that entry as above, its last outcome or the
+/// raise, and does not follow a later declaration of the identifier. A reader inlines a formula entry with the names
+/// the entry resolved at its declaration, so it evaluates a removed formula entry from those leaves and not from the
+/// formula entry's last value.
 /// </para>
 /// <para>A removal costs O(n) in the model's number of entries.</para>
 /// </remarks>

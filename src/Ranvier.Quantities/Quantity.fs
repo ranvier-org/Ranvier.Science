@@ -10,6 +10,19 @@ module internal StandardUncertainty =
         if uncertainty < 0.0 then
             raise (ArgumentOutOfRangeException("uncertainty", "A standard uncertainty must be zero or more, or NaN."))
 
+/// The reads of a declaration whose memo had never run when the declaration left its model.
+module internal Removal =
+    /// True once `removed` is set while `memo` has never run: a disposed memo then has no outcome to answer with.
+    let uncomputed (removed: bool ref) (memo: Memo<'T>) : bool = removed.Value && memo.Runs = 0
+
+    /// `InvalidOperationException` naming the declaration ("entry" or "block") and its identifier.
+    let error (kind: string) (id: string) : exn =
+        InvalidOperationException("The " + kind + " \"" + id + "\" was removed before it was computed.") :> exn
+
+    /// A tracked read of `memo`; raises `error "entry" id` once `uncomputed` holds.
+    let read (removed: bool ref) (id: string) (memo: Memo<'T>) () : 'T =
+        if uncomputed removed memo then raise (error "entry" id) else memo.Value
+
 /// A named quantity of a model.
 type Quantity<[<Measure>] 'u> internal (entry: Entry) =
     member _.Entry: Entry = entry
@@ -34,12 +47,17 @@ type Input<[<Measure>] 'u> internal (entry: Entry, signal: Signal<float>, uncert
 
 /// A named derived value with no single unit, such as an array.
 [<Sealed>]
-type Block<'T> internal (id: string, name: string, memo: Memo<'T>) =
+type Block<'T> internal (id: string, name: string, memo: Memo<'T>, removed: bool ref) =
     member _.Id: string = id
     member _.Name: string = name
 
-    /// A tracked read.
-    member _.Value: 'T = memo.Value
+    /// A tracked read. After the block leaves its model it answers with its last outcome, and raises
+    /// `InvalidOperationException` (the block was removed before it was computed) when it never computed one.
+    member _.Value: 'T =
+        if Removal.uncomputed removed memo then
+            raise (Removal.error "block" id)
+
+        memo.Value
 
 /// Declarations of a model's entries and blocks. Under an active graph each declaration registers, with the current
 /// owner, one cleanup that removes it from its model; inside a pure body it raises `InvalidOperationException`.
@@ -47,11 +65,15 @@ type Block<'T> internal (id: string, name: string, memo: Memo<'T>) =
 module Quantity =
     let private ready () = QuantityStatus.Ready
 
-    let private statusOf (memo: Memo<float>) () : QuantityStatus =
-        match memo.TryValue with
-        | Reading.Ready _ -> QuantityStatus.Ready
-        | Reading.Pending -> QuantityStatus.Pending
-        | Reading.Failed error -> QuantityStatus.Failed error
+    /// The status of `memo`, and `Failed` with `Removal.error "entry" id` once `Removal.uncomputed` holds.
+    let private statusOf (removed: bool ref) (id: string) (memo: Memo<float>) () : QuantityStatus =
+        if Removal.uncomputed removed memo then
+            QuantityStatus.Failed(Removal.error "entry" id)
+        else
+            match memo.TryValue with
+            | Reading.Ready _ -> QuantityStatus.Ready
+            | Reading.Pending -> QuantityStatus.Pending
+            | Reading.Failed error -> QuantityStatus.Failed error
 
     let private unknown () = nan
 
@@ -88,15 +110,13 @@ module Quantity =
             Formula = formula
         }
 
-    /// Registers `remove` with the current owner through `onCleanup`, then runs `add`; with no active graph, runs `add`
-    /// alone. Under an owner already disposed the core runs `remove` at once, and `add` is skipped. Raises as `onCleanup`
-    /// does, before `add` runs.
-    let private declareOwned (add: unit -> unit) (remove: unit -> unit) : unit =
+    /// Registers a cleanup with the current owner through `onCleanup` that sets `removed` and runs `remove`, then runs
+    /// `add`; with no active graph, runs `add` alone. Under an owner already disposed the core runs the cleanup at once,
+    /// and `add` is skipped. Raises as `onCleanup` does, before `add` runs.
+    let private declareOwned (removed: bool ref) (add: unit -> unit) (remove: unit -> unit) : unit =
         match Graph.TryCurrent with
         | ValueNone -> add ()
         | ValueSome _ ->
-            let removed = ref false
-
             onCleanup (fun () ->
                 removed.Value <- true
                 remove ())
@@ -104,12 +124,14 @@ module Quantity =
             if not removed.Value then
                 add ()
 
-    /// Adds the entry to the model, removed from it when the current owner is cleaned up.
-    let private add (model: Model) (e: Entry) : unit =
-        declareOwned (fun () -> model.Add e) (fun () -> model.Remove e)
+    /// Adds the entry to the model, removed from it when the current owner is cleaned up, which also sets `removed`.
+    let private add (model: Model) (removed: bool ref) (e: Entry) : unit =
+        declareOwned removed (fun () -> model.Add e) (fun () -> model.Remove e)
 
     let private derived (model: Model) (id: string) (name: string) (unit: UnitOf<'u>) (memo: Memo<float>) : Quantity<'u> =
         let unitSource = Uncertain.source 1.0 0.0
+        let removed = ref false
+        let read = Removal.read removed id memo
 
         let e =
             entry
@@ -118,13 +140,13 @@ module Quantity =
                 unit.Info
                 QuantityKind.Derived
                 ""
-                (fun () -> memo.Value)
-                (statusOf memo)
+                read
+                (statusOf removed id memo)
                 unknown
-                (fun () -> measured unitSource memo.Value nan)
+                (fun () -> measured unitSource (read ()) nan)
                 ""
 
-        add model e
+        add model removed e
         Quantity<'u>(e)
 
     let private declareInput
@@ -152,7 +174,7 @@ module Quantity =
                 (fun () -> measured unitSource signal.Value uncertaintySignal.Value)
                 ""
 
-        add model e
+        add model (ref false) e
         Input<'u>(e, signal, uncertaintySignal)
 
     let private declareConstant
@@ -181,7 +203,7 @@ module Quantity =
                 (fun () -> fixedMeasured)
                 ""
 
-        add model e
+        add model (ref false) e
         Quantity<'u>(e)
 
     /// An input of value `initial` and uncertainty 0, over two signals, one for the value and one for the standard
@@ -265,6 +287,8 @@ module Quantity =
         model.Check id
         let result = createMemo (fun _ -> compute ())
         let value = createMemo (fun _ -> Uncertain.value result.Value)
+        let removed = ref false
+        let readResult = Removal.read removed id result
 
         let e =
             entry
@@ -273,13 +297,13 @@ module Quantity =
                 unit.Info
                 QuantityKind.Derived
                 source
-                (fun () -> value.Value)
-                (statusOf value)
-                (fun () -> Uncertain.standardUncertainty result.Value)
-                (fun () -> result.Value)
+                (Removal.read removed id value)
+                (statusOf removed id value)
+                (fun () -> Uncertain.standardUncertainty (readResult ()))
+                readResult
                 ""
 
-        add model e
+        add model removed e
         Quantity<'u>(e)
 
     /// The value of `compute`, with the standard uncertainty and contributions of its result: first-order propagation
@@ -302,8 +326,11 @@ module Quantity =
     /// when read). `Entry.Read` and `Entry.Status` read the value and are notified only when it changes, so they stay
     /// clean through a change of an uncertainty alone; `Entry.Uncertainty` and `Entry.Measured` read the measured value
     /// and are notified on every recomputation. Names resolve once, when the entry is created: an entry that outlives
-    /// the owner of an entry it reads keeps reading that entry's last value and does not follow a later declaration of
-    /// the identifier, and `Formula.monteCarlo` inlines the entry's formula with those names. Raises
+    /// the owner of an entry it reads reads that entry's last value, or fails with `InvalidOperationException` when
+    /// that entry was removed before it was computed (`Model`'s remarks), and does not follow a later declaration of
+    /// the identifier; `Formula.monteCarlo` inlines the entry's formula with those names. After this entry's own
+    /// removal each of its two memos answers with its last outcome, and the reads through one that never ran raise
+    /// `InvalidOperationException`. Raises
     /// `ArgumentException` as `input` does, before `text` is parsed. `Error` with the message of
     /// `Formula.parse` or `Formula.check` for text that does not parse or check, and then the model is unchanged.
     let formula (model: Model) (id: string) (name: string) (text: string) : Result<Entry, string> =
@@ -317,6 +344,8 @@ module Quantity =
             let evaluateMeasured = Formula.measuredEvaluator model expr
             let value = createMemo (fun _ -> evaluate ())
             let measuredValue = createMemo (fun _ -> evaluateMeasured ())
+            let removed = ref false
+            let readMeasured = Removal.read removed id measuredValue
 
             let e =
                 entry
@@ -325,13 +354,13 @@ module Quantity =
                     unitInfo
                     QuantityKind.Derived
                     ""
-                    (fun () -> value.Value)
-                    (statusOf value)
-                    (fun () -> Uncertain.standardUncertainty measuredValue.Value)
-                    (fun () -> measuredValue.Value)
+                    (Removal.read removed id value)
+                    (statusOf removed id value)
+                    (fun () -> Uncertain.standardUncertainty (readMeasured ()))
+                    readMeasured
                     text
 
-            declareOwned (fun () -> model.AddFormula(e, record)) (fun () -> model.Remove e)
+            declareOwned removed (fun () -> model.AddFormula(e, record)) (fun () -> model.Remove e)
             e)
 
     /// The entry as a quantity in `unit`. `Error` stating both units unless `UnitInfo.sameUnit` holds for the unit and
@@ -355,11 +384,13 @@ module Quantity =
     let blockFrom (model: Model) (id: string) (name: string) (compute: 'T voption -> 'T) : Block<'T> =
         model.Check id
         let memo = createMemo compute
-        declareOwned (fun () -> model.Reserve id) (fun () -> model.Release id)
-        Block<'T>(id, name, memo)
+        let removed = ref false
+        declareOwned removed (fun () -> model.Reserve id) (fun () -> model.Release id)
+        Block<'T>(id, name, memo, removed)
 
     /// The value of `compute`, over a memo owned by the current owner. A block has no single unit and is not an entry
     /// of its model: its identifier is reserved in the model, so a later declaration of it in the model raises as
-    /// `input` does, and `TryFind` of it from a child model finds an ancestor's entry. Raises as `input` does.
+    /// `input` does, and `TryFind` of it from a child model finds an ancestor's entry. After the owner's cleanup,
+    /// `Value` reads as a removed entry's `Read` does (`Model`'s remarks). Raises as `input` does.
     let block (model: Model) (id: string) (name: string) (compute: unit -> 'T) : Block<'T> =
         blockFrom model id name (fun _ -> compute ())
