@@ -9,6 +9,7 @@ let private excludes (x: float) (i: Interval) = x < i.Lower || x > i.Upper
 
 /// True when each of the two intervals misses 0 at some t >= 30 of a stream of `length` standard normal deviates.
 let private misses (alpha: float) (rho: float) (length: int) (g0: Generator) : struct (bool * bool) =
+    let settings = ConfidenceSequence.settings alpha rho ConfidenceSequence.standardBurnIn
     let mutable g = g0
     let mutable m = Moments.zero
     let mutable sequenceMissed = false
@@ -22,7 +23,7 @@ let private misses (alpha: float) (rho: float) (length: int) (g0: Generator) : s
         t <- t + 1
 
         if t >= 30 then
-            if not sequenceMissed && excludes 0.0 (ConfidenceSequence.ofMoments alpha rho m) then
+            if not sequenceMissed && excludes 0.0 (ConfidenceSequence.interval settings m) then
                 sequenceMissed <- true
 
             if not fixedMissed && excludes 0.0 (FixedSample.ofMoments alpha m) then
@@ -156,9 +157,10 @@ let tests =
                 let xs = Array.init 30 (fun k -> sin (float k) * 2.0 + 1.0)
                 let before = Array.fold (Moments.add true) Moments.zero xs[0..28]
                 let at = Moments.add true before xs[29]
-                let early = ConfidenceSequence.ofMomentsAfter 30.0 alpha rho before
+                let s = ConfidenceSequence.settings alpha rho 30.0
+                let early = ConfidenceSequence.interval s before
                 Expect.isTrue (Double.IsNaN early.Lower && Double.IsNaN early.Upper) "29 observations: NaN bounds"
-                let reached = ConfidenceSequence.ofMomentsAfter 30.0 alpha rho at
+                let reached = ConfidenceSequence.interval s at
                 let plain = ConfidenceSequence.ofMoments alpha rho at
                 Expect.equal reached.Lower plain.Lower "30 observations: lower bound"
                 Expect.equal reached.Upper plain.Upper "30 observations: upper bound"
@@ -168,9 +170,41 @@ let tests =
                 let m = Array.fold (Moments.add true) Moments.zero [| 1.0; 2.0 |]
 
                 for burnIn in [ 0.5; nan; infinity ] do
-                    Expect.throwsT<ArgumentOutOfRangeException>
-                        (fun () -> ConfidenceSequence.ofMomentsAfter burnIn 0.05 1.0 m |> ignore)
-                        (sprintf "burnIn %g" burnIn)
+                    let label = sprintf "burnIn %g" burnIn
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.settings 0.05 1.0 burnIn |> ignore) label
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.tunedFor 0.05 1000.0 burnIn |> ignore) label
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> ConfidenceSequence.interval { Alpha = 0.05; Rho = 1.0; BurnIn = 0.5 } m |> ignore)
+                    "interval on a record with burnIn 0.5"
+            }
+
+            test "settings and tunedFor" {
+                Expect.equal (ConfidenceSequence.settings 0.05 0.3 30.0) { Alpha = 0.05; Rho = 0.3; BurnIn = 30.0 } "settings"
+                Expect.equal (ConfidenceSequence.tunedFor 0.05 1000.0 30.0).Rho (ConfidenceSequence.rhoTightestAt 0.05 1000.0) "tunedFor rho"
+                Expect.equal (ConfidenceSequence.tunedFor 0.05 1000.0 30.0).BurnIn 30.0 "tunedFor burn-in"
+                Expect.equal ConfidenceSequence.standardBurnIn 30.0 "standardBurnIn"
+            }
+
+            test "settings out of range are rejected" {
+                let m = Array.fold (Moments.add true) Moments.zero [| 1.0; 2.0 |]
+
+                for alpha in [ 0.0; 1.0; nan ] do
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.settings alpha 1.0 30.0 |> ignore) (sprintf "settings alpha %g" alpha)
+
+                for rho in [ 0.0; -1.0; infinity; nan ] do
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.settings 0.05 rho 30.0 |> ignore) (sprintf "settings rho %g" rho)
+
+                for n in [ 0.0; infinity; nan ] do
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> ConfidenceSequence.tunedFor 0.05 n 30.0 |> ignore) (sprintf "tunedFor plannedCount %g" n)
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> ConfidenceSequence.interval { Alpha = 1.0; Rho = 1.0; BurnIn = 30.0 } m |> ignore)
+                    "interval on a record with alpha 1"
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> ConfidenceSequence.interval { Alpha = 0.05; Rho = 0.0; BurnIn = 30.0 } m |> ignore)
+                    "interval on a record with rho 0"
             }
 
             // Seeds 1 to 2,000, 10,000 deviates each.
@@ -200,8 +234,7 @@ let tests =
             }
 
             test "the sequence covers at the page's setting" {
-                let alpha = 0.05 / 4.0
-                let rho = ConfidenceSequence.rhoTightestAt alpha 1000.0
+                let settings = ConfidenceSequence.tunedFor (0.05 / 4.0) 1000.0 ConfidenceSequence.standardBurnIn
                 let streams = 2000
                 let mutable misses = 0
 
@@ -217,7 +250,7 @@ let tests =
                         m <- Moments.add true m z
                         t <- t + 1
 
-                        if excludes 0.0 (ConfidenceSequence.ofMomentsAfter 30.0 alpha rho m) then
+                        if excludes 0.0 (ConfidenceSequence.interval settings m) then
                             missed <- true
 
                     if missed then misses <- misses + 1

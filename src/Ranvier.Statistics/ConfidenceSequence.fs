@@ -6,6 +6,13 @@ open Ranvier.Numerics
 [<Struct>]
 type Interval = { Lower: float; Upper: float }
 
+/// <summary>
+/// The settings of a confidence sequence: the error level, the mixture's tuning parameter and the burn-in, a count
+/// as <c>Moments.count</c> is a float. Build it with <c>ConfidenceSequence.settings</c> or <c>tunedFor</c>, which
+/// validate the fields; <c>interval</c> validates them again.
+/// </summary>
+type SequenceSettings = { Alpha: float; Rho: float; BurnIn: float }
+
 module private Arguments =
     let alpha (alpha: float) =
         if not (alpha > 0.0 && alpha < 1.0) then
@@ -29,9 +36,16 @@ module private Arguments =
 /// asymptotic confidence sequence: as t grows, their bounds approach, almost surely, those of a sequence of
 /// intervals that holds the mean at every t simultaneously with probability at least 1 − α. The guarantee is
 /// asymptotic: it states no coverage at any finite t. Intervals at small t fall outside it (at one observation the
-/// interval has zero width at the observation), so a monitor reads the sequence only after a burn-in.
-/// Measured by this repository's coverage test, outside the theorem: on standard normal streams of 10,000
-/// observations, α = 0.05, 0.0415 of 2,000 streams excluded the mean at some t ≥ 30, and every stream did at t = 1.
+/// interval has zero width at the observation), so a monitor reads the sequence through <c>interval</c>, which
+/// applies a burn-in.
+/// Coverage, outside the theorem, on 2,000 standard normal streams of 10,000 observations, ρ = <c>rhoTightestAt</c>
+/// α 1000, burn-in 30 (<c>standardBurnIn</c>), *measured here* on 2026-11-20 by the coverage tests "the sequence
+/// covers under continuous monitoring and the fixed-sample interval does not" and "the sequence covers at the
+/// page's setting" (<c>dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter "ConfidenceSequence"</c>
+/// and <c>npx mocha dist/tests/Main.fs.js --grep "ConfidenceSequence"</c> after <c>dotnet fickl</c>; the two
+/// targets printed the same figures):
+/// at α = 0.05, 0.0415 of the streams excluded the mean at some count from 30 on; at α = 0.0125 (0.05 over four
+/// channels), 0.009 did.
 /// </remarks>
 module ConfidenceSequence =
     /// <summary>
@@ -40,8 +54,8 @@ module ConfidenceSequence =
     /// rho is finite and greater than 0, and when sd is negative.
     /// </summary>
     /// <remarks>
-    /// The coverage guarantee of the module is asymptotic, with no statement at any finite t; a monitor applies a
-    /// burn-in before reading it.
+    /// The coverage guarantee of the module is asymptotic, with no statement at any finite t; <c>interval</c>
+    /// applies the burn-in.
     /// </remarks>
     let radius (alpha: float) (rho: float) (t: float) (sd: float) : float =
         Arguments.alpha alpha
@@ -62,28 +76,13 @@ module ConfidenceSequence =
     /// </summary>
     /// <remarks>
     /// The interval holds the mean only asymptotically, with no coverage statement at any finite count. At small
-    /// counts it is too narrow (at one observation it excludes every other value), so a monitor applies a burn-in
-    /// before showing or acting on it; the repository's coverage test reads from t ≥ 30.
+    /// counts it is too narrow (at one observation it excludes every other value); <c>interval</c> applies a
+    /// burn-in before the bounds are shown or acted on.
     /// </remarks>
     let ofMoments (alpha: float) (rho: float) (m: Moments) : Interval =
         let mean = Moments.mean m
         let r = radius alpha rho (Moments.count m) (sqrt (Moments.variance m))
         { Lower = mean - r; Upper = mean + r }
-
-    /// <summary>
-    /// <c>ofMoments</c> with NaN bounds while the count is below <c>burnIn</c>. Raises ArgumentOutOfRangeException
-    /// unless <c>burnIn</c> is finite and at least 1, and as <c>ofMoments</c> does.
-    /// </summary>
-    let ofMomentsAfter (burnIn: float) (alpha: float) (rho: float) (m: Moments) : Interval =
-        if not (burnIn >= 1.0 && burnIn < infinity) then
-            raise (ArgumentOutOfRangeException(nameof burnIn, "burnIn must be finite and at least 1."))
-
-        let interval = ofMoments alpha rho m
-
-        if Moments.count m < burnIn then
-            { Lower = nan; Upper = nan }
-        else
-            interval
 
     /// <summary>
     /// The rho for which <c>radius</c> at t = n is smallest: sqrt(u / n), where u &gt; 0 solves
@@ -106,6 +105,52 @@ module ConfidenceSequence =
             iterations <- iterations + 1
 
         sqrt (u / n)
+
+    let private check (alpha: float) (rho: float) (burnIn: float) =
+        Arguments.alpha alpha
+        Arguments.finitePositive (nameof rho) rho
+
+        if not (burnIn >= 1.0 && burnIn < infinity) then
+            raise (ArgumentOutOfRangeException(nameof burnIn, "burnIn must be finite and at least 1."))
+
+    /// <summary>
+    /// The settings with the given fields. Raises ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1, rho is
+    /// finite and greater than 0, and burnIn is finite and at least 1.
+    /// </summary>
+    let settings (alpha: float) (rho: float) (burnIn: float) : SequenceSettings =
+        check alpha rho burnIn
+        { Alpha = alpha; Rho = rho; BurnIn = burnIn }
+
+    /// <summary>
+    /// The settings whose Rho is <c>rhoTightestAt</c> alpha at plannedCount. Raises ArgumentOutOfRangeException as
+    /// <c>rhoTightestAt</c> and <c>settings</c> do.
+    /// </summary>
+    let tunedFor (alpha: float) (plannedCount: float) (burnIn: float) : SequenceSettings =
+        settings alpha (rhoTightestAt alpha plannedCount) burnIn
+
+    /// <summary>
+    /// The burn-in, 30, at which the repository's coverage tests read the sequence: <c>interval</c> shows no bounds
+    /// before the 30th observation.
+    /// </summary>
+    let standardBurnIn: float = 30.0
+
+    /// <summary>
+    /// <c>ofMoments</c> at the settings' Alpha and Rho, with NaN bounds while the count is below BurnIn. Checks the
+    /// record's fields by the rules of <c>settings</c>, so a record built directly is held to them; raises
+    /// ArgumentOutOfRangeException when one fails.
+    /// </summary>
+    /// <remarks>
+    /// The burn-in is a count, as <c>Moments.count</c> is a float. The coverage guarantee is asymptotic, so the
+    /// interval carries no statement at any count; see the module's remarks for the coverage measured at the
+    /// burn-in <c>standardBurnIn</c>.
+    /// </remarks>
+    let interval (s: SequenceSettings) (m: Moments) : Interval =
+        check s.Alpha s.Rho s.BurnIn
+
+        if Moments.count m < s.BurnIn then
+            { Lower = nan; Upper = nan }
+        else
+            ofMoments s.Alpha s.Rho m
 
 /// <summary>The fixed-sample normal-approximation interval for a mean.</summary>
 /// <remarks>
