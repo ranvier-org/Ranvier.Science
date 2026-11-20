@@ -201,22 +201,25 @@ module UnitInfo =
         | "" -> "1"
         | text -> text
 
+    /// `ArithmeticException` stating that the unit named `name` has the scale `scale`, written "NaN", "∞", "−∞", "0"
+    /// or as the number.
+    let private badScale (name: string) (scale: float) : exn =
+        let value =
+            if Double.IsNaN scale then "NaN"
+            elif Double.IsPositiveInfinity scale then "∞"
+            elif Double.IsNegativeInfinity scale then "−∞"
+            elif scale = 0.0 then "0"
+            else string scale
+
+        ArithmeticException("The scale of " + name + " is " + value + "; a unit's scale must be positive and finite.")
+
     /// The unit itself when its scale is finite and not 0. Raises ArithmeticException otherwise, with a message
     /// stating the unit's symbol ("1" for a unit without factors) and its scale.
     let private checkedScale (u: UnitInfo) : UnitInfo =
         let scale = u.Scale
 
         if Double.IsNaN scale || Double.IsInfinity scale || scale = 0.0 then
-            let name = nameOf u
-
-            let value =
-                if Double.IsNaN scale then "NaN"
-                elif scale = 0.0 then "0"
-                elif scale > 0.0 then "∞"
-                else "−∞"
-
-            let message = "The scale of " + name + " is " + value + "; a unit's scale must be positive and finite."
-            raise (ArithmeticException message)
+            raise (badScale (nameOf u) scale)
 
         u
 
@@ -281,20 +284,14 @@ module UnitInfo =
 
     /// `u` with its one factor prefixed: the factor's name gains the prefix's symbol and the scale is multiplied by
     /// the prefix's factor, so `prefixed Prefix.kilo` of the metre is "km" of scale 1000. Raises ArgumentException
-    /// unless `u` has exactly one factor with exponent 1, and ArithmeticException when the new scale is not finite or
-    /// is 0; the message states the symbol.
+    /// unless `u` has exactly one factor with exponent 1, and ArithmeticException when the new scale is not positive
+    /// and finite; the message states the symbol and the new scale.
     let prefixed (prefix: Prefix) (u: UnitInfo) : UnitInfo =
         match u.Factors with
         | [ (_, 1) ] ->
             match Prefix.tryApply prefix u with
             | ValueSome result -> result
-            | ValueNone ->
-                let name = prefix.Symbol + fst u.Factors.Head
-                let value = if prefix.Factor * u.Scale = 0.0 then "0" else "\u221E"
-
-                raise (
-                    ArithmeticException("The scale of " + name + " is " + value + "; a unit's scale must be positive and finite.")
-                )
+            | ValueNone -> raise (badScale (prefix.Symbol + fst u.Factors.Head) (prefix.Factor * u.Scale))
         | _ ->
             raise (
                 ArgumentException(
@@ -357,7 +354,7 @@ module UnitInfo =
 
         let atChar (c: char) = pos.Value < length && text[pos.Value] = c
 
-        /// Raises UnitSyntax with the message of an exception thrown by `f`, at character `at`.
+        /// The unit `f` gives; raises UnitSyntax with the message of an exception `f` throws, which names no character.
         let arithmetic (f: unit -> UnitInfo) : UnitInfo =
             let outcome =
                 try
@@ -559,6 +556,6 @@ module UnitOf =
     let squared (u: UnitOf<'u>) : UnitOf<'u ^ 2> = UnitOf<'u ^ 2>(UnitInfo.power u.Info 2)
 
     /// The unit with a prefix, as `UnitInfo.prefixed`. The caller's annotation fixes 'v. Raises ArgumentException
-    /// unless `u` has one factor with exponent 1, and ArithmeticException when the new scale is not finite or is 0.
+    /// unless `u` has one factor with exponent 1, and ArithmeticException when the new scale is not positive and finite.
     let prefixed<[<Measure>] 'u, [<Measure>] 'v> (prefix: Prefix) (u: UnitOf<'u>) : UnitOf<'v> =
         UnitOf<'v>(UnitInfo.prefixed prefix u.Info)
