@@ -204,6 +204,45 @@ let tests =
                 Expect.equal (Moments.mean (Window.value w)) 6.0 "mean after the NaN left"
             }
 
+            test "a departure from an overflowed value re-folds" {
+                // 1e200, 1e200 then 1 overflow the variance. Once both 1e200 have left, the items are 1, 2 and 3: closed
+                // form, mean 2, and the value is the fresh fold of the items.
+                let xs = [| 1e200; 1e200; 1.0; 2.0; 3.0 |]
+                let w = pushAll (Window.moments true 3) xs
+                let tw = timed 2.0 (xs |> Array.mapi (fun i x -> float i, x) |> Array.toList)
+
+                for what, items, held in [ "window", Window.items w, Window.value w; "time window", TimeWindow.items tw, TimeWindow.value tw ] do
+                    Expect.equal items [| 1.0; 2.0; 3.0 |] $"{what} items"
+                    let fresh = Array.fold (Moments.add true) Moments.zero items
+                    Expect.equal (Moments.mean held) 2.0 $"{what} mean"
+                    Expect.equal (Moments.variance held) (Moments.variance fresh) $"{what} variance"
+            }
+
+            test "a dominant item's error lasts until the next re-fold, within the stated bound" {
+                // The remarks' bound after 1e20 leaves a capacity-3 window: the mean within count·ε·1e20 and the
+                // variance within count·ε·1e40 of a fresh fold (ε = 2^-52), until the removals reach the count at the
+                // sixth push, whose re-fold is the fresh fold.
+                let eps = Math.Pow(2.0, -52.0)
+                let xs = [| 1e20; 1.0; 2.0; 3.0; 4.0; 5.0 |]
+
+                for n in 4..6 do
+                    let w = pushAll (Window.moments true 3) xs[.. n - 1]
+                    let tw = timed 2.0 (xs[.. n - 1] |> Array.mapi (fun i x -> float i, x) |> Array.toList)
+
+                    for what, items, held in [ "window", Window.items w, Window.value w; "time window", TimeWindow.items tw, TimeWindow.value tw ] do
+                        let fresh = Array.fold (Moments.add true) Moments.zero items
+                        let meanError = abs (Moments.mean held - Moments.mean fresh)
+                        let varianceError = abs (Moments.variance held - Moments.variance fresh)
+
+                        if n < 6 then
+                            Expect.isGreaterThan meanError 0.0 $"{what} mean differs after {n} pushes"
+                            Expect.isLessThan meanError (3.0 * eps * 1e20) $"{what} mean bound after {n} pushes"
+                            Expect.isLessThan varianceError (3.0 * eps * 1e40) $"{what} variance bound after {n} pushes"
+                        else
+                            Expect.equal (Moments.mean held) (Moments.mean fresh) $"{what} mean after the re-fold"
+                            Expect.equal (Moments.variance held) (Moments.variance fresh) $"{what} variance after the re-fold"
+            }
+
             test "a time window re-folds, bounds drift and does amortised work" {
                 let adds = ref 0
                 let removes = ref 0

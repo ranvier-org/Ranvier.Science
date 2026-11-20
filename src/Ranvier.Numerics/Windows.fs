@@ -112,19 +112,8 @@ module internal Queue =
         Array.append (List.toArray q.Front) (List.toArray (List.rev q.Back))
 
 module internal Refold =
-    /// The accumulator folded from the zero over the items, and the sequence number of the first item whose addition
-    /// leaves the value non-finite (-1 when none). The first item has the sequence number firstSeq.
-    let run (add: 'A -> 'T -> 'A) (finite: 'A -> bool) (zero: 'A) (firstSeq: float) (xs: 'T[]) : 'A * float =
-        let mutable v = zero
-        let mutable culprit = -1.0
-
-        for i in 0 .. xs.Length - 1 do
-            v <- add v xs[i]
-
-            if culprit < 0.0 && not (finite v) then
-                culprit <- firstSeq + float i
-
-        v, culprit
+    /// The accumulator folded from the zero over the items.
+    let run (add: 'A -> 'T -> 'A) (zero: 'A) (xs: 'T[]) : 'A = Array.fold add zero xs
 
     /// The finiteness test of a Moments value: the count is zero, or its mean and variance are finite.
     let momentsFinite (m: Moments) : bool =
@@ -135,15 +124,24 @@ module internal Refold =
 /// <remarks>
 /// A push removes the oldest item from the accumulator when the window is full, then adds the new one. The value is
 /// re-folded from the zero over the items once the removals since the last re-fold reach the item count, which bounds
-/// the drift of a remove and costs O(1) amortised per push (general knowledge; the "Window" test list counts the calls
-/// over 1000 pushes). The held value carries up to one capacity of removals since the last re-fold. For
-/// <c>Window.moments</c> at capacity 50 over 1e9 + (i mod 7), measured here by the "Window" test list
-/// ("re-folds bound drift", at 100001, 100010 and 100049 pushes): the mean within relative 1e-12 of a fresh fold of the
-/// items, the compensated variance within relative 1e-8 and the uncompensated variance within relative 1e-6.
+/// the drift of a remove. On a stream whose values stay finite, pushed in sequence without branching, this costs O(1)
+/// amortised per push (general knowledge; the "Window" test list counts the calls over 5000 pushes). Each of several
+/// pushes onto the same window pays that window's pending re-fold and queue reversal, up to O(count) each. The held
+/// value carries up to one
+/// capacity of removals since the last re-fold. For <c>Window.moments</c> at capacity 50 over 1e9 + (i mod 7), measured
+/// here by the "Window" test list ("re-folds bound drift", at 100001, 100010 and 100049 pushes): the mean within
+/// relative 1e-12 of a fresh fold of the items, the compensated variance within relative 1e-8 and the uncompensated
+/// variance within relative 1e-6. After an item far larger than the rest leaves, the mean of <c>Window.moments</c>
+/// carries an absolute error of order count·ε times the largest |item| since the last re-fold, and the variance of
+/// order count·ε times that item's square (ε = 2^-52; general knowledge), until the next re-fold, at most one capacity
+/// of pushes later: at capacity 3, after 1e20, 1, 2, 3 the compensated mean reads 1366.33 where the items' mean is 2
+/// (measured here by the "Window" test list, "a dominant item's error lasts until the next re-fold, within the stated
+/// bound"). A fresh fold of <c>items</c> is exact after such a departure.
 /// A window built by <c>Window.create</c> keeps a non-finite value until the next re-fold. <c>Window.moments</c>
-/// re-folds when the item whose addition first made the value non-finite is removed, and again for the next such item
-/// in the re-folded window, so a NaN or infinite observation stops affecting the value once it has left. The window
-/// holds functions, so it has no equality: a memo of one cuts off only by returning the previous instance.
+/// re-folds in place of each removal from a non-finite value, and of a removal that leaves a finite value non-finite,
+/// so a NaN or infinite observation, or an overflow, stops affecting the value once its items have left; while the
+/// value is non-finite every departure re-folds, O(count) each. The window holds functions, so it has no equality: a
+/// memo of one cuts off only by returning the previous instance.
 /// </remarks>
 [<NoEquality; NoComparison>]
 type Window<'T, 'A> =
@@ -156,10 +154,6 @@ type Window<'T, 'A> =
             Value: 'A
             Finite: 'A -> bool
             Items: Queue<'T>
-            /// The number of items pushed so far, as a float so it is exact to 2^53 on both targets.
-            Seq: float
-            /// The sequence number of the item whose addition first made the value non-finite; -1 when none.
-            Culprit: float
             Count: int
             Removals: int
         }
@@ -183,8 +177,6 @@ module Window =
             Value = zero
             Finite = finite
             Items = Queue.empty
-            Seq = 0.0
-            Culprit = -1.0
             Count = 0
             Removals = 0
         }
@@ -196,31 +188,30 @@ module Window =
 
     /// A window over the last items, which drops the oldest when full. Re-folds as described on the type.
     let push (w: Window<'T, 'A>) (x: 'T) : Window<'T, 'A> =
-        let mutable forced = false
+        let full = w.Count = w.Capacity
+        let count = if full then w.Count else w.Count + 1
+        let removals = if full then w.Removals + 1 else w.Removals
+        let mutable refold = removals >= count
+        let mutable value = w.Value
+        let mutable items = w.Items
 
-        let value, items, count, removals =
-            if w.Count = w.Capacity then
-                let oldest, rest = Queue.dequeue w.Items
-                forced <- (w.Seq - float w.Count = w.Culprit)
-                w.Remove w.Value oldest, rest, w.Count - 1, w.Removals + 1
-            else
-                w.Value, w.Items, w.Count, w.Removals
+        if full then
+            let oldest, rest = Queue.dequeue items
+            items <- rest
 
-        let value = w.Add value x
-        let items = Queue.enqueue x items
-        let count = count + 1
-        let seq = w.Seq + 1.0
+            if not refold then
+                if w.Finite value then
+                    value <- w.Remove value oldest
+                    refold <- not (w.Finite value)
+                else
+                    refold <- true
 
-        if forced || removals >= count then
-            let folded, culprit = Refold.run w.Add w.Finite w.Zero (seq - float count) (Queue.toArray items)
-            { w with Value = folded; Items = items; Seq = seq; Culprit = culprit; Count = count; Removals = 0 }
+        items <- Queue.enqueue x items
+
+        if refold then
+            { w with Value = Refold.run w.Add w.Zero (Queue.toArray items); Items = items; Count = count; Removals = 0 }
         else
-            let culprit =
-                if w.Culprit >= 0.0 then w.Culprit
-                elif w.Finite value then -1.0
-                else w.Seq
-
-            { w with Value = value; Items = items; Seq = seq; Culprit = culprit; Count = count; Removals = removals }
+            { w with Value = w.Add value x; Items = items; Count = count; Removals = removals }
 
     /// The accumulator over the items in the window.
     let value (w: Window<'T, 'A>) : 'A = w.Value
@@ -239,8 +230,15 @@ module Window =
 /// <remarks>
 /// A push at time t drops the items older than t - span (it keeps the items with time at least t - span), removing each
 /// from the accumulator, then adds the new one. Re-folds, drift and the treatment of a non-finite value are those of
-/// <c>Window</c>: O(1) amortised per push (general knowledge), pinned by the "Window" test list. The window holds functions, so it has no equality: a memo of one cuts off only by returning the previous
-/// instance.
+/// <c>Window</c>: O(1) amortised per push on a stream whose values stay finite, pushed in sequence without branching
+/// (general knowledge; the "Window" test list counts the calls over 100049 pushes), and O(count) for each departure
+/// while the value of <c>TimeWindow.moments</c> is non-finite. After an item far larger than the rest leaves, the mean
+/// of <c>TimeWindow.moments</c> carries an absolute error of order count·ε times the largest |item| since the last
+/// re-fold, and the variance of order count·ε times that item's square (ε = 2^-52; general knowledge), until the
+/// removals since the last re-fold reach the item count (measured here by the "Window" test list, "a dominant item's
+/// error lasts until the next re-fold, within the stated bound"). A fresh fold of <c>items</c> is exact after such a
+/// departure. The window holds functions, so it has no equality: a memo of one cuts off only by returning the
+/// previous instance.
 /// </remarks>
 [<NoEquality; NoComparison>]
 type TimeWindow<'T, 'A> =
@@ -253,8 +251,6 @@ type TimeWindow<'T, 'A> =
             Value: 'A
             Finite: 'A -> bool
             Items: Queue<float * 'T>
-            Seq: float
-            Culprit: float
             Latest: float
             Count: int
             Removals: int
@@ -279,8 +275,6 @@ module TimeWindow =
             Value = zero
             Finite = finite
             Items = Queue.empty
-            Seq = 0.0
-            Culprit = -1.0
             Latest = -infinity
             Count = 0
             Removals = 0
@@ -302,39 +296,33 @@ module TimeWindow =
         let mutable count = w.Count
         let mutable removals = w.Removals
         let mutable go = true
-        let mutable forced = false
+        let mutable refold = false
 
         while go && count > 0 do
             items <- Queue.prime items
 
             match items.Front with
             | (ti, old) :: rest when ti < cutoff ->
-                if w.Seq - float count = w.Culprit then
-                    forced <- true
+                if not refold then
+                    if w.Finite value then
+                        value <- w.Remove value old
+                        refold <- not (w.Finite value)
+                    else
+                        refold <- true
 
-                value <- w.Remove value old
                 items <- { items with Front = rest }
                 count <- count - 1
                 removals <- removals + 1
             | _ -> go <- false
 
-        value <- w.Add value x
         items <- Queue.enqueue (t, x) items
         count <- count + 1
 
-        let seq = w.Seq + 1.0
-
-        if forced || removals >= count then
+        if refold || removals >= count then
             let xs = Queue.toArray items |> Array.map snd
-            let folded, culprit = Refold.run w.Add w.Finite w.Zero (seq - float count) xs
-            { w with Value = folded; Items = items; Seq = seq; Culprit = culprit; Latest = t; Count = count; Removals = 0 }
+            { w with Value = Refold.run w.Add w.Zero xs; Items = items; Latest = t; Count = count; Removals = 0 }
         else
-            let culprit =
-                if w.Culprit >= 0.0 then w.Culprit
-                elif w.Finite value then -1.0
-                else w.Seq
-
-            { w with Value = value; Items = items; Seq = seq; Culprit = culprit; Latest = t; Count = count; Removals = removals }
+            { w with Value = w.Add value x; Items = items; Latest = t; Count = count; Removals = removals }
 
     /// The accumulator over the items in the window.
     let value (w: TimeWindow<'T, 'A>) : 'A = w.Value
