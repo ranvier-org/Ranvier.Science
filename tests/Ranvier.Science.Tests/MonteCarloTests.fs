@@ -41,6 +41,14 @@ let private within (actual: float) (expected: float) (bound: float) (what: strin
         (abs (actual - expected) <= bound)
         (sprintf "%s: %.17g within %.6g of %.17g" what actual bound expected)
 
+/// Expects NaN in every float field and `Draws` = 20,000.
+let private expectUndefined (r: MonteCarloResult) : unit =
+    Expect.isTrue (Double.IsNaN r.Mean) (sprintf "Mean NaN, was %.17g" r.Mean)
+    Expect.isTrue (Double.IsNaN r.StandardDeviation) (sprintf "StandardDeviation NaN, was %.17g" r.StandardDeviation)
+    Expect.isTrue (Double.IsNaN r.Lower) (sprintf "Lower NaN, was %.17g" r.Lower)
+    Expect.isTrue (Double.IsNaN r.Upper) (sprintf "Upper NaN, was %.17g" r.Upper)
+    Expect.equal r.Draws draws "Draws"
+
 [<Tests>]
 let tests =
     testList
@@ -129,12 +137,38 @@ let tests =
                     let model = Model.create "m"
                     // A derive entry's uncertainty is unknown: one contribution, NaN.
                     Quantity.derive model "d" "D" Units.one (fun () -> 3.0) |> ignore
-                    let r = run model "d * 2"
-                    Expect.isTrue (Double.IsNaN r.Mean) "Mean"
-                    Expect.isTrue (Double.IsNaN r.StandardDeviation) "StandardDeviation"
-                    Expect.isTrue (Double.IsNaN r.Lower) "Lower"
-                    Expect.isTrue (Double.IsNaN r.Upper) "Upper"
-                    Expect.equal r.Draws draws "Draws")
+                    expectUndefined (run model "d * 2")
+                    // d^0 is 1 at every d, so every draw is 1 and the NaN comes from the contribution alone.
+                    expectUndefined (run model "d^0"))
+            }
+
+            test "a NaN leaf value gives NaN fields" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.inputWithUncertainty model "a" "A" Units.one 1.0 0.1
+                    a.Set nan
+                    // a^0 is 1 at every a, NaN included (the evaluator's repeated multiplication), so every draw is 1
+                    // and the NaN comes from the leaf's value alone.
+                    expectUndefined (run model "a^0"))
+            }
+
+            test "a draw that evaluates to NaN gives NaN fields" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    Quantity.inputWithUncertainty model "a" "A" Units.one 0.0 1.0 |> ignore
+                    // a < 0, where sqrt(a) is NaN, with probability 1/2 per draw: 20,000 draws all miss it with
+                    // probability 2^−20000.
+                    expectUndefined (run model "sqrt(a)"))
+            }
+
+            test "a second read gives an equal record" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    Quantity.inputWithUncertainty model "a" "A" Units.one 1.0 0.1 |> ignore
+                    let reader = Formula.monteCarlo draws 1 0.95 model (parsed "a * 3")
+                    let first = reader ()
+                    // Every field is finite, so the record's equality compares each field by value.
+                    Expect.equal (reader ()) first "the second read of one reader")
             }
 
             test "a reader is tracked" {
