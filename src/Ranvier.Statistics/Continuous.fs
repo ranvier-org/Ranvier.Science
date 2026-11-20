@@ -212,6 +212,13 @@ module Continuous =
     /// the <c>Continuous</c> tests against <c>tests/reference/special.py</c> and closed forms (measured here: the
     /// tests "normal cdf and survival against the reference" and "logNormal against the reference"). Exactly 0 at
     /// and below the lower end of the support and 1 at and above the upper end; NaN at NaN.
+    /// Domain of the bound, measured here by the tests "quantile round trips", "normal cdf and survival against the
+    /// reference", "logNormal against the reference", "weibull survival at a large shape and a scale that is not a
+    /// power of two" and "log-normal quantile round trip at a large mu" on .NET and on JavaScript: the normal, uniform,
+    /// exponential, Cauchy and logistic at the tested parameters; the log-normal for |mu| up to 50 at sigma 0.1 and
+    /// above; the Weibull for shape up to 20. Beyond it the error grows with the conditioning of the input:
+    /// about shape · (x / scale)^shape · 1.1e-16 for the Weibull at a scale that is not a power of two, which pinned
+    /// rows show as at most 1e-9 at shape 1000 (general knowledge: the rounding of x / scale, raised to the shape).
     /// </summary>
     let cdf (d: Continuous) (x: float) : float =
         if Double.IsNaN x then
@@ -233,6 +240,13 @@ module Continuous =
     /// P(X &gt; x), accurate in the upper tail. Relative error at most 1e-12 where the value is at least 1e-300, over
     /// the parameter values pinned by the <c>Continuous</c> tests (measured here, as for <c>cdf</c>). 1 at and below
     /// the lower end of the support and exactly 0 at and above the upper end; NaN at NaN.
+    /// Domain of the bound, measured here by the tests "quantile round trips", "normal cdf and survival against the
+    /// reference", "logNormal against the reference", "weibull survival at a large shape and a scale that is not a
+    /// power of two" and "log-normal quantile round trip at a large mu" on .NET and on JavaScript: the normal, uniform,
+    /// exponential, Cauchy and logistic at the tested parameters; the log-normal for |mu| up to 50 at sigma 0.1 and
+    /// above; the Weibull for shape up to 20. Beyond it the error grows with the conditioning of the input:
+    /// about shape · (x / scale)^shape · 1.1e-16 for the Weibull at a scale that is not a power of two, which pinned
+    /// rows show as at most 1e-9 at shape 1000 (general knowledge: the rounding of x / scale, raised to the shape).
     /// </summary>
     let survival (d: Continuous) (x: float) : float =
         if Double.IsNaN x then
@@ -269,7 +283,10 @@ module Continuous =
     /// p &gt; 0.5, down to p = 1e-300, over the parameter values pinned by the <c>Continuous</c> tests (measured
     /// here: the test "quantile round trips"). The normal quantile is Acklam's approximation (relative error 1.2e-9,
     /// <c>NormalQuantile.ofProbability</c>) refined by one Halley step on the <c>cdf</c>, skipped below −37.5, where
-    /// p is under about 5e-308 (general knowledge).
+    /// p is under about 5e-308 (general knowledge). The round trip's domain is that of <c>cdf</c>; outside it the
+    /// error of the log-normal grows about as |mu| · |z| · 1.1e-16 / sigma, because exp (mu + sigma · z) rounds
+    /// its argument to half an ulp of mu (general knowledge), and a pinned row shows at most 2e-11 at mu = 300,
+    /// sigma = 0.1.
     /// </summary>
     let quantile (d: Continuous) (p: float) : float =
         if Double.IsNaN p then
@@ -303,11 +320,66 @@ module Continuous =
         | Weibull (shape, scale) -> scale * Special.gamma (1.0 + 1.0 / shape)
         | Logistic (location, _) -> location
 
+    // zeta(n) for n = 2..30, printed by `python -I tests/reference/special.py zeta`.
+    let private zetaValues: float[] =
+        [|
+            1.6449340668482264
+            1.2020569031595942
+            1.0823232337111381
+            1.03692775514337
+            1.0173430619844492
+            1.008349277381923
+            1.0040773561979444
+            1.0020083928260821
+            1.000994575127818
+            1.0004941886041194
+            1.000246086553308
+            1.0001227133475785
+            1.0000612481350588
+            1.000030588236307
+            1.0000152822594086
+            1.0000076371976379
+            1.000003817293265
+            1.0000019082127165
+            1.0000009539620338
+            1.0000004769329869
+            1.0000002384505027
+            1.000000119219926
+            1.000000059608189
+            1.0000000298035034
+            1.0000000149015549
+            1.0000000074507118
+            1.000000003725334
+            1.0000000018626598
+            1.0000000009313275
+        |]
+
+    // The coefficients (-1)^n zeta(n) (2^n - 2) / n of S(e) = ln Gamma(1 + 2e) - 2 ln Gamma(1 + e), n = 2..30.
+    let private logRatioCoefficients: float[] =
+        Array.mapi
+            (fun i z ->
+                let n = i + 2
+                (if n % 2 = 0 then 1.0 else -1.0) * z * (2.0 ** float n - 2.0) / float n)
+            zetaValues
+
+    // S(e) by Horner's rule from the top term: the Euler constant terms of the two log-gamma values cancel, so the
+    // series starts at e^2 pi^2 / 6. It converges for e < 1/2.
+    let private weibullLogRatio (e: float) : float =
+        let mutable s = 0.0
+
+        for i in logRatioCoefficients.Length - 1 .. -1 .. 0 do
+            s <- s * e + logRatioCoefficients[i]
+
+        s * e * e
+
     /// <summary>
     /// The variance: NaN for the Cauchy, +∞ where it overflows. The Weibull's is
-    /// scale² (Γ(1 + 2/shape) − Γ(1 + 1/shape)²), a difference that loses digits as the shape grows, because the
-    /// standard deviation falls against the mean (general knowledge); it is within relative 1e-14 at shape 2
-    /// (measured here: the test "weibull closed forms").
+    /// scale² (Γ(1 + 2/shape) − Γ(1 + 1/shape)²) for shape below 10, and scale² Γ(1 + ε)² expm1(S) with ε = 1/shape and
+    /// S = Σ over n = 2..30 of (−1)ⁿ ζ(n) (2ⁿ − 2) εⁿ / n from shape 10 on, where the difference would cancel
+    /// (the Euler constant terms of ln Γ(1 + 2ε) − 2 ln Γ(1 + ε) cancel exactly; the series is from documentation:
+    /// the expansion of ln Γ(1 + z) in ζ(n)). Relative error at most 1e-13 over shape from 10 to 1e8, and at shape 2 within 1e-14, pinned by the tests "weibull variance against
+    /// the reference at large shape" and "weibull closed forms" against <c>tests/reference/special.py weibull</c>
+    /// (measured here). The ζ(n) come from <c>tests/reference/special.py zeta</c>.
     /// </summary>
     let variance (d: Continuous) : float =
         match d with
@@ -317,10 +389,15 @@ module Continuous =
         | Exponential rate -> 1.0 / (rate * rate)
         | Cauchy _ -> nan
         | Weibull (shape, scale) ->
-            let g1 = Special.gamma (1.0 + 1.0 / shape)
-            let g2 = Special.gamma (1.0 + 2.0 / shape)
+            if shape >= 10.0 then
+                let e = 1.0 / shape
+                let g = Special.gamma (1.0 + e)
+                scale * scale * g * g * Special.expm1 (weibullLogRatio e)
+            else
+                let g1 = Special.gamma (1.0 + 1.0 / shape)
+                let g2 = Special.gamma (1.0 + 2.0 / shape)
 
-            if Double.IsInfinity g1 || Double.IsInfinity g2 then infinity else scale * scale * (g2 - g1 * g1)
+                if Double.IsInfinity g1 || Double.IsInfinity g2 then infinity else scale * scale * (g2 - g1 * g1)
         | Logistic (_, scale) -> scale * scale * Math.PI * Math.PI / 3.0
 
     /// <summary>The square root of the variance: NaN for the Cauchy.</summary>

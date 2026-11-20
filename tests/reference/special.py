@@ -12,6 +12,8 @@ Sections:
     normal  the standard normal cdf and survival, the cdf of N(3, 2) and the standard normal quantile, as struct tuples
     lognormal
             the cdf and survival of the log-normal distribution with mu = 0.5 and sigma = 0.8
+    zeta    the Riemann zeta function at n = 2 to 30, as doubles
+    weibull the Weibull variance scale^2 (Gamma(1 + 2/k) - Gamma(1 + 1/k)^2) and the Weibull survival function
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -70,6 +72,11 @@ Methods:
     invert      200 bisection steps on an increasing function between two bounds that bracket the target (asserted);
                 the bracket of width w shrinks to w 2^-200.
     emit        prints a table of struct tuples, each value as repr(float(value)).
+    zeta(n)     Euler-Maclaurin summation at N = 40: the sum of k^-n for k < N, N^(1-n)/(n-1), N^-n/2 and the sum over
+                j = 1..25 of B(2j)/(2j)! (n)_(2j-1) N^(-n-2j+1), (n)_m the rising factorial; asserted equal to the same sum
+                at N = 50 to 1e-55, and for even n to (-1)^(n/2+1) B(n) (2 pi)^n / (2 n!) to 1e-55.
+    Weibull     variance from exp(ln_gamma(1 + 2/k)) - exp(ln_gamma(1 + 1/k))^2 at the context precision plus GUARD + 20
+                digits (the difference cancels about 2 log10(k) digits); survival exp(-(x/scale)^k) at 20 more digits.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -860,6 +867,77 @@ def section_lognormal() -> None:
     emit("logNormalCases", [(x, value(lognormal_cdf, x), value(lognormal_sf, x)) for x in xs])
 
 
+def zeta_sum(n: int, big_n: int) -> Decimal:
+    """zeta(n) by Euler-Maclaurin summation at big_n, for n >= 2."""
+    total = sum((Decimal(k) ** -n for k in range(1, big_n)), Decimal(0))
+    total += Decimal(big_n) ** (1 - n) / (n - 1) + Decimal(big_n) ** -n / 2
+    rising = Decimal(n)
+    for j in range(1, 26):
+        if j > 1:
+            rising *= (n + 2 * j - 3) * (n + 2 * j - 2)
+        total += dec(B[2 * j] / math.factorial(2 * j)) * rising * Decimal(big_n) ** (-n - 2 * j + 1)
+    return total
+
+
+def zeta_value(n: int) -> Decimal:
+    """zeta(n) for an integer n >= 2, checked against N = 50 and, for even n, against the Bernoulli closed form."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = zeta_sum(n, 40)
+        if abs(result - zeta_sum(n, 50)) > Decimal("1e-55"):
+            sys.exit(f"zeta({n}): N = 40 and N = 50 differ")
+        if n % 2 == 0:
+            closed = (-1) ** (n // 2 + 1) * dec(B[n]) * (2 * pi()) ** n / (2 * math.factorial(n))
+            if abs(result - closed) > Decimal("1e-55") * result:
+                sys.exit(f"zeta({n}): {result} against the Bernoulli closed form {closed}")
+    return +result
+
+
+def section_zeta() -> None:
+    print("// python -I tests/reference/special.py zeta")
+    print()
+    print("// zeta(n), n = 2..30:")
+    print("let private zetaValues: float[] =")
+    print("    [|")
+    for n in range(2, 31):
+        print(f"        {value(zeta_value, n)!r} // {n}")
+    print("    |]")
+    print()
+
+
+def weibull_variance(k, scale) -> Decimal:
+    """scale^2 (Gamma(1 + 2/k) - Gamma(1 + 1/k)^2) from ln_gamma."""
+    k, scale = Decimal(k), Decimal(scale)
+    with localcontext() as ctx:
+        ctx.prec += GUARD + 20
+        g1 = ln_gamma(1 + 1 / k).exp()
+        g2 = ln_gamma(1 + 2 / k).exp()
+        result = scale * scale * (g2 - g1 * g1)
+    return +result
+
+
+def weibull_survival(k, scale, x) -> Decimal:
+    """exp(-(x / scale)^k) at the exact values of the doubles."""
+    with localcontext() as ctx:
+        ctx.prec += 20
+        result = (-((Decimal(x) / Decimal(scale)) ** Decimal(k))).exp()
+    return +result
+
+
+def section_weibull() -> None:
+    print("// python -I tests/reference/special.py weibull")
+    print()
+    ks = [10.0, 100.0, 1e4, 1e8]
+    scales = [1.0, 1.7]
+    emit("weibullVarianceCases", [(k, sc, value(weibull_variance, k, sc)) for k in ks for sc in scales])
+
+    xs = {20.0: [1.2, 1.6, 1.7, 1.8, 2.0, 2.2], 1000.0: [1.69, 1.7, 1.7017, 1.705]}
+    emit(
+        "weibullSurvivalCases",
+        [(k, 1.7, x, value(weibull_survival, k, 1.7, x)) for k, row in xs.items() for x in row],
+    )
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -867,6 +945,8 @@ SECTIONS = {
     "incbeta": section_incbeta,
     "normal": section_normal,
     "lognormal": section_lognormal,
+    "zeta": section_zeta,
+    "weibull": section_weibull,
 }
 
 if __name__ == "__main__":

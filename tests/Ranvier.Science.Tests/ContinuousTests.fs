@@ -65,6 +65,35 @@ let private logNormalCases: struct (float * float * float)[] =
         struct (1000.0, 0.9999999999999994, 5.749705686405583e-16)
     |]
 
+// python -I tests/reference/special.py weibull
+// k, scale, variance
+let private weibullVarianceCases: struct (float * float * float)[] =
+    [|
+        struct (10.0, 1.0, 0.01310045507346831)
+        struct (10.0, 1.7, 0.03786031516232341)
+        struct (100.0, 1.0, 0.00016030491620026111)
+        struct (100.0, 1.7, 0.0004632812078187546)
+        struct (10000.0, 1.0, 1.6445038762822376e-08)
+        struct (10000.0, 1.7, 4.7526162024556667e-08)
+        struct (100000000.0, 1.0, 1.6449340238174553e-16)
+        struct (100000000.0, 1.7, 4.753859328832446e-16)
+    |]
+
+// k, scale, x, survival
+let private weibullSurvivalCases: struct (float * float * float * float)[] =
+    [|
+        struct (20.0, 1.7, 1.2, 0.9990571520175738)
+        struct (20.0, 1.7, 1.6, 0.7427060286258715)
+        struct (20.0, 1.7, 1.7, 0.36787944117144233)
+        struct (20.0, 1.7, 1.8, 0.0434262777646477)
+        struct (20.0, 1.7, 2.0, 6.239595687369753e-12)
+        struct (20.0, 1.7, 2.2, 4.163087892779429e-76)
+        struct (1000.0, 1.7, 1.69, 0.9972635447961798)
+        struct (1000.0, 1.7, 1.7, 0.36787944117144233)
+        struct (1000.0, 1.7, 1.7017, 0.06607770161458344)
+        struct (1000.0, 1.7, 1.705, 6.467103253477042e-09)
+    |]
+
 let private rel (a: float) (b: float) : float = abs (a - b) / abs b
 
 let private lowerGrid = [ 1e-100; 1e-10; 0.01; 0.3; 0.5 ]
@@ -77,6 +106,11 @@ let private matches (name: string) (actual: float) (reference: float) =
             (rel actual reference)
             1e-12
             (name + ": " + string actual + " against " + string reference)
+
+/// matches with a stated bound in place of 1e-12.
+let private matchesWithin (bound: float) (name: string) (actual: float) (reference: float) =
+    if reference >= 1e-300 then
+        Expect.isLessThanOrEqual (rel actual reference) bound (name + ": " + string actual + " against " + string reference)
 
 let private roundTrip (d: Continuous) (p: float) =
     let q = Continuous.quantile d p
@@ -272,6 +306,45 @@ let tests =
                 Expect.isLessThanOrEqual (rel (Continuous.mean d2) (3.0 * sqrt pi / 2.0)) 1e-14 "mean"
                 Expect.isLessThanOrEqual (rel (Continuous.variance d2) (9.0 * (1.0 - pi / 4.0))) 1e-14 "variance"
                 Expect.equal (Continuous.density (Continuous.weibull 0.5 1.0) 0.0) infinity "density at 0, shape 1/2")
+
+            testCase "weibull variance against the reference at large shape" (fun () ->
+                for row in weibullVarianceCases do
+                    let struct (k, scale, v) = row
+
+                    Expect.isLessThanOrEqual
+                        (rel (Continuous.variance (Continuous.weibull k scale)) v)
+                        1e-13
+                        ("variance at shape " + string k + ", scale " + string scale)
+
+                // The direct difference of gamma values goes negative from a shape of about 1e8.
+                Expect.isTrue (Continuous.variance (Continuous.weibull 1e8 1.0) > 0.0) "positive at shape 1e8"
+                Expect.isTrue (Continuous.standardDeviation (Continuous.weibull 1e8 1.0) > 0.0) "sd at shape 1e8")
+
+            testCase "weibull survival at a large shape and a scale that is not a power of two" (fun () ->
+                for row in weibullSurvivalCases do
+                    let struct (k, scale, x, sf) = row
+                    let d = Continuous.weibull k scale
+                    // x / scale rounds to half an ulp and is raised to the shape: the error grows as shape * (x / scale)^shape.
+                    let bound = if k <= 20.0 then 1e-12 else 1e-9
+                    matchesWithin bound ("survival at shape " + string k + ", x " + string x) (Continuous.survival d x) sf)
+
+            testCase "log-normal quantile round trip at a large mu" (fun () ->
+                // exp (mu + sigma * z) rounds its argument to half an ulp of mu: the error grows as |mu| * |z| / sigma.
+                for p in lowerGrid @ upperGrid @ [ 1e-300 ] do
+                    roundTrip (Continuous.logNormal 50.0 0.1) p
+
+                let d = Continuous.logNormal 300.0 0.1
+
+                for p in [ 1e-300; 1e-100; 1e-10; 0.3; 0.975 ] do
+                    let q = Continuous.quantile d p
+
+                    let err =
+                        if p <= 0.5 then
+                            rel (Continuous.cdf d q) p
+                        else
+                            rel (Continuous.survival d q) (1.0 - p)
+
+                    Expect.isLessThanOrEqual err 2e-11 ("round trip at " + string p))
 
             testCase "logistic closed forms" (fun () ->
                 let d = Continuous.logistic 1.0 2.0
