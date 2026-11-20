@@ -38,7 +38,7 @@ lists the changes.
 - `tests/`: one test suite that compiles to two targets, .NET and, through the Fickl compiler, JavaScript.
 - `bench/Ranvier.Science.Benchmarks`: the benchmark project.
 - `examples/Monitor`: the sequential monitor, one page for a native window and a browser (below).
-- `examples/AstroTracked`: a copy of the AstroShowcase app with two pages ported onto tracked quantities (below).
+- `examples/AstroTracked`: removed on 2026-11-20; see "AstroTracked" below.
 - `docs/`: the probe record and the measurements.
 
 ## Tests
@@ -118,30 +118,12 @@ default page of four channels.
 
 ## AstroTracked
 
-`examples/AstroTracked` is a versioned copy of the AstroShowcase demo app, with its 29 pages, and two pages added beside
-their originals, 31 in all: Atmospheric Drag Decay and Attitude Dynamics, each ported onto tracked quantities and
-registered as "..., tracked".
-The original pages are changed only by a counter, a removed `private` and one state reader; the other pages are
-untouched. The copy is not in `Ranvier.Science.slnx`, and it takes no fixes from the app it was copied from.
-
-The commands run from the repository root. Each scripted mode creates its window hidden; no run of the window mode or
-the `dev` host has been made in this slice.
-
-1. Build: `dotnet build -c Release examples/AstroTracked/AstroShowcase.fsproj`
-2. Counts and comparison: `dotnet run -c Release --no-build --project examples/AstroTracked/AstroShowcase.fsproj -- --tracked`
-   counts the integrations of the original and tracked Decay pages per control change, compares the two pages' status
-   text, lifetimes and, over a script, the two Attitude pages' states, times a control change on each Decay page, and
-   ends with `PASS  tracked pages`.
-3. Frame times: `dotnet run -c Release --no-build --project examples/AstroTracked/AstroShowcase.fsproj -- --bench`
-   times one frame of app work on every page (add `--frames <n>` for fewer or more).
-
-Records:
-
-- [`examples/AstroTracked/COPY.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/examples/AstroTracked/COPY.md): where the copy came from, its hashes, its package
-  versions and the warning baseline.
-- [`docs/measurements/tracked-pages.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/tracked-pages.md): on one machine, in separate runs, the
-  counts, the state comparison and the control-change medians of four `--tracked` runs, the frame means of one `--bench`
-  run, and the picture comparison of three `--shots` runs.
+`examples/AstroTracked` was a versioned copy of the AstroShowcase demo app with two pages ported onto tracked
+quantities, Atmospheric Drag Decay and Attitude Dynamics, counted and compared against their originals. It was removed
+from the repository on 2026-11-20 at the owner's request. Its sources, and the `--tracked` scripted mode, are at commit
+`236eaf7`: [`examples/AstroTracked`](https://github.com/ranvier-org/Ranvier.Science/tree/236eaf7/examples/AstroTracked).
+The measurements stay in [`docs/measurements/tracked-pages.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/tracked-pages.md)
+and the findings report, [`docs/FINDINGS.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md).
 
 ## Benchmarks
 

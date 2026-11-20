@@ -30,7 +30,7 @@ jobs:
       - name: Install npm packages
         run: npm ci
       # The solution holds the libraries, the .NET tests, the benchmarks and the Monitor's model and native head. No step
-      # runs the Monitor or AstroTracked apps, which need a display and a GPU; AstroTracked is outside the solution.
+      # runs the Monitor app, which needs a display and a GPU.
       - name: Build
         run: dotnet build -c Release
       - name: .NET tests
