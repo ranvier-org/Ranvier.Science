@@ -14,6 +14,9 @@ Sections:
             the cdf and survival of the log-normal distribution with mu = 0.5 and sigma = 0.8
     zeta    the Riemann zeta function at n = 2 to 30, as doubles
     weibull the Weibull variance scale^2 (Gamma(1 + 2/k) - Gamma(1 + 1/k)^2) and the Weibull survival function
+    dist-gamma, dist-chi-squared, dist-beta, dist-student-t, dist-fisher-f
+            the cdf, survival and density of the gamma, chi-squared, beta, Student t and F distributions at the
+            points of ContinuousTests.fs, and their quantiles at p = 0.05 and 0.975
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -77,6 +80,22 @@ Methods:
                 at N = 50 to 1e-55, and for even n to (-1)^(n/2+1) B(n) (2 pi)^n / (2 n!) to 1e-55.
     Weibull     variance from exp(ln_gamma(1 + 2/k)) - exp(ln_gamma(1 + 1/k))^2 at the context precision plus GUARD + 20
                 digits (the difference cancels about 2 log10(k) digits); survival exp(-(x/scale)^k) at 20 more digits.
+    gamma(k, s) cdf P(k, x/s) and survival Q(k, x/s) from gamma_p and gamma_q; density
+                exp((k - 1) ln t - t - ln Gamma(k) - ln s) with t = x/s. Chi-squared(n) is gamma(n/2, 2).
+    beta(a, b)  cdf I_x(a, b) and survival I_(1 - x)(b, a) from beta_inc; density
+                exp((a - 1) ln x + (b - 1) ln(1 - x) - ln B(a, b)).
+    t(n)        P(T > |t|) = I_x(n/2, 1/2) / 2 with x = n / (n + t^2), from beta_inc; the cdf is that tail below 0 and
+                1 minus it above, the survival the reverse; density
+                exp(-((n + 1)/2) ln(1 + t^2/n) - ln(n)/2 - ln B(n/2, 1/2)).
+    F(m, n)     cdf I_w(m/2, n/2) with w = m x / (m x + n) and survival I_(1 - w)(n/2, m/2) with 1 - w = n / (n + m x),
+                from beta_inc; density
+                exp((m/2) ln(m/n) + (m/2 - 1) ln x - ((m + n)/2) ln(1 + m x/n) - ln B(m/2, n/2)).
+    densities   each exponent at the context precision plus GUARD + 4 digits (exp_of), so that its terms, below 10^4,
+                keep the context's precision in absolute terms.
+    quantiles   invert on the cdf for p <= 1/2 and on minus the survival against -(1 - p) above, over a bracket
+                asserted by invert.
+    Each of these sections first checks beta_inc against I_x(1, 1) = x at x = 0.3 and 0.8 and against
+    I_0.3(2.5, 3.5) + I_0.7(3.5, 2.5) = 1, to 1e-50 at 60 digits.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -938,6 +957,239 @@ def section_weibull() -> None:
     )
 
 
+def check_distribution_helpers() -> None:
+    """Exits 1 unless beta_inc meets three identities to 1e-50 at 60 digits."""
+    with localcontext() as ctx:
+        ctx.prec = DIGITS
+        tolerance = Decimal("1e-50")
+        checks = [
+            ("beta_inc(1, 1, 0.3) = 0.3", beta_inc(1, 1, 0.3) - Decimal(0.3)),
+            ("beta_inc(1, 1, 0.8) = 0.8", beta_inc(1, 1, 0.8) - Decimal(0.8)),
+            (
+                "beta_inc(2.5, 3.5, 0.3) + beta_inc(3.5, 2.5, 0.7) = 1",
+                beta_inc(2.5, 3.5, Decimal("0.3")) + beta_inc(3.5, 2.5, Decimal("0.7")) - 1,
+            ),
+        ]
+        for label, difference in checks:
+            if abs(difference) > tolerance:
+                sys.exit(f"check failed: {label}, off by {difference}")
+
+
+def distribution_quantile(cdf, sf, p: float, lo, hi) -> Decimal:
+    """x with cdf(x) = p for p <= 1/2, and with sf(x) = 1 - Decimal(p) above, by invert over [lo, hi]."""
+    if p <= 0.5:
+        return invert(cdf, Decimal(p), lo, hi)
+    return invert(lambda x: -sf(x), -(1 - Decimal(p)), lo, hi)
+
+
+def exp_of(exponent) -> Decimal:
+    """exp of a callable's result, the callable run at the context precision plus GUARD plus 4 digits, so that terms
+    below 10^4 in magnitude keep the context's precision in absolute terms."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD + 4
+        result = exponent().exp()
+    return +result
+
+
+def gamma_cdf(k, scale, x) -> Decimal:
+    return gamma_p(k, Decimal(x) / Decimal(scale))
+
+
+def gamma_sf(k, scale, x) -> Decimal:
+    return gamma_q(k, Decimal(x) / Decimal(scale))
+
+
+def gamma_density(k, scale, x) -> Decimal:
+    """x^(k - 1) e^(-x/scale) / (Gamma(k) scale^k)."""
+    k, scale, x = Decimal(k), Decimal(scale), Decimal(x)
+
+    def exponent() -> Decimal:
+        t = x / scale
+        return (k - 1) * t.ln() - t - ln_gamma_precise(k) - scale.ln()
+
+    return exp_of(exponent)
+
+
+def gamma_quantile(k, scale, p) -> Decimal:
+    hi = 10 * (k + 10 * math.sqrt(k) + 10) * scale
+    return distribution_quantile(
+        lambda x: gamma_cdf(k, scale, x), lambda x: gamma_sf(k, scale, x), p, 0, hi
+    )
+
+
+def section_dist_gamma() -> None:
+    print("// python -I tests/reference/special.py dist-gamma")
+    print()
+    check_distribution_helpers()
+    points = {
+        (2.5, 2.0): [1e-5, 0.1, 1.0, 5.0, 20.0, 100.0],
+        (0.5, 1.0): [1e-10, 0.01, 0.5, 3.0, 50.0],
+        (100.0, 1.0): [60.0, 90.0, 100.0, 110.0, 150.0],
+    }
+    emit(
+        "gammaCases",
+        [
+            (k, s, x, value(gamma_cdf, k, s, x), value(gamma_sf, k, s, x), value(gamma_density, k, s, x))
+            for (k, s), xs in points.items()
+            for x in xs
+        ],
+    )
+    emit("gammaQuantileCases", [(k, s, p, value(gamma_quantile, k, s, p)) for k, s in points for p in (0.05, 0.975)])
+
+
+def section_dist_chi_squared() -> None:
+    print("// python -I tests/reference/special.py dist-chi-squared")
+    print()
+    check_distribution_helpers()
+    points = {3.0: [0.01, 1.0, 3.0, 10.0, 50.0], 10.0: [1.0, 10.0, 30.0, 100.0]}
+    # Chi-squared(n) is gamma(n/2, 2); n/2 is exact.
+    emit(
+        "chiSquaredCases",
+        [
+            (
+                n,
+                x,
+                value(gamma_cdf, n / 2, 2.0, x),
+                value(gamma_sf, n / 2, 2.0, x),
+                value(gamma_density, n / 2, 2.0, x),
+            )
+            for n, xs in points.items()
+            for x in xs
+        ],
+    )
+    emit("chiSquaredQuantileCases", [(n, p, value(gamma_quantile, n / 2, 2.0, p)) for n in points for p in (0.05, 0.975)])
+
+
+def beta_cdf(a, b, x) -> Decimal:
+    return beta_inc(a, b, x)
+
+
+def beta_sf(a, b, x) -> Decimal:
+    # 1 - x rounds only beyond the context's 60 or 80 digits, far below the precision of a double.
+    return beta_inc(b, a, 1 - Decimal(x))
+
+
+def beta_density(a, b, x) -> Decimal:
+    """x^(a - 1) (1 - x)^(b - 1) / B(a, b)."""
+    a, b, x = Decimal(a), Decimal(b), Decimal(x)
+    return exp_of(lambda: (a - 1) * x.ln() + (b - 1) * (1 - x).ln() - beta_ln(a, b))
+
+
+def beta_quantile(a, b, p) -> Decimal:
+    return distribution_quantile(lambda x: beta_cdf(a, b, x), lambda x: beta_sf(a, b, x), p, 0, 1)
+
+
+def section_dist_beta() -> None:
+    print("// python -I tests/reference/special.py dist-beta")
+    print()
+    check_distribution_helpers()
+    a, b = 2.5, 3.5
+    xs = [1e-6, 0.1, 0.4, 0.8, 0.999]
+    emit(
+        "betaCases",
+        [(a, b, x, value(beta_cdf, a, b, x), value(beta_sf, a, b, x), value(beta_density, a, b, x)) for x in xs],
+    )
+    emit("betaQuantileCases", [(a, b, p, value(beta_quantile, a, b, p)) for p in (0.05, 0.975)])
+
+
+def student_t_tail(n, t) -> Decimal:
+    """P(T > |t|) = I_x(n/2, 1/2) / 2 with x = n / (n + t^2)."""
+    n, t = Decimal(n), Decimal(t)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        x = n / (n + t * t)
+        result = beta_inc(n / 2, Decimal(1) / 2, x) / 2
+    return +result
+
+
+def student_t_cdf(n, t) -> Decimal:
+    if Decimal(t) < 0:
+        return student_t_tail(n, t)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = 1 - student_t_tail(n, t)
+    return +result
+
+
+def student_t_sf(n, t) -> Decimal:
+    return student_t_cdf(n, -Decimal(t))
+
+
+def student_t_density(n, t) -> Decimal:
+    """(1 + t^2/n)^(-(n + 1)/2) / (sqrt(n) B(n/2, 1/2))."""
+    n, t = Decimal(n), Decimal(t)
+    half = Decimal(1) / 2
+    return exp_of(lambda: -(n + 1) / 2 * (1 + t * t / n).ln() - n.ln() / 2 - beta_ln(n / 2, half))
+
+
+def student_t_quantile(n, p) -> Decimal:
+    lo, hi = (-1000, 0) if p <= 0.5 else (0, 1000)
+    return distribution_quantile(lambda t: student_t_cdf(n, t), lambda t: student_t_sf(n, t), p, lo, hi)
+
+
+def section_dist_student_t() -> None:
+    print("// python -I tests/reference/special.py dist-student-t")
+    print()
+    check_distribution_helpers()
+    dofs = [2.5, 5.0, 30.0]
+    ts = [-1000.0, -10.0, -2.5, -1.0, 0.4, 1.96, 4.0, 100.0]
+    emit(
+        "studentTCases",
+        [
+            (n, t, value(student_t_cdf, n, t), value(student_t_sf, n, t), value(student_t_density, n, t))
+            for n in dofs
+            for t in ts
+        ],
+    )
+    emit("studentTQuantileCases", [(n, p, value(student_t_quantile, n, p)) for n in dofs for p in (0.05, 0.975)])
+
+
+def fisher_f_cdf(m, n, x) -> Decimal:
+    m, n, x = Decimal(m), Decimal(n), Decimal(x)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        w = m * x / (m * x + n)
+        result = beta_inc(m / 2, n / 2, w)
+    return +result
+
+
+def fisher_f_sf(m, n, x) -> Decimal:
+    m, n, x = Decimal(m), Decimal(n), Decimal(x)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        w = n / (n + m * x)
+        result = beta_inc(n / 2, m / 2, w)
+    return +result
+
+
+def fisher_f_density(m, n, x) -> Decimal:
+    """(m/n)^(m/2) x^(m/2 - 1) (1 + m x/n)^(-(m + n)/2) / B(m/2, n/2)."""
+    m, n, x = Decimal(m), Decimal(n), Decimal(x)
+    return exp_of(
+        lambda: m / 2 * (m / n).ln() + (m / 2 - 1) * x.ln() - (m + n) / 2 * (1 + m * x / n).ln() - beta_ln(m / 2, n / 2)
+    )
+
+
+def fisher_f_quantile(m, n, p) -> Decimal:
+    return distribution_quantile(lambda x: fisher_f_cdf(m, n, x), lambda x: fisher_f_sf(m, n, x), p, 0, 1000)
+
+
+def section_dist_fisher_f() -> None:
+    print("// python -I tests/reference/special.py dist-fisher-f")
+    print()
+    check_distribution_helpers()
+    points = {(5.0, 10.0): [0.01, 0.5, 1.0, 3.0, 20.0, 1000.0], (2.0, 30.0): [0.1, 1.0, 5.0, 50.0]}
+    emit(
+        "fisherFCases",
+        [
+            (m, n, x, value(fisher_f_cdf, m, n, x), value(fisher_f_sf, m, n, x), value(fisher_f_density, m, n, x))
+            for (m, n), xs in points.items()
+            for x in xs
+        ],
+    )
+    emit("fisherFQuantileCases", [(m, n, p, value(fisher_f_quantile, m, n, p)) for m, n in points for p in (0.05, 0.975)])
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -947,6 +1199,11 @@ SECTIONS = {
     "lognormal": section_lognormal,
     "zeta": section_zeta,
     "weibull": section_weibull,
+    "dist-gamma": section_dist_gamma,
+    "dist-chi-squared": section_dist_chi_squared,
+    "dist-beta": section_dist_beta,
+    "dist-student-t": section_dist_student_t,
+    "dist-fisher-f": section_dist_fisher_f,
 }
 
 if __name__ == "__main__":
