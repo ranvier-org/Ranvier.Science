@@ -20,6 +20,7 @@
         <Compile Include="Comoments.fs" />
         <Compile Include="HigherMoments.fs" />
         <Compile Include="WeightedMoments.fs" />
+        <Compile Include="Windows.fs" />
         <Compile Include="FloatPolicy.fs" />
         <Compile Include="Aggregate.fs" />
         <Compile Include="Tolerance.fs" />

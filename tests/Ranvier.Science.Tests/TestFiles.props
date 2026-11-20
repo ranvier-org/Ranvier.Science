@@ -38,6 +38,7 @@
         <Compile Include="$(MSBuildThisFileDirectory)HigherMomentsTests.fs" Link="HigherMomentsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)WeightedMomentsTests.fs" Link="WeightedMomentsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)HistogramTests.fs" Link="HistogramTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)WindowTests.fs" Link="WindowTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />
