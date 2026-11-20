@@ -76,8 +76,8 @@ module internal TestSupport =
         }
 
     let nullValue (name: string) (x: float) : unit =
-        if Double.IsInfinity x then
-            raise (ArgumentOutOfRangeException(name, name + " must not be infinite."))
+        if Double.IsNaN x || Double.IsInfinity x then
+            raise (ArgumentOutOfRangeException(name, name + " must be finite."))
 
     // The result of a t statistic on dof degrees of freedom.
     let tResult (alternative: Alternative) (statistic: float) (dof: float) : TestResult =
@@ -101,7 +101,7 @@ module HypothesisTest =
     /// <summary>
     /// The one-sample t test of the mean against the null value: t = (x̄ − μ₀)/(s/√n) with s the sample standard
     /// deviation (divisor n − 1), on n − 1 degrees of freedom. Raises ArgumentOutOfRangeException when the null value
-    /// is infinite (NaN gives a NaN statistic). A count below 2 gives every field NaN. A constant sample gives ±∞
+    /// is not finite (NaN raises too). A count below 2 gives every field NaN. A constant sample gives ±∞
     /// (p-value 0 two-sided) at a mean other than the null value and NaN at the null value. Relative error of the
     /// p-value at most 1e-12 over the samples of the test "one-sample t against the reference" (R's
     /// <c>datasets::sleep</c> group 1 and the paired differences), which pins it.
@@ -118,8 +118,7 @@ module HypothesisTest =
 
     /// <summary>
     /// The one-sample z test of the mean for a known standard deviation: z = (x̄ − μ₀)/(σ/√n), standard normal under
-    /// the null. Raises ArgumentOutOfRangeException unless σ is finite and greater than 0 and the null value is not
-    /// infinite. A count of 0 gives every field NaN. Both degrees-of-freedom fields are NaN. Relative error of the
+    /// the null. Raises ArgumentOutOfRangeException unless σ is finite and greater than 0 and the null value is finite. A count of 0 gives every field NaN. Both degrees-of-freedom fields are NaN. Relative error of the
     /// p-value at most 1e-12 over the sample of the test "one-sample z against the reference", which pins it.
     /// </summary>
     let oneSampleZ (alternative: Alternative) (mu0: float) (sigma: float) (m: Moments) : TestResult =
@@ -172,7 +171,9 @@ module HypothesisTest =
     /// <summary>
     /// The pooled-variance t test of equal means, the parameter being mean a − mean b: t = d/(s_p·√(1/nₐ + 1/nᵦ)),
     /// s²_p = ((nₐ − 1)s²ₐ + (nᵦ − 1)s²ᵦ)/(nₐ + nᵦ − 2), on nₐ + nᵦ − 2 degrees of freedom; it assumes equal
-    /// variances. A count below 2 in either sample gives every field NaN. Two constant samples give a statistic of
+    /// variances. A sample of one observation adds 0 to the pooled sum of squares, so it is defined when one sample
+    /// holds a single observation and the other two or more, as in <c>DifferenceInterval.pooled</c>; counts of (1, 1)
+    /// or a count of 0 give every field NaN. Two constant samples give a statistic of
     /// ±∞ (p-value 0 two-sided) when the means differ and NaN when they agree. Relative error of the p-value at most
     /// 1e-12 over the samples of the test "Welch and pooled t against the reference", which pins it.
     /// </summary>
@@ -180,11 +181,14 @@ module HypothesisTest =
         let na = Moments.count a
         let nb = Moments.count b
 
-        if na < 2.0 || nb < 2.0 then
+        if na < 1.0 || nb < 1.0 || na + nb < 3.0 then
             TestSupport.nanResult
         else
+            let sumOfSquares (n: float) (m: Moments) : float =
+                if n < 2.0 then 0.0 else (n - 1.0) * Moments.sampleVariance m
+
             let dof = na + nb - 2.0
-            let variance = ((na - 1.0) * Moments.sampleVariance a + (nb - 1.0) * Moments.sampleVariance b) / dof
+            let variance = (sumOfSquares na a + sumOfSquares nb b) / dof
             let d = Moments.mean a - Moments.mean b
             TestSupport.tResult alternative (d / sqrt (variance * (1.0 / na + 1.0 / nb))) dof
 

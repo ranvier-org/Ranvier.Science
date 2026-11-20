@@ -171,11 +171,28 @@ let tests =
                     allNaN "oneSampleT" (HypothesisTest.oneSampleT alt 0.0 one)
                     allNaN "welchT a" (HypothesisTest.welchT alt one many)
                     allNaN "welchT b" (HypothesisTest.welchT alt many one)
-                    allNaN "pooledT a" (HypothesisTest.pooledT alt one many)
-                    allNaN "pooledT b" (HypothesisTest.pooledT alt many one)
+                    allNaN "pooledT (1, 1)" (HypothesisTest.pooledT alt one one)
+                    allNaN "pooledT (0, 3)" (HypothesisTest.pooledT alt Moments.zero many)
+                    allNaN "pooledT (3, 0)" (HypothesisTest.pooledT alt many Moments.zero)
                     allNaN "varianceRatio a" (HypothesisTest.varianceRatio alt one many)
                     allNaN "varianceRatio b" (HypothesisTest.varianceRatio alt many one)
                     allNaN "oneSampleZ" (HypothesisTest.oneSampleZ alt 0.0 1.0 Moments.zero))
+
+            testCase "pooledT with a single observation agrees with its interval" (fun () ->
+                // Counts (1, 3) and (3, 1): the pooled variance and the n - 2 degrees of freedom exist. The interval
+                // at alpha 0.05 excludes 0 exactly when the two-sided p-value is at most 0.05.
+                let singles = [| 1.0; 9.0; 4.0 |]
+                let triple = [| 3.0; 4.0; 5.0 |]
+
+                for single in singles do
+                    for (a, b) in [| [| single |], triple; triple, [| single |] |] do
+                        let r = HypothesisTest.pooledT TwoSided (moments a) (moments b)
+                        Expect.isTrue (not (isNaN r.Statistic || Double.IsInfinity r.Statistic)) "finite statistic"
+                        Expect.equal r.DegreesOfFreedom 2.0 "degrees of freedom"
+                        Expect.isTrue (r.PValue > 0.0 && r.PValue <= 1.0) "p-value in (0, 1]"
+                        let ci = DifferenceInterval.pooled 0.05 (moments a) (moments b)
+                        let excludesZero = ci.Lower > 0.0 || ci.Upper < 0.0
+                        Expect.equal excludesZero (r.PValue <= 0.05) ("interval and p-value agree at single " + string single))
 
             testCase "zero spread" (fun () ->
                 let t = HypothesisTest.oneSampleT TwoSided 0.0 (constant 3 2.0)
@@ -235,7 +252,7 @@ let tests =
                         (fun () -> HypothesisTest.oneSampleZ TwoSided 0.0 sigma m |> ignore)
                         ("sigma " + string sigma)
 
-                for mu0 in [| infinity; -infinity |] do
+                for mu0 in [| infinity; -infinity; nan |] do
                     Expect.throwsT<ArgumentOutOfRangeException>
                         (fun () -> HypothesisTest.oneSampleT TwoSided mu0 m |> ignore)
                         ("oneSampleT mu0 " + string mu0)
