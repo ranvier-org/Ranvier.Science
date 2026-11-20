@@ -167,6 +167,32 @@ let tests =
                             expectClose 1e-13 1e-13 (Interpolant.derivative reference f) (Interpolant.derivative scaled (f * scale) * scale) (sprintf "%s: slope at %g" label f)
             }
 
+            test "widths whose sum overflows give the unscaled cubic" {
+                let baseXs = [| 0.; 1.; 2.5; 3.5 |]
+                let ys = [| 1.3; -0.4; 2.2; 0.9 |]
+                let scale = 5e307
+                let fractions = [| 0.1; 0.5; 1.0; 1.7; 2.5; 2.75; 3.0; 3.4 |]
+
+                for name, make in kinds |> List.tail do
+                    let reference = make baseXs ys
+                    let scaled = make (baseXs |> Array.map (fun x -> x * scale)) ys
+
+                    for k in 0 .. baseXs.Length - 1 do
+                        Expect.equal (Interpolant.evaluate scaled (baseXs[k] * scale)) ys[k] (sprintf "%s: knot %d" name k)
+
+                    for f in fractions do
+                        expectClose 1e-13 1e-13 (Interpolant.evaluate reference f) (Interpolant.evaluate scaled (f * scale)) (sprintf "%s: value at %g" name f)
+                        expectClose 1e-13 1e-13 (Interpolant.derivative reference f) (Interpolant.derivative scaled (f * scale) * scale) (sprintf "%s: slope at %g" name f)
+            }
+
+            test "an overflowing secant gives NaN everywhere" {
+                for name, make in kinds do
+                    let f = make [| 0.; 1.; 2.; 3. |] [| 0.; -1e308; 1e308; 0. |]
+                    Expect.isTrue (Double.IsNaN(Interpolant.evaluate f 0.5)) (name + ": evaluate")
+                    Expect.isTrue (Double.IsNaN(Interpolant.evaluate f 1.0)) (name + ": evaluate at a knot")
+                    Expect.isTrue (Double.IsNaN(Interpolant.derivative f 1.5)) (name + ": derivative")
+            }
+
             test "monotone cubic takes the mean and the scaling branches" {
                 // Secants 1, 99, 1: each interior slope is the mean 50, and both outer intervals have
                 // alpha^2 + beta^2 = 1 + 2500 > 9, so their slope pairs are scaled by tau = 3 / sqrt 2501.

@@ -110,8 +110,9 @@ module Interpolant =
 /// Builders of `Interpolant`s from knots. Each raises `ArgumentException` when xs is not strictly increasing (a NaN
 /// breaks it), when an interval width x[i + 1] - x[i] is infinite (so an infinite x, or two finite knots further
 /// apart than the largest float, raises, and the message names the interval), when it has fewer than two points, or
-/// when ys has another length than xs (the message names both lengths). A NaN or infinite y is not an error: the interpolant evaluates to NaN everywhere. Each builder copies
-/// its arrays, so later mutation of the inputs does not reach the interpolant. Cost O(n) to build (general
+/// when ys has another length than xs (the message names both lengths). A NaN or infinite y is not an error, nor is a
+/// secant (y[i + 1] - y[i]) / (x[i + 1] - x[i]) that overflows: the interpolant then evaluates and differentiates to
+/// NaN everywhere. Each builder copies its arrays, so later mutation of the inputs does not reach the interpolant. Cost O(n) to build (general
 /// knowledge). With two points every kind is the straight line through them.
 module Interpolate =
     let private build
@@ -160,12 +161,18 @@ module Interpolate =
 
         let xs = Array.copy xs
         let ys = Array.copy ys
-        let nonFinite = ys |> Array.exists (fun y -> Double.IsNaN y || Double.IsInfinity y)
+        let isNonFinite (v: float) = Double.IsNaN v || Double.IsInfinity v
+
+        let nonFiniteSecant () =
+            Array.exists2 (fun (y0, y1) (x0, x1) -> isNonFinite ((y1 - y0) / (x1 - x0))) (Array.pairwise ys) (Array.pairwise xs)
+
+        let coefficientValues = if Array.exists isNonFinite ys || nonFiniteSecant () then [||] else coefficients xs ys
+        let nonFinite = Array.exists isNonFinite ys || nonFiniteSecant () || Array.exists isNonFinite coefficientValues
 
         { Kind = kind
           Xs = xs
           Ys = ys
-          Coefficients = (if nonFinite then [||] else coefficients xs ys)
+          Coefficients = (if nonFinite then [||] else coefficientValues)
           NonFinite = nonFinite }
 
     /// The piecewise-linear interpolant. Continuous, with a derivative that jumps at each interior knot.
@@ -175,18 +182,26 @@ module Interpolate =
         let n = xs.Length
         let h = Array.init (n - 1) (fun i -> xs[i + 1] - xs[i])
         let delta = Array.init (n - 1) (fun i -> (ys[i + 1] - ys[i]) / h[i])
-        // Tridiagonal rows in the scaling of de Boor, so every term scales as y or y / h: the natural end rows
-        // 2 s[0] + s[1] = 3 delta[0] and s[n - 2] + 2 s[n - 1] = 3 delta[n - 2], and for 0 < i < n - 1
-        // h[i] s[i - 1] + 2 (h[i - 1] + h[i]) s[i] + h[i - 1] s[i + 1] = 3 (h[i] delta[i - 1] + h[i - 1] delta[i]).
-        let lower = Array.init n (fun i -> if i = 0 then 0.0 elif i = n - 1 then 1.0 else h[i])
-        let diagonal = Array.init n (fun i -> if i = 0 || i = n - 1 then 2.0 else 2.0 * (h[i - 1] + h[i]))
-        let upper = Array.init n (fun i -> if i = 0 then 1.0 elif i = n - 1 then 0.0 else h[i - 1])
+        // Tridiagonal rows: the natural end rows 2 s[0] + s[1] = 3 delta[0] and s[n - 2] + 2 s[n - 1] = 3 delta[n - 2],
+        // and for 0 < i < n - 1, with r = h[i - 1] / h[i], l = 1 / (1 + r) and m = r / (1 + r) (the row of de Boor
+        // divided by h[i - 1] + h[i]): l s[i - 1] + 2 s[i] + m s[i + 1] = 3 (l delta[i - 1] + m delta[i]). Every
+        // coefficient lies in [0, 2] and the right-hand side is three convex combinations of secants, so nothing
+        // overflows while the secants are finite.
+        let before (i: int) = 1.0 / (1.0 + h[i - 1] / h[i])
+
+        let after (i: int) =
+            let r = h[i - 1] / h[i]
+            if r > 1.0 then 1.0 / (1.0 + 1.0 / r) else r / (1.0 + r)
+
+        let lower = Array.init n (fun i -> if i = 0 then 0.0 elif i = n - 1 then 1.0 else before i)
+        let diagonal = Array.create n 2.0
+        let upper = Array.init n (fun i -> if i = 0 then 1.0 elif i = n - 1 then 0.0 else after i)
 
         let rhs =
             Array.init n (fun i ->
                 if i = 0 then 3.0 * delta[0]
                 elif i = n - 1 then 3.0 * delta[n - 2]
-                else 3.0 * (h[i] * delta[i - 1] + h[i - 1] * delta[i]))
+                else 3.0 * (lower[i] * delta[i - 1] + upper[i] * delta[i]))
 
         for i in 1 .. n - 1 do
             let w = lower[i] / diagonal[i - 1]
@@ -202,8 +217,8 @@ module Interpolate =
         s
 
     /// The natural cubic spline: twice continuously differentiable, with zero second derivative at both end knots,
-    /// found by the Thomas algorithm on the tridiagonal system of the knot slopes, scaled so that no term overflows
-    /// for finite knots however small or large the spacing. It can overshoot monotone data.
+    /// found by the Thomas algorithm on the tridiagonal system of the knot slopes, with rows normalised so that no term
+    /// overflows while the secants are finite, however small or large the spacing. It can overshoot monotone data.
     let naturalCubic (xs: float[]) (ys: float[]) : Interpolant =
         build "naturalCubic" NaturalCubic naturalSlopes xs ys
 
@@ -219,7 +234,7 @@ module Interpolate =
             let after = delta[k]
 
             if (before > 0.0 && after > 0.0) || (before < 0.0 && after < 0.0) then
-                d[k] <- (before + after) / 2.0
+                d[k] <- before / 2.0 + after / 2.0
 
         for k in 0 .. n - 2 do
             if delta[k] = 0.0 then
