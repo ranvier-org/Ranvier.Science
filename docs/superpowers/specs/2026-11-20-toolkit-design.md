@@ -106,8 +106,9 @@ browser from one source. So the toolkit has two kinds of part:
 
 - A kernel never reads or creates a node. The graph-aware parts state how many nodes they create.
 - An accumulator is an immutable value with `add` (and `remove`, `merge`, `unmerge` where the algebra allows), so it
-  folds through `createStreamFold`, `Projection.foldGroup` and `Aggregate.maintainedBy` unchanged. Accumulators take
-  the `compensated: bool` argument first, as `Sum` and `Moments` do.
+  folds through `createStreamFold`, `Projection.foldGroup` and `Aggregate.maintainedBy` unchanged. Accumulators that
+  keep running sums take the `compensated: bool` argument first, as `Sum` and `Moments` do; `DecayedMoments` (section
+  6.8) takes none, since its weights shrink at every item.
 - **Cut-off.** The core's default equality, `JsIdentityPolicy`, compares a `float` by value and every reference type by
   reference on .NET, and everything but primitives by reference under Fable (*from documentation*: core v0.2.1
   `src/Ranvier/Types.fs`, `ComparerResolution.resolve` and `GraphOptions.Default`; `docs/PROBES.md`, probe E3). So a
@@ -344,6 +345,7 @@ CholeskyDecomposition.solve : CholeskyDecomposition -> float[] -> float[]
 type QrDecomposition
 Matrix.qr : Matrix -> QrDecomposition                            // Householder; rows ≥ columns, else raise
 QrDecomposition.leastSquares : QrDecomposition -> float[] -> Result<float[], string>   // Error when rank-deficient
+QrDecomposition.r : QrDecomposition -> Matrix          // the upper-triangular factor, columns × columns
 
 type SymmetricEigen = { Values: float[]; Vectors: Matrix }        // ascending values; vectors as columns
 Matrix.symmetricEigen : Matrix -> Result<SymmetricEigen, string>  // cyclic Jacobi; Error unless symmetric
@@ -402,10 +404,10 @@ Aggregate.quantileBy : p: float -> ('V -> float) -> Projection<'K, 'V> -> Memo<f
 
 `maintainedBy` is today's private `maintain` made public. `histogramBy` counts exactly, so it needs no re-fold.
 `quantileBy` is the exact type-7 quantile over the core's sorted view; its doc comment states the per-change cost the
-builder measures or reads from core 0.2.1's `sortBy` (the incremental sort view, core PR #361). Core 0.2.1's `sortBy`
-raises `NotSupportedException` for a projection made by `createProjectionOnce` (*from documentation*: core v0.2.1
-`src/Ranvier/Projections.fs`, as the builder check read it), so `quantileBy` accepts fewer projections than the other
-aggregates, and its doc comment says so.
+builder measures or reads from core 0.2.1's `sortBy` (the incremental sort view, core PR #361). Core 0.2.1 rejects a
+projection made by `createProjectionOnce` in every `Projection` combinator, `foldGroupBy` included, so every aggregate
+here accepts the same projections (*from documentation*: core v0.2.1 `Api.fs`, `createProjectionOnce`, as the T2
+plan read it; this corrects an earlier reading that singled out `sortBy`).
 
 ### 6.10 Random variates: `Generator` additions
 
@@ -516,25 +518,28 @@ DifferenceInterval.welch, DifferenceInterval.pooled : alpha: float -> Moments ->
 
 `FixedSample.ofMoments` stays as it is.
 
-### 7.4 Hypothesis tests: `Test`
+### 7.4 Hypothesis tests: `HypothesisTest`
+
+The module is `HypothesisTest`, not `Test`, which would collide with Expecto's `Test` type in any test file that opens
+Expecto (the T3 plan's finding; the author's ruling).
 
 ```fsharp
 type Alternative = TwoSided | Less | Greater      // "Less": the parameter is below the null value
 type TestResult = { Statistic: float; DegreesOfFreedom: float; DenominatorDegreesOfFreedom: float; PValue: float }
                                                   // NaN where a field does not apply
-Test.oneSampleT : Alternative -> mu0: float -> Moments -> TestResult
-Test.oneSampleZ : Alternative -> mu0: float -> sigma: float -> Moments -> TestResult
-Test.welchT, Test.pooledT : Alternative -> Moments -> Moments -> TestResult
-Test.varianceRatio : Alternative -> Moments -> Moments -> TestResult           // F
-Test.oneWayAnova : Moments[] -> TestResult
-Test.binomial : Alternative -> successes: int -> trials: int -> p0: float -> TestResult   // exact
-Test.chiSquaredGoodnessOfFit : observed: float[] -> expected: float[] -> TestResult
-Test.chiSquaredIndependence : table: float[][] -> TestResult                   // no continuity correction
-Test.fisherExact : Alternative -> a: int -> b: int -> c: int -> d: int -> TestResult   // 2 × 2
-Test.mannWhitney : Alternative -> float[] -> float[] -> TestResult              // normal approximation
-Test.wilcoxonSignedRank : Alternative -> differences: float[] -> TestResult     // normal approximation
-Test.kolmogorovSmirnov : cdf: (float -> float) -> float[] -> TestResult         // asymptotic
-Test.kolmogorovSmirnovTwoSample : float[] -> float[] -> TestResult              // asymptotic
+HypothesisTest.oneSampleT : Alternative -> mu0: float -> Moments -> TestResult
+HypothesisTest.oneSampleZ : Alternative -> mu0: float -> sigma: float -> Moments -> TestResult
+HypothesisTest.welchT, HypothesisTest.pooledT : Alternative -> Moments -> Moments -> TestResult
+HypothesisTest.varianceRatio : Alternative -> Moments -> Moments -> TestResult           // F
+HypothesisTest.oneWayAnova : Moments[] -> TestResult
+HypothesisTest.binomial : Alternative -> successes: int -> trials: int -> p0: float -> TestResult   // exact
+HypothesisTest.chiSquaredGoodnessOfFit : observed: float[] -> expected: float[] -> TestResult
+HypothesisTest.chiSquaredIndependence : table: float[][] -> TestResult                   // no continuity correction
+HypothesisTest.fisherExact : Alternative -> a: int -> b: int -> c: int -> d: int -> TestResult   // 2 × 2
+HypothesisTest.mannWhitney : Alternative -> float[] -> float[] -> TestResult              // normal approximation
+HypothesisTest.wilcoxonSignedRank : Alternative -> differences: float[] -> TestResult     // normal approximation
+HypothesisTest.kolmogorovSmirnov : cdf: (float -> float) -> float[] -> TestResult         // asymptotic
+HypothesisTest.kolmogorovSmirnovTwoSample : float[] -> float[] -> TestResult              // asymptotic
 ```
 
 The two-sided exact tests (binomial, Fisher) sum the probabilities of outcomes no more likely than the observed one, with
@@ -607,7 +612,9 @@ Density.gaussianKernel : bandwidth: float -> float[] -> (float -> float)
 
 `Units` gains a `UnitOf` value, with a measure type, for each of these (symbol, scale in SI base units). Measure type
 names follow FSharp.Core's `UnitSymbols` where it has one (I8); otherwise the symbol when it is an F# identifier, else an
-ASCII spelling (`ohm`, `um`, `deg`), the builder's choice within that rule.
+ASCII spelling (`ohm`, `um`, `deg`), the builder's choice within that rule. A symbol whose measure type would hide an
+FSharp.Core function is spelled out: `[<Measure>] type min` hides `min` (FS1133, *measured here* by the T1 planner
+with `dotnet fsi`), so the minute's measure is `minute`; the unit's symbol stays "min".
 
 | Group | Units |
 |---|---|
@@ -702,9 +709,17 @@ second runs only when read. Its unit is the unit `Formula.check` gives.
 
 Each declaration (input, constant, derived, formula, block) registers a cleanup with the current owner that removes the
 entry, or the block's reserved identifier, from its model. After the owner is cleaned up the identifier may be declared
-again, and `TryFind` no longer finds the entry. Outside any owner a declaration is permanent, as in 0.1.0; the builder
-reads the core's `onCleanup` (`Ranvier/src/Ranvier/Api.fs`, `onCleanup`) to confirm what it does with no owner, and the
-doc comment states it. A read through a removed entry's functions behaves as the core's disposed node does.
+again, and `TryFind` no longer finds the entry. A read through a removed entry's functions behaves as the core's
+disposed node does. What "the current owner" is, from core v0.2.1 (`Api.fs` `onCleanup`; `Core.fs` `currentOwner`,
+`AddCleanup`, `Graph.Current`, as the T1 plan read them; the author's ruling on the plan's finding):
+
+- Under a graph and outside any root, effect or owning scope, the owner is the graph's root scope, so the entry leaves
+  its model when the graph is disposed.
+- With no active graph a declaration registers nothing and is permanent, as in 0.1.0 (only `constant` and
+  `measuredConstant` can be declared then, since the others create nodes).
+- Inside a pure body (a `createMemo` computation, a projection row's reader) `onCleanup` raises, and so does every
+  declaration there, leaving the model unchanged. In 0.1.0 a constant declared there was permanent, and the memo's next
+  run raised "already declares"; failing at once is the honest form of that.
 
 Names resolve once, when an entry or evaluator is created (as in 0.1.0), and do not follow a later declaration of the
 same identifier. So a formula entry, a `measuredEvaluator` or a `monteCarlo` reader that outlives the owner of an entry
