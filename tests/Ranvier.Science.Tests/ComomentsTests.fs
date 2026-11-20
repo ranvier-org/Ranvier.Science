@@ -106,6 +106,32 @@ let tests =
                 Expect.equal back Comoments.zero "zero"
             }
 
+            test "the correlation of exactly linear data is exactly 1 or -1" {
+                // y = 2x + 1 and y = 1 − 2x hold exactly in doubles. Unclamped, this set gave 1.0000000000000002
+                // (measured here: dotnet fsi on commit 04da332).
+                let xs = [| -9.0; -7.0; -3.0; 5.0; -7.0; 5.0 |]
+                Expect.equal (Comoments.correlation (ofPairs true xs (Array.map (fun x -> 2.0 * x + 1.0) xs))) 1.0 "positive"
+                Expect.equal (Comoments.correlation (ofPairs true xs (Array.map (fun x -> 1.0 - 2.0 * x) xs))) -1.0 "negative"
+            }
+
+            test "the correlation of 1000 exactly linear sets stays within -1 and 1" {
+                let rnd = Random 7
+
+                for _ in 1..1000 do
+                    let n = 3 + rnd.Next 6
+                    let xs = Array.init n (fun _ -> float (rnd.Next 41 - 20))
+                    let slope = float (rnd.Next 9 - 4)
+
+                    if slope <> 0.0 && Array.distinct xs |> Array.length > 1 then
+                        let r = Comoments.correlation (ofPairs true xs (Array.map (fun x -> slope * x + 3.0) xs))
+                        Expect.isTrue (abs r <= 1.0) (sprintf "|r| = %.17g" r)
+            }
+
+            test "a constant x keeps a NaN correlation" {
+                let c = ofPairs true [| 2.0; 2.0; 2.0 |] [| 1.0; 2.0; 4.0 |]
+                Expect.isTrue (Double.IsNaN(Comoments.correlation c)) "NaN"
+            }
+
             test "the correlation survives data scaled by 1e100 and 1e-80" {
                 // Identity: the correlation is invariant under positive scaling of x and y. The product M2x · M2y
                 // overflows near 1e100 and underflows near 1e-80, so the correlation takes the two roots separately.

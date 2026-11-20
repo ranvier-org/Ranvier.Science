@@ -166,7 +166,8 @@ module Comoments =
         if m.N < 2.0 then nan else Sum.value m.C / (m.N - 1.0)
 
     /// C / (√M2x · √M2y), where C is the co-moment and M2x, M2y the sums of squares about the means; NaN when the count is
-    /// zero or either spread is 0. The two roots are taken apart so that neither the product of the spreads nor a
+    /// zero or either spread is 0. The result is clamped to [-1, 1]: the computed ratio can exceed 1 in magnitude by a few
+    /// ulps on perfectly correlated data, and acos, atanh or sqrt (1 − r²) of such a value would be NaN. The two roots are taken apart so that neither the product of the spreads nor a
     /// square of a tiny one leaves the finite range.
     let correlation (m: Comoments) : float =
         let sx = Sum.value m.M2X
@@ -175,7 +176,8 @@ module Comoments =
         if m.N = 0.0 || not (sx > 0.0) || not (sy > 0.0) then
             nan
         else
-            Sum.value m.C / (sqrt sx * sqrt sy)
+            let r = Sum.value m.C / (sqrt sx * sqrt sy)
+            if r > 1.0 then 1.0 elif r < -1.0 then -1.0 else r
 
     /// The least-squares slope of y on x, C / M2x; NaN when the count is zero or M2x is 0.
     let slope (m: Comoments) : float =
