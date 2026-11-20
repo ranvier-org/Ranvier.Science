@@ -101,6 +101,7 @@ let tests =
                     let model = Model.create "p"
                     Quantity.inputWithUncertainty model "a" "A" Units.one 10.0 3.0 |> ignore
                     Quantity.inputWithUncertainty model "b" "B" Units.one 20.0 4.0 |> ignore
+                    Quantity.inputWithUncertainty model "z" "Z" Units.one 0.0 1.0 |> ignore
                     let u (text: string) = Uncertain.standardUncertainty (Formula.measuredEvaluator model (parsed text) ())
                     // Two independent sources: √(3² + 4²) = 5 (closed form).
                     Expect.equal (u "a + b") 5.0 "a + b"
@@ -112,7 +113,9 @@ let tests =
                     let squared = u "a^2"
                     Expect.isTrue (relative squared 60.0 <= 1e-15) (sprintf "a^2: %.17g within relative 1e-15 of 60" squared)
                     // d|x|/dx = −1 at x = −10, and −a holds a's source with contribution −3: |−1 · −3|.
-                    Expect.equal (u "abs(-a)") 3.0 "abs(-a)")
+                    Expect.equal (u "abs(-a)") 3.0 "abs(-a)"
+                    // z⁰ ≡ 1, so its derivative is 0 at z = 0 as everywhere (closed form).
+                    Expect.equal (u "z^0") 0.0 "z^0 at z = 0")
             }
 
             test "measuredEvaluator raises for a name the model lacks" {
@@ -171,10 +174,33 @@ let tests =
 
             test "a formula can read a formula entry" {
                 withGraph (fun () ->
-                    let model, _, _ = page ()
+                    let model, mean, _ = page ()
                     declared (Quantity.formula model "excess" "Excess" "mean - target") |> ignore
                     let doubled = declared (Quantity.formula model "doubled" "Doubled" "excess * 2")
-                    Expect.equal (doubled.Read ()) ((7.3 - 2.1) * 2.0) "Read")
+                    Expect.equal (doubled.Read ()) ((7.3 - 2.1) * 2.0) "Read"
+                    // 2(mean − target) holds mean's source with contribution 2 · 0.2 and target's with −2 · 0.1
+                    // (closed form).
+                    let uncertainty = doubled.Uncertainty ()
+                    let expected = 2.0 * sqrt (0.2 ** 2.0 + 0.1 ** 2.0)
+
+                    Expect.isTrue
+                        (relative uncertainty expected <= 1e-15)
+                        (sprintf "Uncertainty %.17g within relative 1e-15 of %.17g" uncertainty expected)
+
+                    let mutable runs = 0
+
+                    createEffect (fun () ->
+                        doubled.Read () |> ignore
+                        runs <- runs + 1)
+
+                    mean.SetUncertainty 0.4<mK>
+                    Expect.equal runs 1 "a new uncertainty of mean leaves a reader of doubled's value unrun"
+                    let after = doubled.Uncertainty ()
+                    let expectedAfter = 2.0 * sqrt (0.4 ** 2.0 + 0.1 ** 2.0)
+
+                    Expect.isTrue
+                        (relative after expectedAfter <= 1e-15)
+                        (sprintf "Uncertainty %.17g within relative 1e-15 of %.17g" after expectedAfter))
             }
 
             test "a formula that does not parse or check declares nothing" {

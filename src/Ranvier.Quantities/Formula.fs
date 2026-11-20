@@ -377,8 +377,9 @@ module Formula =
 
     /// A function that evaluates `expr` as `evaluator` does, over tracked reads of each entry's `Entry.Measured`: the
     /// value has the evaluator's bits, with first-order contributions by source (`Uncertain`). A number is exact;
-    /// `min` and `max` give the operand whose value `Math.Min` and `Math.Max` give, the first when both have it, and an
-    /// exact NaN when either value is NaN. Each operation costs O(m + n) in its operands' numbers of sources.
+    /// `x^0` is 1 with derivative 0 at every x, 0 included; `min` and `max` give the operand whose value `Math.Min`
+    /// and `Math.Max` give, the first when both have it, and an exact NaN when either value is NaN. Each operation costs
+    /// O(m + n) in its operands' numbers of sources.
     /// Raises ArgumentException for an identifier `model` lacks.
     let measuredEvaluator (model: Model) (expr: Expr) : unit -> Uncertain =
         let rec build (e: Expr) : unit -> Uncertain =
@@ -408,7 +409,7 @@ module Formula =
             | Power(a, n) ->
                 let f = build a
                 let power (v: float) = integerPower v n
-                let derivative (v: float) = float n * integerPower v (n - 1)
+                let derivative (v: float) = if n = 0 then 0.0 else float n * integerPower v (n - 1)
                 fun () -> Uncertain.map power derivative (f ())
             | Call(name, arguments) ->
                 match name, arguments with
