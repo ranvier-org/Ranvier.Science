@@ -12,8 +12,9 @@ open System
 /// results may differ in the last places between targets. Every function leaves its inputs unchanged and returns
 /// fresh arrays. Cost O(n log n) (general knowledge); a length that is not a power of two costs three transforms of
 /// the padded length, two forward and one inverse. Accuracy: each output of `forward` is within
-/// 1e-13 · Σ_j (|Re x_j| + |Im x_j|) of the direct sum, and each output of `inverse ∘ forward` within
-/// 1e-13 · max_j max(|Re x_j|, |Im x_j|) of the input, for n ≤ 4096, measured here by the "Fourier" test list
+/// 1e-13 · Σ_j (|Re x_j| + |Im x_j|) of the direct sum, checked at every bin for n ≤ 1024 and at the bins 0, n/2,
+/// n − 1 and every 37th for n = 4095 and 4096, and each output of `inverse ∘ forward` within
+/// 1e-13 · max_j max(|Re x_j|, |Im x_j|) of the input for n ≤ 4096, measured here by the "Fourier" test list
 /// (`dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter "Fourier"`).
 module Fourier =
     let private checkLengths (re: float[]) (im: float[]) : unit =

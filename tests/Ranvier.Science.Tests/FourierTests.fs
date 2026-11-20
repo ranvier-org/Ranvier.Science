@@ -8,19 +8,27 @@ open System
 open Expecto
 open Ranvier.Numerics
 
-/// The direct sum of the transform of (re, im), each bin from the correctly rounded sum of its terms.
-let private dft (re: float[]) (im: float[]) : float[] * float[] =
+/// The direct sum of the transform of (re, im) at the given bins, each from the correctly rounded sum of its terms.
+let private dftAt (re: float[]) (im: float[]) (bins: int[]) : float[] * float[] =
     let n = re.Length
     let c = Array.init n (fun t -> Math.Cos (2.0 * Math.PI * float t / float n))
     let s = Array.init n (fun t -> Math.Sin (2.0 * Math.PI * float t / float n))
 
     let outRe =
-        Array.init n (fun k -> exactSum (Array.init n (fun j -> re[j] * c[(j * k) % n] + im[j] * s[(j * k) % n])))
+        bins |> Array.map (fun k -> exactSum (Array.init n (fun j -> re[j] * c[(j * k) % n] + im[j] * s[(j * k) % n])))
 
     let outIm =
-        Array.init n (fun k -> exactSum (Array.init n (fun j -> im[j] * c[(j * k) % n] - re[j] * s[(j * k) % n])))
+        bins |> Array.map (fun k -> exactSum (Array.init n (fun j -> im[j] * c[(j * k) % n] - re[j] * s[(j * k) % n])))
 
     outRe, outIm
+
+/// Every bin up to n = 1024; above it the bins 0, n/2 and n − 1 and every 37th. The direct sum over every bin at 4095
+/// and 4096, O(n²), was most of the mocha run's time (docs/measurements/gate.md).
+let private checkedBins (n: int) : int[] =
+    if n <= 1024 then
+        Array.init n id
+    else
+        Array.append [| 0; n / 2; n - 1 |] [| 0..37 .. n - 1 |] |> Array.distinct |> Array.sort
 
 let private normalsOf (seed: int) (n: int) : float[] =
     let struct (xs, _) = Generator.normals 0.0 1.0 n (Generator.create seed)
@@ -63,14 +71,16 @@ let tests =
                     let re = normalsOf n n
                     let im = normalsOf (n + 1) n
                     let struct (fr, fi) = Fourier.forward re im
-                    let er, ei = dft re im
+                    let bins = checkedBins n
+                    let er, ei = dftAt re im bins
                     let scale = Array.sum (Array.map2 (fun a b -> abs a + abs b) re im)
                     Expect.equal fr.Length n (sprintf "n = %d: re length" n)
                     Expect.equal fi.Length n (sprintf "n = %d: im length" n)
 
-                    for k in 0 .. n - 1 do
-                        expectClose 0.0 (1e-13 * scale) er[k] fr[k] (sprintf "n = %d: re[%d]" n k)
-                        expectClose 0.0 (1e-13 * scale) ei[k] fi[k] (sprintf "n = %d: im[%d]" n k)
+                    for i in 0 .. bins.Length - 1 do
+                        let k = bins[i]
+                        expectClose 0.0 (1e-13 * scale) er[i] fr[k] (sprintf "n = %d: re[%d]" n k)
+                        expectClose 0.0 (1e-13 * scale) ei[i] fi[k] (sprintf "n = %d: im[%d]" n k)
             }
 
             test "inverse undoes forward" {
