@@ -591,6 +591,40 @@ let tests =
                     Int32.MaxValue
                     "a quantile beyond Int32.MaxValue saturates")
 
+            testCase "a Poisson past its mean limit: NaN near the mean, and quantile raises" (fun () ->
+                // Special's incomplete gamma functions pass their 10 000 terms near the mean from about 1.674e6 on.
+                let d = Discrete.poisson 2e6
+                Expect.isTrue (Double.IsNaN(Discrete.cdf d 2000000)) "cdf at the mean"
+                Expect.isTrue (Double.IsNaN(Discrete.survival d 2000000)) "survival at the mean"
+
+                for p in [ 0.5; 0.6 ] do
+                    Expect.throwsT<InvalidOperationException>
+                        (fun () -> Discrete.quantile d p |> ignore)
+                        ("quantile of " + string p)
+
+                let message =
+                    try
+                        Discrete.quantile d 0.5 |> ignore
+                        ""
+                    with e ->
+                        e.Message
+
+                Expect.stringContains message "Poisson(mean = 2000000)" "the message names the distribution")
+
+            testCase "a Poisson at its mean limit: the quantile is the least k" (fun () ->
+                let d = Discrete.poisson 1.674e6
+
+                for p in [ 1e-10; 0.01; 0.5; 0.6; 0.99; 1.0 - 1e-10 ] do
+                    let q = Discrete.quantile d p
+                    let name = "Poisson 1.674e6 quantile of " + string p + " = " + string q
+
+                    if p <= 0.5 then
+                        Expect.isTrue (Discrete.cdf d q >= p) (name + ": cdf at q")
+                        Expect.isTrue (Discrete.cdf d (q - 1) < p) (name + ": cdf at q - 1")
+                    else
+                        Expect.isTrue (Discrete.survival d q <= 1.0 - p) (name + ": survival at q")
+                        Expect.isTrue (Discrete.survival d (q - 1) > 1.0 - p) (name + ": survival at q - 1"))
+
             testCase "Poisson draws above 2^30" (fun () ->
                 let count = 200
                 let struct (xs, _) = Discrete.samples (Discrete.poisson 1.5e9) count (Generator.create 2027)

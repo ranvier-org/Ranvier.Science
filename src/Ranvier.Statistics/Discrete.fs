@@ -54,7 +54,8 @@ module Discrete =
         Binomial(trials, p)
 
     /// <summary>The Poisson distribution with the given mean. Raises ArgumentOutOfRangeException unless the mean is
-    /// finite and greater than 0.</summary>
+    /// finite and greater than 0. From a mean of about 1.674e6 on, <c>cdf</c> and <c>survival</c> are NaN near the
+    /// mean and <c>quantile</c> raises there (see <c>cdf</c>).</summary>
     let poisson (mean: float) : Discrete =
         Check.finitePositive (nameof mean) mean
         Poisson mean
@@ -271,6 +272,14 @@ module Discrete =
     /// support to k below the mode ⌊(draws + 1)(successes + 1)/(population + 2)⌋, and from the mode on 1 minus the sum
     /// from k + 1 to the upper end, which is then at most about ½. Cost: one evaluation of the incomplete beta or gamma
     /// function; for the hypergeometric k − lower + 1 masses below the mode and upper − k from it.
+    /// The Poisson's is finite for means up to 1.674e6 and NaN near the mean from about 1 674 055 on, where the
+    /// series that <c>Special.gammaUpperRegularized</c> and <c>Special.gammaLowerRegularized</c> share passes its
+    /// 10 000 terms with k + 1 close to the mean (measured here on .NET and on JavaScript, at every k within 8 standard
+    /// deviations of the mean, where that series converges slowest: the least mean with a NaN, by bisection over means
+    /// m + f, is 1 674 054.999999 at f = 0.999999, 1 674 222.5 at f = ½ and 1 674 390 at whole means, and 157 means
+    /// from 1e3 to 1.674e6 have none). The tests "a Poisson past its mean limit: NaN near the mean, and quantile
+    /// raises" and "a Poisson at its mean limit: the quantile is the least k" hold means 2e6 and 1.674e6. Beyond mean
+    /// 1000 no accuracy is stated.
     /// </summary>
     let cdf (d: Discrete) (k: int) : float =
         let struct (lower, upper) = support d
@@ -309,7 +318,8 @@ module Discrete =
     /// holds both rows. Below p = 0.002, where k + 1 reaches far past the shapes up to 1000 that the bound of
     /// <c>Special.betaRegularized</c> covers, the error grows: measured here 1.9e-12 at r = 0.5, p = 5e-4. Cost: as
     /// <c>cdf</c>; for the negative binomial above the cdf's ½, two evaluations of the incomplete beta function and one
-    /// of <c>Special.betaLn</c>.
+    /// of <c>Special.betaLn</c>. The Poisson's is NaN where <c>cdf</c> is, near the mean from a mean of about
+    /// 1 674 055 on.
     /// </summary>
     let survival (d: Discrete) (k: int) : float =
         let struct (lower, upper) = support d
@@ -383,6 +393,29 @@ module Discrete =
             let count = float upper - float lower + 1.0
             (count * count - 1.0) / 12.0
 
+    /// <summary>
+    /// The family and parameters as <c>Name(parameter = value, ...)</c>, each value by F#'s <c>string</c>, for example
+    /// <c>Binomial(trials = 10, p = 0.3)</c>. The text of a real parameter whose magnitude lies outside [1e-5, 1e15)
+    /// may differ between .NET and JavaScript.
+    /// </summary>
+    let describe (d: Discrete) : string =
+        match d with
+        | Binomial (n, p) -> "Binomial(trials = " + string n + ", p = " + string p + ")"
+        | Poisson mean -> "Poisson(mean = " + string mean + ")"
+        | Geometric p -> "Geometric(p = " + string p + ")"
+        | NegativeBinomial (r, p) -> "NegativeBinomial(r = " + string r + ", p = " + string p + ")"
+        | Hypergeometric (population, successes, draws) ->
+            "Hypergeometric(population = "
+            + string population
+            + ", successes = "
+            + string successes
+            + ", draws = "
+            + string draws
+            + ")"
+        | Bernoulli p -> "Bernoulli(p = " + string p + ")"
+        | DiscreteUniform (lower, upper) ->
+            "DiscreteUniform(lower = " + string lower + ", upper = " + string upper + ")"
+
     let private standardNormal = Continuous.normal 0.0 1.0
 
     // The least k in [lower, upper] at which the monotone condition holds, from start: steps of 1, 2, 4, … away from
@@ -438,7 +471,10 @@ module Discrete =
     /// <c>survival</c> (survival k ≤ 1 − p) above, so that a p within the error of either from one of its values can
     /// give a result one away from the exact quantile. The support's lower bound at p = 0 and its upper bound at p = 1,
     /// Int32.MaxValue where the support is unbounded; a quantile beyond Int32.MaxValue gives Int32.MaxValue. Raises
-    /// ArgumentOutOfRangeException unless 0 ≤ p ≤ 1; NaN raises, since an int has no NaN. From the start
+    /// ArgumentOutOfRangeException unless 0 ≤ p ≤ 1; NaN raises, since an int has no NaN. Raises
+    /// InvalidOperationException, naming the distribution and the k, where a value of <c>cdf</c> or <c>survival</c>
+    /// that the search needs is NaN, as for the Poisson near its mean from a mean of about 1 674 055 on (see
+    /// <c>cdf</c>); up to a mean of 1.674e6 the Poisson's quantile is the least k. From the start
     /// ⌊mean + sd · z⌋ clamped to the support, z the standard normal quantile of p, it takes steps of 1, 2, 4, … away
     /// from the start until the condition changes, then bisects. Cost: about 2 log₂(d + 1) + 2 evaluations of
     /// <c>cdf</c> or <c>survival</c> for a result d away from the start (general knowledge), which the test "quantile
@@ -454,7 +490,22 @@ module Discrete =
             upper
         else
             let holds (k: int) =
-                if p <= 0.5 then cdf d k >= p else survival d k <= 1.0 - p
+                let value = if p <= 0.5 then cdf d k else survival d k
+
+                if Double.IsNaN value then
+                    raise (
+                        InvalidOperationException(
+                            "The "
+                            + (if p <= 0.5 then "cdf" else "survival")
+                            + " of "
+                            + describe d
+                            + " is not available near "
+                            + string k
+                            + ", where it is NaN."
+                        )
+                    )
+
+                if p <= 0.5 then value >= p else value <= 1.0 - p
 
             let guess = Math.Floor(mean d + sqrt (variance d) * Continuous.quantile standardNormal p)
             let start = if guess >= float upper then upper elif guess > float lower then int guess else lower
@@ -550,26 +601,3 @@ module Discrete =
             current <- next
 
         struct (out, current)
-
-    /// <summary>
-    /// The family and parameters as <c>Name(parameter = value, ...)</c>, each value by F#'s <c>string</c>, for example
-    /// <c>Binomial(trials = 10, p = 0.3)</c>. The text of a real parameter whose magnitude lies outside [1e-5, 1e15)
-    /// may differ between .NET and JavaScript.
-    /// </summary>
-    let describe (d: Discrete) : string =
-        match d with
-        | Binomial (n, p) -> "Binomial(trials = " + string n + ", p = " + string p + ")"
-        | Poisson mean -> "Poisson(mean = " + string mean + ")"
-        | Geometric p -> "Geometric(p = " + string p + ")"
-        | NegativeBinomial (r, p) -> "NegativeBinomial(r = " + string r + ", p = " + string p + ")"
-        | Hypergeometric (population, successes, draws) ->
-            "Hypergeometric(population = "
-            + string population
-            + ", successes = "
-            + string successes
-            + ", draws = "
-            + string draws
-            + ")"
-        | Bernoulli p -> "Bernoulli(p = " + string p + ")"
-        | DiscreteUniform (lower, upper) ->
-            "DiscreteUniform(lower = " + string lower + ", upper = " + string upper + ")"
