@@ -302,8 +302,10 @@ module Formula =
 
         if n < 0 then 1.0 / product else product
 
-    /// A function that evaluates `expr` with tracked reads of the entries of `model`.
-    /// Raises ArgumentException for an identifier `model` lacks.
+    /// A function that evaluates `expr` with tracked reads of the entries of `model`. Creates no node. Names resolve
+    /// once, when the evaluator is created: an evaluator that outlives the owner of an entry it reads keeps reading that
+    /// entry's last value and does not follow a later declaration of the identifier. Raises `ArgumentException` for an
+    /// identifier `model` lacks, and for a `Call` outside the notation (only a hand-built `Expr` holds one).
     let evaluator (model: Model) (expr: Expr) : unit -> float =
         let rec build (e: Expr) : unit -> float =
             match e with
@@ -379,8 +381,10 @@ module Formula =
     /// value has the evaluator's bits, with first-order contributions by source (`Uncertain`). A number is exact;
     /// `x^0` is 1 with derivative 0 at every x, 0 included; `min` and `max` give the operand whose value `Math.Min`
     /// and `Math.Max` give, the first when both have it, and an exact NaN when either value is NaN. Each operation costs
-    /// O(m + n) in its operands' numbers of sources.
-    /// Raises ArgumentException for an identifier `model` lacks.
+    /// O(m + n) in its operands' numbers of sources. Creates no node. Names resolve once, when the evaluator is created:
+    /// an evaluator that outlives the owner of an entry it reads keeps reading that entry's last value and does not
+    /// follow a later declaration of the identifier. Raises `ArgumentException` for an identifier `model` lacks, and for
+    /// a `Call` outside the notation (only a hand-built `Expr` holds one).
     let measuredEvaluator (model: Model) (expr: Expr) : unit -> Uncertain =
         let rec build (e: Expr) : unit -> Uncertain =
             match e with

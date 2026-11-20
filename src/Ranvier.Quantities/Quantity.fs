@@ -41,6 +41,9 @@ type Block<'T> internal (id: string, name: string, memo: Memo<'T>) =
     /// A tracked read.
     member _.Value: 'T = memo.Value
 
+/// Declarations of a model's entries and blocks. Under an active graph each declaration registers, with the current
+/// owner, one cleanup that removes it from its model; inside a pure body it raises `InvalidOperationException`.
+/// `Model`'s remarks give the rules.
 module Quantity =
     let private ready () = QuantityStatus.Ready
 
@@ -81,6 +84,26 @@ module Quantity =
             Formula = formula
         }
 
+    /// Registers `remove` with the current owner through `onCleanup`, then runs `add`; with no active graph, runs `add`
+    /// alone. Under an owner already disposed the core runs `remove` at once, and `add` is skipped. Raises as `onCleanup`
+    /// does, before `add` runs.
+    let private declareOwned (add: unit -> unit) (remove: unit -> unit) : unit =
+        match Graph.TryCurrent with
+        | ValueNone -> add ()
+        | ValueSome _ ->
+            let removed = ref false
+
+            onCleanup (fun () ->
+                removed.Value <- true
+                remove ())
+
+            if not removed.Value then
+                add ()
+
+    /// Adds the entry to the model, removed from it when the current owner is cleaned up.
+    let private add (model: Model) (e: Entry) : unit =
+        declareOwned (fun () -> model.Add e) (fun () -> model.Remove e)
+
     let private derived (model: Model) (id: string) (name: string) (unit: UnitOf<'u>) (memo: Memo<float>) : Quantity<'u> =
         let unitSource = Uncertain.source 1.0 0.0
 
@@ -97,7 +120,7 @@ module Quantity =
                 (fun () -> measured unitSource memo.Value nan)
                 ""
 
-        model.Add e
+        add model e
         Quantity<'u>(e)
 
     let private declareInput
@@ -125,7 +148,7 @@ module Quantity =
                 (fun () -> measured unitSource signal.Value uncertaintySignal.Value)
                 ""
 
-        model.Add e
+        add model e
         Input<'u>(e, signal, uncertaintySignal)
 
     let private declareConstant
@@ -154,11 +177,11 @@ module Quantity =
                 (fun () -> fixedMeasured)
                 ""
 
-        model.Add e
+        add model e
         Quantity<'u>(e)
 
-    /// An input of value `initial` and uncertainty 0, over two signals owned by the current owner, one for the value and
-    /// one for the standard uncertainty, and an uncertainty source of its own. Raises `ArgumentException` for an
+    /// An input of value `initial` and uncertainty 0, over two signals, one for the value and one for the standard
+    /// uncertainty, and an uncertainty source of its own. Raises `ArgumentException` for an
     /// identifier outside `[A-Za-z_][A-Za-z0-9_]*` and for one the model already declares.
     let input (model: Model) (id: string) (name: string) (unit: UnitOf<'u>) (initial: float<'u>) : Input<'u> =
         model.Check id
@@ -250,7 +273,7 @@ module Quantity =
                 (fun () -> result.Value)
                 ""
 
-        model.Add e
+        add model e
         Quantity<'u>(e)
 
     /// The entry of the formula `text` over the identifiers of `model`: a `QuantityKind.Derived` with the unit
@@ -258,9 +281,10 @@ module Quantity =
     /// (as `Formula.evaluator` computes it) and the measured value (as `Formula.measuredEvaluator` computes it, only
     /// when read). `Entry.Read` and `Entry.Status` read the value and are notified only when it changes, so they stay
     /// clean through a change of an uncertainty alone; `Entry.Uncertainty` and `Entry.Measured` read the measured value
-    /// and are notified on every recomputation. Raises `ArgumentException` as `input` does, before `text` is parsed.
-    /// `Error` with the message of `Formula.parse` or `Formula.check` for text that does not parse or check, and then
-    /// the model is unchanged.
+    /// and are notified on every recomputation. Names resolve once, when the entry is created: an entry that outlives
+    /// the owner of an entry it reads keeps reading that entry's last value and does not follow a later declaration of
+    /// the identifier. Raises `ArgumentException` as `input` does, before `text` is parsed. `Error` with the message of
+    /// `Formula.parse` or `Formula.check` for text that does not parse or check, and then the model is unchanged.
     let formula (model: Model) (id: string) (name: string) (text: string) : Result<Entry, string> =
         model.Check id
 
@@ -285,7 +309,7 @@ module Quantity =
                     (fun () -> measuredValue.Value)
                     text
 
-            model.Add e
+            add model e
             e)
 
     /// The entry as a quantity in `unit`. `Error` stating both units unless `UnitInfo.sameUnit` holds for the unit and
@@ -309,7 +333,7 @@ module Quantity =
     let blockFrom (model: Model) (id: string) (name: string) (compute: 'T voption -> 'T) : Block<'T> =
         model.Check id
         let memo = createMemo compute
-        model.Reserve id
+        declareOwned (fun () -> model.Reserve id) (fun () -> model.Release id)
         Block<'T>(id, name, memo)
 
     /// The value of `compute`, over a memo owned by the current owner. A block has no single unit and is not an entry

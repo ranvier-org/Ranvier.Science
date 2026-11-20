@@ -244,6 +244,15 @@ let tests =
                 Expect.equal b.Feed.Starts starts "no further start of the removed channel")
         }
 
+        test "a removed channel's entries leave its row's model" {
+            withGraph (fun () ->
+                let m = monitorWith 2
+                let a = rowOf m "A"
+                Monitor.removeChannel m "A"
+                readPage m
+                Expect.isEmpty a.Model.Entries "the removed row's entries")
+        }
+
         test "no channels" {
             withGraph (fun () ->
                 let m = monitorWith 1
