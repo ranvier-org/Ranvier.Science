@@ -540,8 +540,8 @@ module HypothesisTest =
     /// every observation is tied the variance is 0 and the p-value is NaN (R's trunk returns 1, from documentation, wilcox.test.R). Either sample empty or holding
     /// a NaN gives every field NaN and raises nothing; both degrees-of-freedom fields are NaN. Values of any
     /// magnitude, infinities included, enter only through their order. Cost: O((n + m) log(n + m)). The p-value is an
-    /// approximation: R computes it exactly where both samples hold fewer than 50 observations and has no ties
-    /// (from documentation, wilcox.test.R). Relative error of the p-value at most 1e-12 against the approximating
+    /// approximation: R computes it exactly, ties included, where both samples hold fewer than 50
+    /// observations (from documentation, wilcox.test.R line 108). Relative error of the p-value at most 1e-12 against the approximating
     /// formula over the three data sets of the test "Mann–Whitney against the reference" (ties and U on each side of
     /// its mean, and U at its mean), which pins it against the script <c>tests/reference/special.py</c>, section ranks.
     /// </summary>
@@ -576,13 +576,14 @@ module HypothesisTest =
     /// The Wilcoxon signed-rank test of the differences against 0 by the normal approximation, following R's
     /// <c>wilcox.test(exact = FALSE, correct = TRUE)</c> (read from wilcox.test.R at
     /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/wilcox.test.R, from documentation).
-    /// Zeros are dropped; Statistic is V, the sum of the average ranks of |d| over the positive differences. With n
+    /// Zeros are dropped (Wilcoxon's method, as R did before 4.6.0; R from 4.6.0 keeps them, following Pratt, so its
+    /// p-values differ where a difference is 0: from documentation, wilcox.test.R lines 213–221); Statistic is V, the sum of the average ranks of |d| over the positive differences. With n
     /// the number of non-zero differences the null distribution has mean n(n + 1)/4 and variance
     /// n(n + 1)(2n + 1)/24 − Σ(t³ − t)/48, t the sizes of the groups of tied |d|, and the continuity correction of
     /// <c>mannWhitney</c> applies; Less means the differences' location is below 0. Where every difference is zero
     /// Statistic is 0 and the p-value NaN. An empty array or a NaN gives every field NaN and raises nothing; both
-    /// degrees-of-freedom fields are NaN. Cost: O(n log n). The p-value is an approximation: R computes it exactly where
-    /// n is below 50 and the differences have no ties or zeros (from documentation, wilcox.test.R). Relative error of
+    /// degrees-of-freedom fields are NaN. Cost: O(n log n). The p-value is an approximation: R computes it exactly, ties
+    /// included, where n is below 50 (from documentation, wilcox.test.R line 76). Relative error of
     /// the p-value at most 1e-12 against the approximating formula over the three data sets of the tests "Wilcoxon on
     /// the sleep differences" and "Wilcoxon against the reference" (ties and a zero, a zero without ties, V at its
     /// mean), and against closed forms over 100000 differences of ±1 in "the continuity correction and the tie
