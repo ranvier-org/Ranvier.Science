@@ -73,6 +73,27 @@ let tests =
                 Expect.equal y[1] -0.8414709847622888 "y1"
             }
 
+            // Literals: Interpolate printed with ToString("R") on .NET; JavaScript must match.
+            test "interpolation gives the same bits on both targets" {
+                let xs = [| 0.; 0.7; 1.9; 3.2; 4.0 |]
+                let ys = [| 1.3; -0.4; 2.2; 0.9; 1.7 |]
+                let natural = Interpolate.naturalCubic xs ys
+                let monotone = Interpolate.monotoneCubic xs ys
+                let at = [| 0.35; 1.1; 2.5; 3.9 |]
+                let n = Array.map (Interpolant.evaluate natural) at
+                let m = Array.map (Interpolant.evaluate monotone) at
+                Expect.equal n[0] 0.15576516783009053 "natural 0.35"
+                Expect.equal n[1] 0.14229379577961226 "natural 1.1"
+                Expect.equal n[2] 1.8739382376126774 "natural 2.5"
+                Expect.equal n[3] 1.5322421283231842 "natural 3.9"
+                Expect.equal m[0] 0.2375 "monotone 0.35"
+                Expect.equal m[1] 0.27407407407407464 "monotone 1.1"
+                Expect.equal m[2] 1.6248520710059173 "monotone 2.5"
+                Expect.equal m[3] 1.5890624999999996 "monotone 3.9"
+                Expect.equal (Interpolant.derivative natural 2.5) -1.613808702313084 "natural derivative 2.5"
+                Expect.equal (Interpolant.derivative monotone 2.5) -1.4911242603550294 "monotone derivative 2.5"
+            }
+
 #if !FABLE_COMPILER
             // The stream was recorded on Windows. `log` and `cos` come from the platform's math
             // library, so another platform may differ in the last places.
