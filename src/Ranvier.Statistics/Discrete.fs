@@ -300,13 +300,16 @@ module Discrete =
     /// (measured here by its scan, worst 4.3e-13). The binomial is I_p(k + 1, n − k), the Poisson P(k + 1, mean) and
     /// the geometric (1 − p)^(k + 1) by its logarithm; the hypergeometric is the sum of the masses from k + 1 to the
     /// upper end from the mode on, and below it 1 minus the sum up to k, at the cost <c>cdf</c> states. The negative
-    /// binomial is I_q(k + 1, r) at q, the double nearest 1 − p, plus its derivative q^k p^(r − 1)/B(k + 1, r) times
-    /// the rounding error (1 − q) − p, which is exact. Without that term the rounding moves it by about k · 2^-54 / q
-    /// relative at most (general knowledge), measured here 7.6e-11 at r = 0.5, p = 5e-4 and 1.1e-11 at r = 0.5,
-    /// p = 0.00272, k = 200 000, the row the test "where the direct mass and the rounded 1 - p lose accuracy, against
-    /// the reference" holds. Below p = 0.002, where k + 1 reaches far past the shapes up to 1000 that the bound of
+    /// binomial is 1 − I_p(r, k + 1) where that cdf is at most ½, and above it I_q(k + 1, r) at q, the double nearest
+    /// 1 − p, plus its derivative q^k p^(r − 1)/B(k + 1, r) times the rounding error (1 − q) − p, which is exact.
+    /// Without that term the rounding moves the upper tail by about k · 2^-54 / q relative at most (general knowledge),
+    /// measured here 7.6e-11 at r = 0.5, p = 5e-4 and 1.1e-11 at r = 0.5, p = 0.00272, k = 200 000; with the term but
+    /// not the switch at ½, the survival near 1 is 4.3e-9 off at r = 0.5, p = 1e-17, k = 5, where 1 − p rounds to 1
+    /// (measured here). The test "where the direct mass and the rounded 1 - p lose accuracy, against the reference"
+    /// holds both rows. Below p = 0.002, where k + 1 reaches far past the shapes up to 1000 that the bound of
     /// <c>Special.betaRegularized</c> covers, the error grows: measured here 1.9e-12 at r = 0.5, p = 5e-4. Cost: as
-    /// <c>cdf</c>, with one more evaluation of <c>Special.betaLn</c> for the negative binomial.
+    /// <c>cdf</c>; for the negative binomial above the cdf's ½, two evaluations of the incomplete beta function and one
+    /// of <c>Special.betaLn</c>.
     /// </summary>
     let survival (d: Discrete) (k: int) : float =
         let struct (lower, upper) = support d
@@ -321,17 +324,22 @@ module Discrete =
             | Poisson mean -> Special.gammaLowerRegularized (float k + 1.0) mean
             | Geometric p -> exp ((float k + 1.0) * Special.log1p (-p))
             | NegativeBinomial (r, p) ->
-                // I_q(k + 1, r) at q, 1 − p rounded, plus e times its derivative q^k p^(r − 1) / B(k + 1, r), where
-                // e = (1 − q) − p, exact by Sterbenz's lemma, is the rounding error of q.
-                let q = 1.0 - p
-                let e = (1.0 - q) - p
                 let a = float k + 1.0
-                let atQ = Special.betaRegularized a r q
+                let lowerTail = Special.betaRegularized r a p
 
-                if e = 0.0 then
-                    atQ
+                if lowerTail <= 0.5 then
+                    1.0 - lowerTail
                 else
-                    atQ + e * exp (float k * Special.log1p (-p) + (r - 1.0) * log p - Special.betaLn a r)
+                    // I_q(k + 1, r) at q, 1 − p rounded, plus e times its derivative q^k p^(r − 1) / B(k + 1, r),
+                    // where e = (1 − q) − p, exact by Sterbenz's lemma, is the rounding error of q.
+                    let q = 1.0 - p
+                    let e = (1.0 - q) - p
+                    let atQ = Special.betaRegularized a r q
+
+                    if e = 0.0 then
+                        atQ
+                    else
+                        atQ + e * exp (float k * Special.log1p (-p) + (r - 1.0) * log p - Special.betaLn a r)
             | Hypergeometric (population, successes, draws) ->
                 if k >= upper then 0.0
                 elif k >= hypergeometricMode population successes draws then massSum d (k + 1) upper false

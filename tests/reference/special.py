@@ -1585,9 +1585,12 @@ def check_negative_binomial_mass() -> None:
                 sys.exit(f"check failed: {label}, off by {difference}")
 
 
-def negative_binomial_row(r: float, p: float, k: int) -> tuple:
-    """(r, p, k, mass, cdf, survival): at and below the mode from the masses' head sum, past it from the tail sum."""
-    if k <= (r - 1) * (1 - p) / p:
+def negative_binomial_row(r: float, p: float, k: int, head: bool | None = None) -> tuple:
+    """(r, p, k, mass, cdf, survival): from the masses' head sum at and below the mode, or wherever head is True, and
+    past the mode otherwise from the tail sum."""
+    if head is None:
+        head = k <= (r - 1) * (1 - p) / p
+    if head:
         fs = (negative_binomial_mass, negative_binomial_cdf, negative_binomial_sf)
     else:
         fs = (negative_binomial_tail_mass, negative_binomial_tail_cdf, negative_binomial_tail)
@@ -1692,7 +1695,8 @@ def section_discrete() -> None:
         ],
     )
     # Where e^-lambda lambda^k / k! from its logarithm loses more than 1e-12, and where the rounding of 1 - p does in
-    # I_(1 - p)(k + 1, r): p = 0.00272 and 0.00938 round 1 - p by 2^-54.
+    # I_(1 - p)(k + 1, r): p = 0.00272 and 0.00938 round 1 - p by 2^-54, and 1 - 1e-17 rounds to 1, where the survival
+    # at k = 5 is near 1 and comes from the head sum.
     poisson_regimes = {300.0: [858, 1040], 1000.0: [2374]}
     emit_typed(
         "poissonRegimeCases",
@@ -1706,7 +1710,8 @@ def section_discrete() -> None:
     emit_typed(
         "negativeBinomialRegimeCases",
         ("float", "float", "int", "float", "float", "float"),
-        [negative_binomial_row(r, p, k) for r, p, k in [(0.5, 0.00272, 200000), (0.5, 0.00938, 60000)]],
+        [negative_binomial_row(r, p, k) for r, p, k in [(0.5, 0.00272, 200000), (0.5, 0.00938, 60000)]]
+        + [negative_binomial_row(0.5, 1e-17, 5, head=True)],
     )
 
 

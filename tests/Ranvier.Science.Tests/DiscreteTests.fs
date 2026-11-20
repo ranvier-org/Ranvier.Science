@@ -169,7 +169,7 @@ let private hypergeometricEdgeCases: struct (int * int * int * int * float * flo
     |]
 
 // Where e^-mean mean^k / k! from its logarithm loses more than 1e-12, and where the rounding of 1 - p does in
-// I_(1 - p)(k + 1, r): p = 0.00272 and 0.00938 round 1 - p by 2^-54.
+// I_(1 - p)(k + 1, r): p = 0.00272 and 0.00938 round 1 - p by 2^-54, and 1 - 1e-17 rounds to 1.
 // mean, k, mass, cdf, survival
 let private poissonRegimeCases: struct (float * int * float * float * float)[] =
     [|
@@ -183,6 +183,7 @@ let private negativeBinomialRegimeCases: struct (float * float * int * float * f
     [|
         struct (0.5, 0.00272, 200000, 1.7382163516694174e-241, 1.0, 6.367277546488354e-239)
         struct (0.5, 0.00938, 60000, 5.942403452603542e-250, 1.0, 6.270200150881548e-248)
+        struct (0.5, 1e-17, 5, 7.782167679320621e-10, 8.560384447252683e-09, 0.9999999914396156)
     |]
 
 let private rel (a: float) (b: float) : float = abs (a - b) / abs b
