@@ -2,6 +2,7 @@ namespace Ranvier.Quantities
 
 open System
 open System.Collections.Generic
+open Ranvier.Numerics
 
 [<RequireQualifiedAccess>]
 type QuantityKind =
@@ -29,6 +30,13 @@ type Entry =
         Read: unit -> float
         /// A tracked read of the status. Never raises.
         Status: unit -> QuantityStatus
+        /// A tracked read of the standard uncertainty in `Unit`: 0 for an exact value, NaN when unknown. The read of an
+        /// entry of `Quantity.deriveMeasured` raises as `Read` does.
+        Uncertainty: unit -> float
+        /// A tracked read of the value with its contributions by source. Raises as `Read` does.
+        Measured: unit -> Uncertain
+        /// The formula text of an entry declared by `Quantity.formula`; "" otherwise.
+        Formula: string
     }
 
 /// Quantities by identifier, with an optional parent searched after it.

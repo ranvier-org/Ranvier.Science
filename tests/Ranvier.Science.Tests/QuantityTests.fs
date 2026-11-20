@@ -6,6 +6,12 @@ open Ranvier
 open Ranvier.Numerics
 open Ranvier.Quantities
 
+// Fable 5.27 miscompiles an array pattern over struct tuples, so the tests project the entries instead.
+let private sourcesOf (u: Uncertain) : int[] =
+    Uncertain.contributions u |> Array.map (fun struct (id, _) -> id)
+
+let private relative (actual: float) (expected: float) = abs (actual - expected) / abs expected
+
 [<Tests>]
 let tests =
     testList
@@ -261,5 +267,173 @@ let tests =
                     Expect.equal block.Value [| 0.0; 2.0; 4.0 |] "a write to a recomputes"
                     Expect.equal runs 2 "a write to a recomputes once"
                     Expect.isTrue (model.TryFind "series").IsNone "a block has no entry")
+            }
+
+            test "an input carries a source of uncertainty 0" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.input model "a" "A" Units.metre 2.0<m>
+                    let measured = a.Entry.Measured ()
+                    Expect.equal (a.Entry.Uncertainty ()) 0.0 "Uncertainty"
+                    Expect.equal (Uncertain.value measured) 2.0 "the measured value"
+                    Expect.equal (Uncertain.standardUncertainty measured) 0.0 "the measured standard uncertainty"
+                    Expect.equal (sourcesOf measured).Length 1 "one contribution"
+                    Expect.equal a.Entry.Formula "" "Formula")
+            }
+
+            test "inputWithUncertainty and SetUncertainty" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let b = Quantity.inputWithUncertainty model "b" "B" Units.metre 5.0<m> 0.25<m>
+                    Expect.equal (b.Entry.Uncertainty ()) 0.25 "Uncertainty"
+                    Expect.equal (Uncertain.standardUncertainty (b.Entry.Measured ())) 0.25 "the measured standard uncertainty"
+                    let mutable runs = 0
+                    let mutable valueRuns = 0
+
+                    let uncertainty =
+                        createMemo (fun _ ->
+                            runs <- runs + 1
+                            b.Entry.Uncertainty ())
+
+                    createEffect (fun () ->
+                        b.Value |> ignore
+                        valueRuns <- valueRuns + 1)
+
+                    Expect.equal uncertainty.Value 0.25 "the memo's first read"
+                    Expect.equal runs 1 "the first read runs the memo once"
+                    b.SetUncertainty 0.5<m>
+                    Expect.equal uncertainty.Value 0.5 "the new uncertainty"
+                    Expect.equal runs 2 "a new uncertainty runs the memo once more"
+                    b.SetUncertainty 0.5<m>
+                    Expect.equal uncertainty.Value 0.5 "an equal uncertainty"
+                    Expect.equal runs 2 "an equal uncertainty runs nothing"
+                    Expect.equal valueRuns 1 "an uncertainty change leaves a reader of the value unnotified"
+                    let before = sourcesOf (b.Entry.Measured ())
+                    b.Set 6.0<m>
+                    Expect.equal (Uncertain.value (b.Entry.Measured ())) 6.0 "the measured value after Set"
+                    Expect.equal (sourcesOf (b.Entry.Measured ())) before "Set keeps the input's source")
+            }
+
+            test "an uncertainty must not be negative" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+
+                    Expect.throwsT<ArgumentOutOfRangeException>
+                        (fun () -> Quantity.inputWithUncertainty model "a" "A" Units.metre 1.0<m> (-0.1<m>) |> ignore)
+                        "inputWithUncertainty with -0.1"
+
+                    Expect.throwsT<ArgumentOutOfRangeException>
+                        (fun () -> Quantity.measuredConstant model "c" "C" Units.metre 1.0<m> (-0.1<m>) "a source" |> ignore)
+                        "measuredConstant with -0.1"
+
+                    Expect.isEmpty model.Entries "a rejected declaration adds no entry"
+                    let b = Quantity.input model "b" "B" Units.metre 1.0<m>
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> b.SetUncertainty(-0.1<m>)) "SetUncertainty -0.1"
+                    Expect.equal (b.Entry.Uncertainty ()) 0.0 "a rejected SetUncertainty leaves the uncertainty"
+                    let n = Quantity.inputWithUncertainty model "n" "N" Units.metre 1.0<m> (nan * 1.0<m>)
+                    Expect.isTrue (Double.IsNaN (n.Entry.Uncertainty ())) "a NaN uncertainty reads NaN")
+            }
+
+            test "exact and measured constants" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let c = Quantity.constant model "c" "C" Units.metre 2.0<m> "a reference"
+                    Expect.equal (c.Entry.Uncertainty ()) 0.0 "an exact constant's Uncertainty"
+
+                    Expect.equal
+                        (Uncertain.standardUncertainty (c.Entry.Measured ()))
+                        0.0
+                        "an exact constant's measured standard uncertainty"
+
+                    let g = Quantity.measuredConstant model "g" "G" Units.one 9.8 0.1 "a source"
+                    Expect.equal g.Entry.Kind QuantityKind.Constant "Kind"
+                    Expect.equal g.Entry.Source "a source" "Source"
+                    Expect.equal (g.Entry.Read ()) 9.8 "Read"
+                    Expect.equal (g.Entry.Uncertainty ()) 0.1 "Uncertainty"
+                    Expect.equal (Uncertain.standardUncertainty (g.Entry.Measured ())) 0.1 "the measured standard uncertainty")
+            }
+
+            test "derived entries have an unknown uncertainty" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.input model "a" "A" Units.metre 3.0<m>
+                    let d = Quantity.derive model "d" "D" Units.metre (fun () -> a.Value * 2.0)
+
+                    let w =
+                        Quantity.deriveWithin (Tolerance.absolute 0.5) model "w" "W" Units.metre (fun () -> a.Value + 1.0<m>)
+
+                    for e in [ d.Entry; w.Entry ] do
+                        Expect.isTrue (Double.IsNaN (e.Uncertainty ())) (e.Id + ": Uncertainty is NaN")
+                        Expect.equal (Uncertain.value (e.Measured ())) (e.Read ()) (e.Id + ": the measured value is Read")
+
+                        Expect.isTrue
+                            (Double.IsNaN (Uncertain.standardUncertainty (e.Measured ())))
+                            (e.Id + ": the measured standard uncertainty is NaN"))
+            }
+
+            test "deriveMeasured propagates from the entries it reads" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.inputWithUncertainty model "a" "A" Units.metre 3.0<m> 0.1<m>
+                    let b = Quantity.inputWithUncertainty model "b" "B" Units.metre 4.0<m> 0.2<m>
+
+                    let area =
+                        Quantity.deriveMeasured model "area" "Area" (UnitOf.squared Units.metre) (fun () ->
+                            a.Entry.Measured () * b.Entry.Measured ())
+
+                    Expect.equal area.Value 12.0<m^2> "the value"
+                    // ∂(ab)/∂a = b and ∂(ab)/∂b = a, so u = √((0.1 · 4)² + (0.2 · 3)²).
+                    let expected = sqrt ((0.1 * 4.0) ** 2.0 + (0.2 * 3.0) ** 2.0)
+                    let actual = area.Entry.Uncertainty ()
+
+                    Expect.isTrue
+                        (relative actual expected <= 1e-15)
+                        (sprintf "Uncertainty %.17g within relative 1e-15 of %.17g" actual expected)
+
+                    Expect.equal area.Entry.Kind QuantityKind.Derived "Kind")
+            }
+
+            test "two entries that read one input are correlated" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.inputWithUncertainty model "a" "A" Units.metre 3.0<m> 0.1<m>
+                    let d1 = Quantity.deriveMeasured model "d1" "D1" Units.metre (fun () -> 2.0 * a.Entry.Measured ())
+                    let d2 = Quantity.deriveMeasured model "d2" "D2" Units.metre (fun () -> -(a.Entry.Measured ()))
+                    // 2a and −a hold a's source with contributions 0.2 and −0.1: correlation −1.
+                    let r = Uncertain.correlation (d1.Entry.Measured ()) (d2.Entry.Measured ())
+                    Expect.isTrue (abs (r + 1.0) <= 1e-15) (sprintf "correlation %.17g within 1e-15 of -1" r))
+            }
+
+            test "an uncertainty change leaves deriveMeasured's value readers unnotified" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.inputWithUncertainty model "a" "A" Units.metre 3.0<m> 0.1<m>
+                    let b = Quantity.inputWithUncertainty model "b" "B" Units.metre 4.0<m> 0.2<m>
+
+                    let area =
+                        Quantity.deriveMeasured model "area" "Area" (UnitOf.squared Units.metre) (fun () ->
+                            a.Entry.Measured () * b.Entry.Measured ())
+
+                    let mutable runs = 0
+
+                    createEffect (fun () ->
+                        area.Value |> ignore
+                        runs <- runs + 1)
+
+                    let before = area.Entry.Uncertainty ()
+                    a.SetUncertainty 0.2<m>
+                    Expect.equal runs 1 "a new uncertainty of a leaves the effect unrun"
+                    let after = area.Entry.Uncertainty ()
+                    Expect.notEqual after before "the area's uncertainty follows a's"
+                    // u = √((0.2 · 4)² + (0.2 · 3)²) once a's uncertainty is 0.2.
+                    let expected = sqrt ((0.2 * 4.0) ** 2.0 + (0.2 * 3.0) ** 2.0)
+
+                    Expect.isTrue
+                        (relative after expected <= 1e-15)
+                        (sprintf "Uncertainty %.17g within relative 1e-15 of %.17g" after expected)
+
+                    a.Set 5.0<m>
+                    Expect.equal runs 2 "a new value of a runs the effect once"
+                    Expect.equal area.Value 20.0<m^2> "the value after the write")
             }
         ]
