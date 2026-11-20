@@ -121,8 +121,8 @@ module Ode =
 
     /// The state at t1 by `steps` equal RK4 steps of h = (t1 − t0)/steps, the k-th from tₖ = t0 + k·h. Raises
     /// `ArgumentOutOfRangeException` for steps below 1 or t1 below t0 (a NaN t1 included). Exact kernel, as
-    /// `rungeKutta4Step`. 4 · steps evaluations of f; the error is O(h⁴) (general knowledge), and the RK4 is fourth
-    /// order test in the "Ode" list measures an error ratio between 14 and 18 on halving h for y' = y on [0, 1].
+    /// `rungeKutta4Step`. 4 · steps evaluations of f; the error is O(h⁴) (general knowledge), and the "RK4 is fourth
+    /// order" test of the "Ode" list measures an error ratio between 14 and 18 on halving h for y' = y on [0, 1].
     let rungeKutta4 (f: float -> float[] -> float[]) (t0: float) (y0: float[]) (t1: float) (steps: int) : float[] =
         if steps < 1 then
             raise (ArgumentOutOfRangeException("steps", sprintf "The number of steps must be at least 1; it is %d." steps))
@@ -288,6 +288,8 @@ module Ode =
 
             let mutable h = start
             let mutable afterRejection = false
+            // What was not finite in the last step, when that rejected it: its new state or its error estimate.
+            let mutable nonFinite: string option = None
 
             while failure.IsNone && t < t1 do
                 if accepted + rejected >= options.MaximumSteps then
@@ -296,7 +298,12 @@ module Ode =
                     let proposed = min h options.MaximumStep
 
                     if not (proposed > 4.0 * epsilon * abs t && proposed >= smallestNormal) then
-                        failure <- Some(sprintf "step size underflow at t = %g" t)
+                        failure <-
+                            Some(
+                                match nonFinite with
+                                | Some what -> sprintf "%s is not finite at t = %g" what t
+                                | None -> sprintf "step size underflow at t = %g" t
+                            )
                     else
                         let last = t + 1.01 * proposed >= t1 && t1 - t <= options.MaximumStep
                         let step = if last then t1 - t else proposed
@@ -347,15 +354,24 @@ module Ode =
 
                         let err = rms estimate scale
                         let mutable finiteState = true
+                        let mutable finiteEstimate = true
 
                         for i in 0 .. n - 1 do
                             if not (isFinite yNew[i]) then finiteState <- false
+                            if not (isFinite estimate[i]) then finiteEstimate <- false
 
                         if not finiteState || not (isFinite err) then
                             h <- step / 5.0
                             rejected <- rejected + 1
                             afterRejection <- true
+
+                            nonFinite <-
+                                if not finiteState then Some "the state"
+                                elif not finiteEstimate then Some "the right-hand side"
+                                else None
                         else
+                            nonFinite <- None
+
                             let factor =
                                 if err = 0.0 then
                                     5.0
@@ -426,12 +442,14 @@ module Ode =
     /// `InitialStep` of 0 uses the starting-step rule of
     /// ibid. §II.4, and 1e-6 · (t1 − t0) when that is not a positive finite number.
     ///
-    /// Returns `Error` with "step size underflow at t = …" when a step is not above 4ε|t| (ε = 2⁻⁵²) or below the
-    /// smallest normal double, and with "MaximumSteps (n) reached at t = …" when the accepted plus rejected steps reach
-    /// `MaximumSteps`. A right-hand side that blows up, returns NaN or drives the state past the largest double ends in one of the two. Raises
-    /// `ArgumentOutOfRangeException` for t1 below t0 (NaN included) and for options with a negative or NaN tolerance, both
-    /// tolerances 0, a `MaximumStep` not above 0, a negative or NaN `InitialStep` or `MaximumSteps` below 1. t1 = t0
-    /// gives the one time t0 and a copy of y0 without calling f.
+    /// Returns `Error` when a step is not above 4ε|t| (ε = 2⁻⁵²) or below the smallest normal double, with "the state is
+    /// not finite at t = …" when the step rejected before it had a new state with a NaN or infinite component (a NaN in
+    /// y0, or a state driven past the largest double), "the right-hand side is not finite at t = …" when that step's
+    /// error estimate was not finite, and "step size underflow at t = …" otherwise; and with "MaximumSteps (n) reached
+    /// at t = …" when the accepted plus rejected steps reach `MaximumSteps`. A right-hand side that blows up or returns
+    /// NaN ends in one of these. Raises `ArgumentOutOfRangeException` for t1 below t0 (NaN included) and for options
+    /// with a negative or NaN tolerance, both tolerances 0, a `MaximumStep` not above 0, a negative or NaN
+    /// `InitialStep` or `MaximumSteps` below 1. t1 = t0 gives the one time t0 and a copy of y0 without calling f.
     ///
     /// Six evaluations of f per step after the first, one more for the starting step.
     ///
@@ -440,8 +458,7 @@ module Ode =
     /// logistic equation and y' = cos t, with both tolerances 1e-10) the global error was at most
     /// 2 · (AbsoluteTolerance + RelativeTolerance · |exact|) per component (measured here: the "solve meets the
     /// tolerance on closed forms" case of the "Ode" list, `dotnet run -c Release --project tests/Ranvier.Science.Tests
-    /// -- --filter "Ode"`). The worst case was the harmonic oscillator over [0, 2π], at 1.28 times that quantity after
-    /// 148 steps.
+    /// -- --filter "Ode"`).
     let solve
         (options: OdeOptions)
         (f: float -> float[] -> float[])

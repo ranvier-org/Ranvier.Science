@@ -614,4 +614,18 @@ let tests =
                     Expect.equal run.State.Time 2.0 "the retry integrates from the last recorded clock"
                     expectClose 0.0 1e-9 (exp -1.0) run.State.State[0] "y at t = 2")
             }
+
+            test "invalid ode options raise at the call" {
+                withGraph (fun () ->
+                    let clock = createSignal 0.0
+                    let rhs = fun _ (y: float[]) -> [| -y[0] |]
+
+                    for options in
+                        [ { odeTight with MaximumSteps = 0 }
+                          { odeTight with AbsoluteTolerance = nan }
+                          { odeTight with AbsoluteTolerance = 0.0; RelativeTolerance = 0.0 } ] do
+                        Expect.throwsT<System.ArgumentOutOfRangeException>
+                            (fun () -> Run.ode options (fun () -> clock.Value) (fun () -> [| 1.0 |]) rhs |> ignore)
+                            (sprintf "Run.ode with %A" options))
+            }
         ]

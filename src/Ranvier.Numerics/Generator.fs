@@ -86,8 +86,9 @@ module Generator =
 
     /// An integer uniform on [lower, upperExclusive) and the next generator, exactly uniform: a 32-bit output b is
     /// rejected when b ≥ 2³² − (2³² mod r) for r = upperExclusive − lower, so every residue is equally likely. It
-    /// uses only exact float operations on the 32-bit output (a uint32 converts exactly, `%` on floats is an exact
-    /// fmod), so the sequence is equal on both targets. Raises `ArgumentOutOfRangeException` unless
+    /// uses only exact float operations on the 32-bit output (general knowledge: a uint32 converts exactly, and `%` on
+    /// floats is an exact fmod), so the sequence is equal on both targets, as the "Generator" test "the first integers
+    /// of seed 1 are pinned" checks under mocha. Raises `ArgumentOutOfRangeException` unless
     /// lower < upperExclusive. Fewer than 2 outputs are drawn on average (general knowledge: the acceptance
     /// probability exceeds 1/2).
     let integer (lower: int) (upperExclusive: int) (g: Generator) : struct (int * Generator) =
@@ -147,21 +148,25 @@ module Generator =
 
         struct (result, current)
 
-    // ln of a unit-scale gamma deviate. Below shape 1 it is ln G(shape + 1) + ln u / shape, which stays finite
-    // where u^(1/shape) would underflow to zero.
-    let private logGamma (shape: float) (g: Generator) : struct (float * Generator) =
+    // ln of a unit-scale gamma deviate, and ln(1 - u) of its boost (0 from shape 1). Below shape 1 it is
+    // ln G(shape + 1) + ln(1 - u) / shape, which stays finite where (1 - u)^(1/shape) would underflow to zero, and is
+    // -infinity only where ln(1 - u) / shape overflows (a subnormal shape).
+    let private logGamma (shape: float) (g: Generator) : struct (float * float * Generator) =
         if shape >= 1.0 then
             let struct (x, next) = gammaAtLeastOne shape g
-            struct (log x, next)
+            struct (log x, 0.0, next)
         else
             let struct (x, g1) = gammaAtLeastOne (shape + 1.0) g
             let struct (u, g2) = uniform g1
-            struct (log x + log (1.0 - u) / shape, g2)
+            let boost = log (1.0 - u)
+            struct (log x + boost / shape, boost, g2)
 
     /// A gamma deviate with the given shape and scale (mean shape · scale) and the next generator. The method of
     /// Marsaglia and Tsang (ACM Transactions on Mathematical Software 26(3), 2000, from documentation), with the
-    /// boost Γ(shape + 1) · u^(1/shape) below shape 1. Raises `ArgumentOutOfRangeException` unless shape > 0 and
-    /// scale > 0 (NaN included). Expected cost: a few normal deviates (general knowledge).
+    /// boost Γ(shape + 1) · u^(1/shape) below shape 1. Below shape 1 the deviate is exactly 0 wherever the boost
+    /// underflows, for about e^(−745·shape) of the draws, 47% at shape 1e-3 (general knowledge: u^(1/shape) underflows
+    /// where u < 2^(−1075·shape)). Raises `ArgumentOutOfRangeException` unless shape > 0 and scale > 0 (NaN included).
+    /// Expected cost: a few normal deviates (general knowledge).
     let gamma (shape: float) (scale: float) (g: Generator) : struct (float * Generator) =
         if not (shape > 0.0) then
             outOfRange "shape" (sprintf "gamma needs shape > 0; shape = %g." shape)
@@ -179,8 +184,10 @@ module Generator =
 
     /// A beta deviate with parameters a and b and the next generator, X/(X + Y) for independent gamma deviates X and
     /// Y. The ratio is formed from the logarithms of X and Y, so the result lies in [0, 1] and is never NaN even
-    /// where a gamma deviate underflows (a or b below 1). Raises `ArgumentOutOfRangeException` unless a > 0 and
-    /// b > 0 (NaN included). Cost: two gamma deviates.
+    /// where a gamma deviate underflows (a or b below 1). Where both logarithms overflow to −∞ (subnormal a and b),
+    /// the result is 1 or 0 as ln(1 − u)/a exceeds ln(1 − u′)/b or not, compared multiplied out by a·b, with u and u′
+    /// the uniforms of the two deviates' boosts. Raises `ArgumentOutOfRangeException` unless a > 0 and b > 0 (NaN
+    /// included). Cost: two gamma deviates.
     let beta (a: float) (b: float) (g: Generator) : struct (float * Generator) =
         if not (a > 0.0) then
             outOfRange "a" (sprintf "beta needs a > 0; a = %g." a)
@@ -188,12 +195,16 @@ module Generator =
         if not (b > 0.0) then
             outOfRange "b" (sprintf "beta needs b > 0; b = %g." b)
 
-        let struct (lx, g1) = logGamma a g
-        let struct (ly, g2) = logGamma b g1
-        let m = Math.Max(lx, ly)
-        let x = exp (lx - m)
-        let y = exp (ly - m)
-        struct (x / (x + y), g2)
+        let struct (lx, boostX, g1) = logGamma a g
+        let struct (ly, boostY, g2) = logGamma b g1
+
+        if lx = -infinity && ly = -infinity then
+            struct ((if boostX * b > boostY * a then 1.0 else 0.0), g2)
+        else
+            let m = Math.Max(lx, ly)
+            let x = exp (lx - m)
+            let y = exp (ly - m)
+            struct (x / (x + y), g2)
 
     /// The number of successes in `trials` independent trials of probability p, and the next generator. Knuth's
     /// order-statistic split (The Art of Computer Programming vol. 2, 3rd edition, section 3.4.1, from

@@ -20,8 +20,10 @@ let private exponentialJacobian (p: float[]) : Matrix =
 
 let private rosenbrock (p: float[]) : float[] = [| 10.0 * (p[1] - p[0] * p[0]); 1.0 - p[0] |]
 
-// NIST StRD Nonlinear Regression, Misra1a: https://www.itl.nist.gov/div898/strd/nls/data/misra1a.shtml (from
-// documentation, read on 2026-11-20). Model y = b1 (1 - exp(-b2 x)).
+// NIST StRD Nonlinear Regression, Misra1a, the data file
+// https://www.itl.nist.gov/div898/strd/nls/data/LINKS/DATA/Misra1a.dat (from documentation, read on 2026-11-20 and
+// again on 2026-11-21; described at https://www.itl.nist.gov/div898/strd/nls/data/misra1a.shtml).
+// Model y = b1 (1 - exp(-b2 x)).
 // Observations as (y, x):
 let private misraData: (float * float)[] =
     [| (10.07, 77.6)
@@ -117,6 +119,42 @@ let tests =
                 let r = LeastSquares.levenbergMarquardt LeastSquaresOptions.standard (fun _ -> [| nan |]) [| 1.0 |]
                 Expect.isFalse r.Converged "not converged"
                 Expect.equal r.Iterations 0 "iterations"
+            }
+
+            test "a non-finite Jacobian stops the fit without calling the residuals at NaN parameters" {
+                let calls = ref 0
+                let nanCalls = ref 0
+
+                let residuals (p: float[]) =
+                    calls.Value <- calls.Value + 1
+                    if Double.IsNaN p[0] then nanCalls.Value <- nanCalls.Value + 1
+                    [| p[0] - 1.0; p[0] + 1.0 |]
+
+                let analytic =
+                    LeastSquares.levenbergMarquardtWith
+                        LeastSquaresOptions.standard
+                        residuals
+                        (fun _ -> Matrix.init 2 1 (fun _ _ -> nan))
+                        [| 3.0 |]
+
+                Expect.isFalse analytic.Converged "analytic: not converged"
+                Expect.equal analytic.Iterations 0 "analytic: iterations"
+                Expect.equal analytic.Parameters [| 3.0 |] "analytic: parameters stay at the start"
+                Expect.equal calls.Value 1 "analytic: one residual call"
+                Expect.equal nanCalls.Value 0 "analytic: no residual call at NaN parameters"
+
+                // Past 2 the residual overflows, so the forward difference from 2 is infinite.
+                let differenceNaNCalls = ref 0
+
+                let cliff (p: float[]) =
+                    if Double.IsNaN p[0] then differenceNaNCalls.Value <- differenceNaNCalls.Value + 1
+                    [| (if p[0] > 2.0 then infinity else p[0]) |]
+
+                let difference = LeastSquares.levenbergMarquardt LeastSquaresOptions.standard cliff [| 2.0 |]
+                Expect.isFalse difference.Converged "forward difference: not converged"
+                Expect.equal difference.Iterations 0 "forward difference: iterations"
+                Expect.equal difference.Parameters [| 2.0 |] "forward difference: parameters stay at the start"
+                Expect.equal differenceNaNCalls.Value 0 "forward difference: no residual call at NaN parameters"
             }
 
             test "a residual function that is NaN away from the start rejects the trial" {

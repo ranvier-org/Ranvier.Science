@@ -142,7 +142,8 @@ module LeastSquares =
             let scale: float[] = Array.zeroCreate n
             let mutable iterations = 0
             let mutable converged = cost = 0.0
-            let mutable finished = converged
+            // A non-finite Jacobian gives no step to try: the fit stops there, short of convergence.
+            let mutable finished = converged || not (allFinite j.Data)
 
             while not finished && iterations < options.MaximumIterations do
                 iterations <- iterations + 1
@@ -200,6 +201,8 @@ module LeastSquares =
                                 if cost = 0.0 || stepSmall || decrease <= tolerance * previous then
                                     converged <- true
                                     finished <- true
+                                elif not (allFinite j.Data) then
+                                    finished <- true
                             else
                                 lambda <- lambda * 10.0
 
@@ -238,10 +241,12 @@ module LeastSquares =
     /// a rejection in the same iteration never ends the fit by this test, because rejection raises λ and shrinks the
     /// step wherever no descent exists. It is also true when an accepted step lowers the cost by at most Tolerance
     /// times the old cost, or when the cost is 0. The result is the best accepted parameters. It is false at
-    /// `MaximumIterations`, when λ passes 1e16 without an accepted step, and when the initial residuals are not all
-    /// finite (then `Iterations` is 0 and the Jacobian is NaN). Tolerance bounds the relative change of the cost and
-    /// of the parameters between iterations, not the error of the parameters: a flat valley can stop the fit well
-    /// short of the minimum (on NIST MGH09, measured by the reviewer, about 1e-5 from the certified values).
+    /// `MaximumIterations`, when λ passes 1e16 without an accepted step, when the initial residuals are not all finite
+    /// (then `Iterations` is 0 and the Jacobian is NaN), and when the Jacobian at the accepted parameters holds a NaN
+    /// or infinite entry, the caller's or the forward difference alike: the fit then stops there without a trial, and
+    /// `Iterations` is 0 when that is the start. Tolerance bounds the relative change of the cost and of the
+    /// parameters between iterations, not the error of the parameters: a flat valley can stop the fit well short of
+    /// the minimum.
     ///
     /// Raises `ArgumentOutOfRangeException` for a negative or NaN tolerance or a cap below 1, and `ArgumentException`
     /// for an empty initial vector, for a residual vector whose length differs from the first, or for a Jacobian that

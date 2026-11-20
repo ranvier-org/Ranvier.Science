@@ -110,7 +110,8 @@ module Run =
     /// and an advance that integrates from the held time over the clock's gap. <c>Time</c> counts from 0 at each start
     /// and not from the clock. As for <c>create</c>, an advance happens only when the clock moves above its last
     /// value; a clock equal to the last value or within 1e-9 below it leaves <c>Time</c> and <c>State</c> unchanged.
-    /// The state array of each read is a fresh array; the one <c>start</c> returned is never held.
+    /// Each start and each advance puts a fresh array in <c>State</c>, never the one <c>start</c> returned; reads
+    /// between them return that same array, which a caller must not mutate.
     /// </para>
     /// <para>
     /// Reads inside <c>rhs</c> are not tracked, so a signal it reads does not restart the run. A value <c>start</c>
@@ -120,8 +121,8 @@ module Run =
     /// When <c>Ode.solve</c> returns an <c>Error</c>, the read raises <c>InvalidOperationException</c> with its message
     /// and the state stays as it was; the failure rules of <c>Run</c> apply, so a later clock change retries the
     /// integration over the gap from the last clock recorded before the failure. An exception raised by <c>rhs</c>
-    /// propagates unchanged, with the same retry. <c>Ode.solve</c> raises <c>ArgumentOutOfRangeException</c> for
-    /// invalid options.
+    /// propagates unchanged, with the same retry. Raises <c>ArgumentOutOfRangeException</c> at the call for the
+    /// options <c>Ode.solve</c> rejects.
     /// </para>
     /// <para>
     /// The run is two memos, as for <c>create</c>, and its state is a mutable record: the run publishes on every
@@ -134,6 +135,9 @@ module Run =
         (start: unit -> float[])
         (rhs: float -> float[] -> float[])
         : Run<OdeState> =
+        // An empty interval checks the options without calling rhs.
+        Ode.solve options rhs 0.0 [||] 0.0 |> ignore
+
         let start' () =
             { Time = 0.0
               State = Array.copy (start ()) }

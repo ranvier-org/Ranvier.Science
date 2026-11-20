@@ -13,7 +13,9 @@ let private tight =
         AbsoluteTolerance = 1e-10
         RelativeTolerance = 1e-10 }
 
-// The bound of the ledger ruling on spec 5.1: the global error is at most twice atol + rtol · |exact|.
+// The global error these tests allow: 2 · (atol + rtol · |exact|) per component. The step control bounds the local
+// error of each step, and the global error accumulates them, so it can pass the tolerance itself; spec 5.1's "meets the
+// requested tolerance" on closed-form problems is read with this factor of 2.
 let private within (exact: float) (v: float) = abs (v - exact) <= 2.0 * (1e-10 + 1e-10 * abs exact)
 
 let private oscillator (_: float) (y: float[]) : float[] = [| y[1]; -y[0] |]
@@ -138,11 +140,16 @@ let tests =
             test "a state that overflows with a finite right-hand side gives Error" {
                 let overflow (y0: float) =
                     match Ode.solve OdeOptions.standard (fun _ _ -> [| 1e308 |]) 0.0 [| y0 |] 10.0 with
-                    | Error _ -> ()
+                    | Error text -> Expect.stringContains text "the state is not finite at t = " (sprintf "from %g" y0)
                     | Ok s -> failtestf "from %g: Ok with last state %g" y0 s.States.[s.States.Length - 1].[0]
 
                 overflow 1e308
                 overflow 0.0
+            }
+
+            test "a NaN in y0 names the condition" {
+                Ode.solve OdeOptions.standard (fun _ y -> [| -y[0] |]) 0.0 [| nan |] 1.0
+                |> expectError "the state is not finite at t = 0" "NaN y0"
             }
 
             test "solveAt reads the states of the accepted steps at their ends" {

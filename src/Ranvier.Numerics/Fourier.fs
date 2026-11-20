@@ -6,14 +6,15 @@ open System
 /// with real spectra, frequencies and linear convolution. The forward transform is X_k = Σ_j x_j e^(−2πi jk/n); the
 /// inverse carries the 1/n. Lengths that are powers of two use an iterative radix-2 transform whose twiddle factors
 /// come from a table built with + − × ÷ and sqrt only (half-angle steps from the roots 1, −1 and −i), so those
-/// transforms give the same bits on .NET and JavaScript; the table's error grows as log₂ n. Other lengths use
-/// Bluestein's algorithm, which evaluates the transform as a convolution through power-of-two transforms of the
-/// smallest length at least 2n − 1, and takes its chirp e^(−iπk²/n) from `Math.Cos` and `Math.Sin`, so those results
-/// may differ in the last places between targets. Every function leaves its inputs unchanged and returns fresh arrays.
-/// Cost O(n log n) (general knowledge); a length that is not a power of two costs about three transforms of the
-/// padded length. Accuracy: each output of `forward` and of `inverse ∘ forward` is within 1e-13 · Σ_j |x_j| of the
-/// direct sum for n ≤ 4096, measured here by the "Fourier" test list (`dotnet run -c Release --project
-/// tests/Ranvier.Science.Tests -- --filter "Fourier"`).
+/// transforms give the same bits on .NET and JavaScript; the table's error grows as log₂ n (general knowledge). Other
+/// lengths use Bluestein's algorithm, which evaluates the transform as a convolution through power-of-two transforms
+/// of the smallest length at least 2n − 1, and takes its chirp e^(−iπk²/n) from `Math.Cos` and `Math.Sin`, so those
+/// results may differ in the last places between targets. Every function leaves its inputs unchanged and returns
+/// fresh arrays. Cost O(n log n) (general knowledge); a length that is not a power of two costs three transforms of
+/// the padded length, two forward and one inverse. Accuracy: each output of `forward` is within
+/// 1e-13 · Σ_j (|Re x_j| + |Im x_j|) of the direct sum, and each output of `inverse ∘ forward` within
+/// 1e-13 · max_j max(|Re x_j|, |Im x_j|) of the input, for n ≤ 4096, measured here by the "Fourier" test list
+/// (`dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter "Fourier"`).
 module Fourier =
     let private checkLengths (re: float[]) (im: float[]) : unit =
         if re.Length <> im.Length then
@@ -232,12 +233,12 @@ module Fourier =
 
     /// The ⌊n/2⌋ + 1 frequencies k/(n · spacing) of the bins of `realForward` for a sequence of length n sampled
     /// `spacing` apart (NumPy's `rfftfreq`). Raises `ArgumentOutOfRangeException` when n is below 1 or the spacing is
-    /// at most 0; a NaN spacing gives NaN values.
+    /// not above 0, NaN included.
     let frequencies (n: int) (spacing: float) : float[] =
         if n < 1 then
             raise (ArgumentOutOfRangeException("n", "The length must be at least 1."))
 
-        if spacing <= 0.0 then
+        if not (spacing > 0.0) then
             raise (ArgumentOutOfRangeException("spacing", "The sample spacing must be above 0."))
 
         Array.init (n / 2 + 1) (fun k -> float k / (float n * spacing))

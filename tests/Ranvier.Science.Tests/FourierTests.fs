@@ -115,6 +115,7 @@ let tests =
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Fourier.frequencies 0 1.0 |> ignore) "n = 0"
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Fourier.frequencies 8 0.0 |> ignore) "spacing 0"
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Fourier.frequencies 8 -1.0 |> ignore) "spacing < 0"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Fourier.frequencies 8 nan |> ignore) "NaN spacing"
             }
 
             test "convolve" {

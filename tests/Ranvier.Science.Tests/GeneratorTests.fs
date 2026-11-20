@@ -343,6 +343,11 @@ let tests =
                 Expect.isTrue (bs |> Array.forall (fun x -> not (System.Double.IsNaN x) && x >= 0.0 && x <= 1.0)) "beta 1e-3 in [0, 1], none NaN"
                 Expect.isTrue (abs (Array.average bs - 0.5) <= 0.02) "beta 1e-3 mean within 0.02 of 0.5"
 
+                // Subnormal shapes: both log-gamma deviates are -infinity, so each draw is 0 or 1. Seed 277.
+                let tiny = sample 1000 (Generator.beta 1e-310 1e-310) (Generator.create 277)
+                Expect.isTrue (tiny |> Array.forall (fun x -> x = 0.0 || x = 1.0)) "beta 1e-310 gives 0 or 1, none NaN"
+                Expect.isTrue (tiny |> Array.exists (fun x -> x = 0.0) && tiny |> Array.exists (fun x -> x = 1.0)) "beta 1e-310 gives both"
+
                 let struct (b0, _) = Generator.binomial 10 0.0 (Generator.create 273)
                 let struct (b1, _) = Generator.binomial 10 1.0 (Generator.create 273)
                 let struct (bz, _) = Generator.binomial 0 0.5 (Generator.create 273)

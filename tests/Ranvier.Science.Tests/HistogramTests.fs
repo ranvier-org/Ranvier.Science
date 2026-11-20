@@ -75,6 +75,14 @@ let tests =
                 Expect.throwsT<InvalidOperationException> (fun () -> Histogram.unmerge empty (Histogram.add empty 0.2) |> ignore) "unmerge below zero"
                 Expect.throwsT<ArgumentException> (fun () -> Histogram.merge empty (Histogram.uniform 0.0 2.0 2) |> ignore) "different edges"
                 Expect.throwsT<ArgumentException> (fun () -> Histogram.unmerge empty (Histogram.uniform 0.0 2.0 2) |> ignore) "different edges, unmerge"
+
+                // The message names both edge lengths.
+                let four = Histogram.uniform 0.0 1.0 3
+
+                for name, call in
+                    [ "merge", (fun () -> Histogram.merge empty four |> ignore)
+                      "unmerge", (fun () -> Histogram.unmerge empty four |> ignore) ] do
+                    Expect.throwsC call (fun e -> Expect.stringContains e.Message "3 and 4 edges" $"{name} names both lengths")
             }
 
             test "copies in and out" {

@@ -256,25 +256,26 @@ module Special =
         else
             log1p x - x
 
-    /// Raises unless a > 0 and b > 0.
+    /// Raises unless a > 0 and b > 0; a NaN passes.
     let private checkBetaArguments (a: float) (b: float) : unit =
-        if not (a > 0.0) then
+        if a <= 0.0 then
             raise (ArgumentOutOfRangeException(nameof a, sprintf "B(a, b) needs a > 0; a = %g." a))
 
-        if not (b > 0.0) then
+        if b <= 0.0 then
             raise (ArgumentOutOfRangeException(nameof b, sprintf "B(a, b) needs b > 0; b = %g." b))
 
     /// ln B(a, b) = ln Γ(a) + ln Γ(b) − ln Γ(a + b) for a, b > 0: −∞ when either is +∞, NaN when either is NaN.
-    /// `betaLn a b` and `betaLn b a` are equal. Raises `ArgumentOutOfRangeException` when a or b is 0 or less. Error at
-    /// most max(1e-13 · |ln B(a, b)|, 1e-14): relative 1e-13, and absolute 1e-14 where |ln B(a, b)| < 0.1. The floor is
-    /// absolute because ln B is zero wherever B(a, b) = 1, as at a = b = 1, near which its value is the difference of
-    /// much larger terms and keeps their absolute rounding error. Pinned by the `Special` tests against
-    /// `tests/reference/special.py` (measured here).
+    /// `betaLn a b` and `betaLn b a` are equal. Raises `ArgumentOutOfRangeException` when a or b is 0 or less, even
+    /// with the other argument NaN. Error at most max(1e-13 · |ln B(a, b)|, 1e-14): relative 1e-13, and absolute 1e-14
+    /// where |ln B(a, b)| < 0.1. The floor is absolute because ln B is zero wherever B(a, b) = 1, as at a = b = 1, near
+    /// which its value is the difference of much larger terms and keeps their absolute rounding error. Pinned by the
+    /// `Special` tests against `tests/reference/special.py` (measured here).
     let betaLn (a: float) (b: float) : float =
+        checkBetaArguments a b
+
         if Double.IsNaN a || Double.IsNaN b then
             nan
         else
-            checkBetaArguments a b
             let a, b = if a >= b then a, b else b, a
 
             if a = infinity then
@@ -296,16 +297,18 @@ module Special =
                 lnGammaPositive a + lnGammaPositive b - lnGammaPositive (a + b)
 
     /// B(a, b) = Γ(a)Γ(b) / Γ(a + b) for a, b > 0: 0 when either is +∞, NaN when either is NaN. `beta a b` and
-    /// `beta b a` are equal. Raises `ArgumentOutOfRangeException` when a or b is 0 or less. Relative error at most 1e-13
-    /// where |ln B(a, b)| < 256, and at most 5e-13 where |ln B(a, b)| ≥ 256 and B(a, b) ≥ 1e-300. The second bound is
-    /// looser because B is exp(betaLn a b) once a + b ≥ 8, so the absolute error of ln B becomes the relative error of
-    /// B. Once |ln B| ≥ 256, one ulp of ln B is at least 2⁻⁴⁴ ≈ 5.7e-14 (general knowledge), so two ulp exceed 1e-13.
-    /// Both bounds are pinned by the `Special` tests against `tests/reference/special.py` (measured here).
+    /// `beta b a` are equal. Raises `ArgumentOutOfRangeException` when a or b is 0 or less, even with the other argument
+    /// NaN. Relative error at most 1e-13 where |ln B(a, b)| < 256, and at most 5e-13 where |ln B(a, b)| ≥ 256 and
+    /// B(a, b) ≥ 1e-300. The second bound is looser because B is exp(betaLn a b) once a + b ≥ 8, so the absolute error
+    /// of ln B becomes the relative error of B. Once |ln B| ≥ 256, one ulp of ln B is at least 2⁻⁴⁴ ≈ 5.7e-14 (general
+    /// knowledge), so two ulp exceed 1e-13. Both bounds are pinned by the `Special` tests against
+    /// `tests/reference/special.py` (measured here).
     let beta (a: float) (b: float) : float =
+        checkBetaArguments a b
+
         if Double.IsNaN a || Double.IsNaN b then
             nan
         else
-            checkBetaArguments a b
             let a, b = if a >= b then a, b else b, a
 
             if a + b < 8.0 then
@@ -323,17 +326,19 @@ module Special =
 
         lnGammaPositive (float n + 1.0)
 
-    /// ln C(n, k), the logarithm of the binomial coefficient, for 0 ≤ k ≤ n. `logChoose n k` and `logChoose n (n − k)`
-    /// are equal. Raises `ArgumentOutOfRangeException` unless 0 ≤ k ≤ n. Error at most max(1e-13 · ln C(n, k), 1e-14):
-    /// relative 1e-13, and absolute 1e-14 where ln C(n, k) < 0.1, that is at k = 0 and k = n, where the value 0 is the
-    /// difference of two terms near ln(n + 1) and keeps their absolute rounding error. Pinned by the `Special` tests
-    /// against `tests/reference/special.py` (measured here).
+    /// ln C(n, k), the logarithm of the binomial coefficient, for 0 ≤ k ≤ n: exactly 0 at k = 0 and k = n.
+    /// `logChoose n k` and `logChoose n (n − k)` are equal. Raises `ArgumentOutOfRangeException` unless 0 ≤ k ≤ n.
+    /// Relative error at most 1e-13 elsewhere, pinned by the `Special` tests against `tests/reference/special.py`
+    /// (measured here).
     let logChoose (n: int) (k: int) : float =
         if k < 0 || k > n then
             raise (ArgumentOutOfRangeException(nameof k, sprintf "C(n, k) needs 0 <= k <= n; n = %d, k = %d." n k))
 
-        let m = float (min k (n - k))
-        -(Math.Log (float n + 1.0)) - betaLn (float n - m + 1.0) (m + 1.0)
+        if k = 0 || k = n then
+            0.0
+        else
+            let m = float (min k (n - k))
+            -(Math.Log (float n + 1.0)) - betaLn (float n - m + 1.0) (m + 1.0)
 
     // 2/√π and 1/√π: python -I tests/reference/special.py erf
     let private twoOverSqrtPi = 1.1283791670955126
@@ -602,9 +607,9 @@ module Special =
     /// P(a, x) = (1/Γ(a)) ∫₀ˣ tᵃ⁻¹e⁻ᵗ dt, the regularised lower incomplete gamma function, for a > 0 finite and
     /// x ≥ 0: 0 at x = 0, 1 at x = +∞, NaN when a or x is NaN. Raises `ArgumentOutOfRangeException` when a ≤ 0,
     /// a = +∞ or x < 0, even with the other argument NaN. Relative error at most 1e-12 over 0 < a ≤ 1000 where
-    /// P(a, x) ≥ 1e-300, pinned by the `Special` tests against `tests/reference/special.py` (measured here). Cost: a
-    /// series or continued fraction of at most 10 000 terms, NaN past them; a dense scan of a ≤ 1000 took at most 270
-    /// series terms and 95 continued-fraction steps (measured here).
+    /// P(a, x) ≥ 1e-300, pinned by the `Special` tests against `tests/reference/special.py` (measured here). Cost: one
+    /// series or continued fraction, or for a < 1 below a + 1 with P(a, x) > ½ two series and a continued fraction at
+    /// a + 1, each of at most 10 000 terms, NaN past them.
     let gammaLowerRegularized (a: float) (x: float) : float =
         checkIncompleteGammaArguments a x
 
@@ -935,8 +940,7 @@ module Special =
     /// a ≤ 0, b ≤ 0, a or b is +∞, or x is outside [0, 1], even with another argument NaN. Relative error at most 1e-12
     /// over 0 < a, b ≤ 1000 where I_x(a, b) ≥ 1e-300, pinned by the `Special` tests against
     /// `tests/reference/special.py` (measured here). Cost: a continued fraction of at most 10 000 steps, and for b < 1
-    /// a series of as many terms, NaN past them; a dense scan of a, b ≤ 1000 took at most 92 steps and 54 terms
-    /// (measured here).
+    /// a series of as many terms, NaN past them.
     let betaRegularized (a: float) (b: float) (x: float) : float =
         checkBetaShapes a b
 
@@ -1016,7 +1020,7 @@ module Special =
     /// 0 < a, b ≤ 1000 where the root is a normal double and the doubles beside it resolve p; near 1 for b < 1, where
     /// I_x(a, b) can step by more than 1e-12 p between adjacent doubles, the root lies within one double of the
     /// result. Both are pinned by the `Special` tests and a dense scan with shapes from 5e-324 to 1000 (measured here).
-    /// Cost: at most 100 evaluations of `betaRegularized`; the scan took at most 15 (measured here).
+    /// Cost: at most 100 evaluations of `betaRegularized`.
     let betaRegularizedInverse (a: float) (b: float) (p: float) : float =
         checkBetaShapes a b
 

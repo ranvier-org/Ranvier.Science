@@ -396,6 +396,11 @@ let tests =
                 for n, k, expected in logChooseCases do
                     expectClose 1e-13 1e-14 expected (Special.logChoose n k) (sprintf "logChoose %d %d" n k)
                     Expect.equal (Special.logChoose n (n - k)) (Special.logChoose n k) (sprintf "symmetry at %d %d" n k)
+
+                // C(n, 0) = C(n, n) = 1, so ln C is exactly 0 there.
+                for n in [ 0; 1; 7; 1000; 1000000 ] do
+                    Expect.equal (Special.logChoose n 0) 0.0 (sprintf "logChoose %d 0" n)
+                    Expect.equal (Special.logChoose n n) 0.0 (sprintf "logChoose %d %d" n n)
             }
 
             test "log1p and expm1 at small arguments" {
@@ -505,6 +510,9 @@ let tests =
                 raises "digamma -2" (fun () -> Special.digamma -2.0)
                 raises "beta 0 1" (fun () -> Special.beta 0.0 1.0)
                 raises "betaLn 1 -1" (fun () -> Special.betaLn 1.0 -1.0)
+                // An argument outside the domain raises even beside a NaN.
+                raises "beta NaN -1" (fun () -> Special.beta nan -1.0)
+                raises "betaLn -1 NaN" (fun () -> Special.betaLn -1.0 nan)
                 raises "logFactorial -1" (fun () -> Special.logFactorial -1)
                 raises "logChoose 5 6" (fun () -> Special.logChoose 5 6)
                 raises "logChoose 5 -1" (fun () -> Special.logChoose 5 (-1))
