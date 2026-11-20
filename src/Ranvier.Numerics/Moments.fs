@@ -24,6 +24,9 @@ module Moments =
             M2 = Sum.zero
         }
 
+    /// The state with the given count, mean total and sum of squares about the mean; the caller keeps them consistent.
+    let internal ofState (count: float) (mean: Sum) (m2: Sum) : Moments = { N = count; Mean = mean; M2 = m2 }
+
     let add (compensated: bool) (m: Moments) (x: float) : Moments =
         let n = m.N + 1.0
         let delta = x - Sum.value m.Mean

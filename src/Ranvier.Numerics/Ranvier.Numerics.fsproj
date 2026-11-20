@@ -18,6 +18,8 @@
         <Compile Include="Interpolate.fs" />
         <Compile Include="Fourier.fs" />
         <Compile Include="Comoments.fs" />
+        <Compile Include="HigherMoments.fs" />
+        <Compile Include="WeightedMoments.fs" />
         <Compile Include="FloatPolicy.fs" />
         <Compile Include="Aggregate.fs" />
         <Compile Include="Tolerance.fs" />

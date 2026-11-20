@@ -40,6 +40,30 @@ let tests =
                 Expect.equal (Comoments.slope c) 0.03109165887938769 "slope"
             }
 
+            // Literals: printed with ToString("R") on .NET from HigherMoments.add true over the recorded stream; JavaScript must match.
+            test "higher moments give the same bits on both targets" {
+                let h = Array.fold (HigherMoments.add true) HigherMoments.zero Recorded.stream
+                Expect.equal (HigherMoments.mean h) 0.9199618814567002 "mean"
+                Expect.equal (HigherMoments.variance h) 8.34324586928672 "variance"
+                Expect.equal (HigherMoments.skewness h) 0.01189602643549609 "skewness"
+                Expect.equal (HigherMoments.kurtosis h) -0.15033796143860245 "kurtosis"
+            }
+
+            // Literals: printed with ToString("R") on .NET from x = stream[i], w = float (i % 5); JavaScript must match.
+            test "weighted moments give the same bits on both targets" {
+                let w =
+                    Array.fold
+                        (fun m i -> WeightedMoments.add true m Recorded.stream.[i] (float (i % 5)))
+                        WeightedMoments.zero
+                        [| 0..999 |]
+
+                Expect.equal (WeightedMoments.totalWeight w) 2000.0 "totalWeight"
+                Expect.equal (WeightedMoments.mean w) 0.8837353728507035 "mean"
+                Expect.equal (WeightedMoments.variance w) 8.696915713944598 "variance"
+                Expect.equal (WeightedMoments.reliabilityVariance w) 8.709980684972056 "reliabilityVariance"
+                Expect.equal (WeightedMoments.effectiveCount w) 666.6666666666666 "effectiveCount"
+            }
+
             // Literals: Matrix.solve and CholeskyDecomposition.solve printed with ToString("R") on .NET; JavaScript must match.
             test "LU solve gives the same bits on both targets" {
                 let a4 =

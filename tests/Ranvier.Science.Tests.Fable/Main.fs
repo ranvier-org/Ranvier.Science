@@ -38,6 +38,8 @@ let all =
             testList "InterpolateTests.fs" [ Ranvier.Science.Tests.InterpolateTests.tests ]
             testList "FourierTests.fs" [ Ranvier.Science.Tests.FourierTests.tests ]
             testList "ComomentsTests.fs" [ Ranvier.Science.Tests.ComomentsTests.tests ]
+            testList "HigherMomentsTests.fs" [ Ranvier.Science.Tests.HigherMomentsTests.tests ]
+            testList "WeightedMomentsTests.fs" [ Ranvier.Science.Tests.WeightedMomentsTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]
