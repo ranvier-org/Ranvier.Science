@@ -150,6 +150,20 @@ type UnitCatalogue internal (units: Map<string, struct (UnitInfo * bool)>) =
 
 exception internal UnitSyntax of string
 
+/// Rules the unit text and the formula notation share.
+module internal Notation =
+    /// The largest exponent magnitude of `^`, and in unit text of superscript digits; a larger one is a syntax error.
+    let maxExponent = 1000
+
+    /// `x` to the integer power `n`, by repeated multiplication so both targets round alike. O(|n|).
+    let integerPower (x: float) (n: int) : float =
+        let mutable product = 1.0
+
+        for _ in 1 .. abs n do
+            product <- product * x
+
+        if n < 0 then 1.0 / product else product
+
 module UnitInfo =
     let dimensionless: UnitInfo = { Factors = []; Dimension = Dimension.none; Scale = 1.0 }
 
@@ -160,15 +174,6 @@ module UnitInfo =
         names
         |> List.map (fun name -> name, factors |> List.sumBy (fun (n, e) -> if n = name then e else 0))
         |> List.filter (fun (_, e) -> e <> 0)
-
-    /// `x` to the integer power `n`, by repeated multiplication so both targets round alike.
-    let private scalePower (x: float) (n: int) : float =
-        let mutable product = 1.0
-
-        for _ in 1 .. abs n do
-            product <- product * x
-
-        if n < 0 then 1.0 / product else product
 
     let private format (name: string, e: int) = if e = 1 then name else name + "^" + string e
 
@@ -190,16 +195,19 @@ module UnitInfo =
         | _, [ single ] -> top + "/" + single
         | _, _ -> top + "/(" + String.Join("·", denominator) + ")"
 
+    /// The unit's symbol; "1" for a unit without factors.
+    let internal nameOf (u: UnitInfo) : string =
+        match symbol u with
+        | "" -> "1"
+        | text -> text
+
     /// The unit itself when its scale is finite and not 0. Raises ArithmeticException otherwise, with a message
     /// stating the unit's symbol ("1" for a unit without factors) and its scale.
     let private checkedScale (u: UnitInfo) : UnitInfo =
         let scale = u.Scale
 
         if Double.IsNaN scale || Double.IsInfinity scale || scale = 0.0 then
-            let name =
-                match symbol u with
-                | "" -> "1"
-                | text -> text
+            let name = nameOf u
 
             let value =
                 if Double.IsNaN scale then "NaN"
@@ -240,7 +248,7 @@ module UnitInfo =
             {
                 Factors = merge (u.Factors |> List.map (fun (name, e) -> name, e * n))
                 Dimension = Dimension.map (fun e -> e * n) u.Dimension
-                Scale = scalePower u.Scale n
+                Scale = Notation.integerPower u.Scale n
             }
 
     /// `Ok` with every exponent halved and the correctly rounded square root of the scale. Error names the unit when
@@ -295,17 +303,15 @@ module UnitInfo =
                 )
             )
 
-    /// The largest exponent magnitude of `^` or of superscript digits; a larger one is a syntax error.
-    let private maxExponent = 1000
-
     let private superscriptDigits = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
     let private isAsciiDigit (c: char) = c >= '0' && c <= '9'
 
     let private isMinus (c: char) = c = '-' || c = '−'
 
-    /// Characters that end a symbol: the separators, brackets, operators, digits and the superscripts.
-    let private endsSymbol (c: char) =
+    /// Characters that end a symbol: the separators, brackets, operators, digits and the superscripts. A symbol
+    /// `UnitCatalogue.add` registers contains none of them.
+    let internal endsSymbol (c: char) =
         c = ' '
         || c = '·' || c = '*' || c = '.' || c = '/' || c = '(' || c = ')' || c = '^'
         || c = '[' || c = ']' || c = ','
@@ -379,12 +385,12 @@ module UnitInfo =
             for i in start .. pos.Value - 1 do
                 total <- total * 10 + value text[i]
 
-                if total > maxExponent then
+                if total > Notation.maxExponent then
                     tooLarge <- true
-                    total <- maxExponent + 1
+                    total <- Notation.maxExponent + 1
 
             if tooLarge then
-                fail start ("An exponent must be from -" + string maxExponent + " to " + string maxExponent)
+                fail start ("An exponent must be from -" + string Notation.maxExponent + " to " + string Notation.maxExponent)
 
             total
 
@@ -497,11 +503,6 @@ module UnitInfo =
             Result.Ok result
         with UnitSyntax message ->
             Result.Error message
-
-    let private nameOf (u: UnitInfo) : string =
-        match symbol u with
-        | "" -> "1"
-        | text -> text
 
     /// `Ok` of `from.Scale / target.Scale`, the number of `target` in one `from`; Error naming both units when their
     /// dimensions differ or the quotient is not finite or is 0.

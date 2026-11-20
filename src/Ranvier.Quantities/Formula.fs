@@ -61,9 +61,6 @@ module Formula =
         | _ when (pureFunction name).IsSome -> ValueSome 1
         | _ -> ValueNone
 
-    /// The largest exponent magnitude of `^`; a larger one is a syntax error.
-    let private maxExponent = 1000
-
     let private isDigit (c: char) = c >= '0' && c <= '9'
 
     let private isLetter (c: char) =
@@ -149,8 +146,8 @@ module Formula =
 
             let digits = text.Substring(start, pos.Value - start).TrimStart('0')
 
-            if digits.Length > 4 || (digits.Length > 0 && int digits > maxExponent) then
-                fail start ("An exponent must be from -" + string maxExponent + " to " + string maxExponent)
+            if digits.Length > 4 || (digits.Length > 0 && int digits > Notation.maxExponent) then
+                fail start ("An exponent must be from -" + string Notation.maxExponent + " to " + string Notation.maxExponent)
 
             let magnitude = if digits.Length = 0 then 0 else int digits
             if negative then -magnitude else magnitude
@@ -321,11 +318,6 @@ module Formula =
         with FormulaSyntax message ->
             Result.Error message
 
-    /// The unit's symbol; "1" for a unit without factors.
-    let internal describe (u: UnitInfo) : string =
-        let symbol = UnitInfo.symbol u
-        if symbol = "" then "1" else symbol
-
     let private both (a: Result<UnitInfo, string>) (b: Result<UnitInfo, string>) (f: UnitInfo -> UnitInfo -> Result<UnitInfo, string>) =
         match a, b with
         | Result.Error m, _
@@ -339,15 +331,15 @@ module Formula =
             Result.Error(
                 operation
                 + " needs operands of one unit, but met "
-                + describe a
+                + UnitInfo.nameOf a
                 + " and "
-                + describe b
+                + UnitInfo.nameOf b
                 + ": they differ in size only, and "
                 + operation
                 + " does not convert; convert(expr, [unit]) does."
             )
         else
-            Result.Error(operation + " needs operands of one unit, but met " + describe a + " and " + describe b + ".")
+            Result.Error(operation + " needs operands of one unit, but met " + UnitInfo.nameOf a + " and " + UnitInfo.nameOf b + ".")
 
     /// `UnitInfo.dimensionless` for a dimensionless operand of any scale; `Error` naming the function and the unit
     /// otherwise.
@@ -355,7 +347,7 @@ module Formula =
         if UnitInfo.sameDimension u UnitInfo.dimensionless then
             Result.Ok UnitInfo.dimensionless
         else
-            Result.Error(name + " needs a dimensionless operand, but met " + describe u + ".")
+            Result.Error(name + " needs a dimensionless operand, but met " + UnitInfo.nameOf u + ".")
 
     /// The result of `operation`, or `Error` with the message of the exception it raises.
     let private guarded (operation: unit -> Result<UnitInfo, string>) : Result<UnitInfo, string> =
@@ -534,15 +526,6 @@ module Formula =
     /// ∂hypot(x, y)/∂y = y/h with h = hypot(x, y); NaN at the origin.
     let private hypotByY (x: float) (y: float) : float = y / hypot x y
 
-    /// `x` to the integer power `n`, by repeated multiplication so both targets round alike.
-    let private integerPower (x: float) (n: int) : float =
-        let mutable product = 1.0
-
-        for _ in 1 .. abs n do
-            product <- product * x
-
-        if n < 0 then 1.0 / product else product
-
     /// The evaluator's function of `expr` in `context`, with `reader` giving the function of each identifier that
     /// resolves to an entry, from the context, the identifier and the entry. `expr` is assumed to check.
     let private compile
@@ -580,7 +563,7 @@ module Formula =
                 fun () -> f () / g ()
             | Power(a, n) ->
                 let f = build a
-                fun () -> integerPower (f ()) n
+                fun () -> Notation.integerPower (f ()) n
             | Call(name, arguments) ->
                 match name, arguments with
                 | "sqrt", [ a ] ->
@@ -681,8 +664,8 @@ module Formula =
                 fun () -> f () / g ()
             | Power(a, n) ->
                 let f = build a
-                let power (v: float) = integerPower v n
-                let derivative (v: float) = if n = 0 then 0.0 else float n * integerPower v (n - 1)
+                let power (v: float) = Notation.integerPower v n
+                let derivative (v: float) = if n = 0 then 0.0 else float n * Notation.integerPower v (n - 1)
                 fun () -> Uncertain.map power derivative (f ())
             | Call(name, arguments) ->
                 match name, arguments with

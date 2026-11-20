@@ -373,9 +373,9 @@ module Quantity =
                 "The entry \""
                 + entry.Id
                 + "\" is in "
-                + Formula.describe entry.Unit
+                + UnitInfo.nameOf entry.Unit
                 + ", not in "
-                + Formula.describe unit.Info
+                + UnitInfo.nameOf unit.Info
                 + "."
             )
 

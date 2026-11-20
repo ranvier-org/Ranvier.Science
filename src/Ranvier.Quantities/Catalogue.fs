@@ -338,8 +338,6 @@ module Units =
 /// The catalogues of units.
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module UnitCatalogue =
-    let private forbidden = " \u00B7*./()^[],-\u2212\u00D7\u00F7\u207B\u2070\u00B9\u00B2\u00B3\u2074\u2075\u2076\u2077\u2078\u2079"
-
     /// The catalogue with `unit` registered under `symbol`, prefixable or not, as one factor, `symbol` with exponent 1,
     /// of the unit's dimension and scale, whatever factors `unit` has. A unit the catalogue holds is atomic, as the
     /// built-in named units are: `UnitInfo.parse` gives it the symbol as written ("kWh", not "kW\u00B7h"), and its square
@@ -355,7 +353,7 @@ module UnitCatalogue =
 
         let symbol = Prefix.normalise symbol
 
-        if symbol |> Seq.exists (fun c -> forbidden.IndexOf c >= 0 || (c >= '0' && c <= '9')) then
+        if symbol |> Seq.exists UnitInfo.endsSymbol then
             raise (
                 ArgumentException(
                     "The symbol " + symbol + " contains a space, an operator, a bracket or a digit.",
