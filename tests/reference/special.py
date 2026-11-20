@@ -8,6 +8,7 @@ Sections:
     erf     erf and erfc; the constants 2 / sqrt(pi) and 1 / sqrt(pi) of Special.fs
     incgamma
             the regularised incomplete gamma functions P(a, x) and Q(a, x), printed as 0.0 below 1e-300
+    incbeta the regularised incomplete beta function I_x(a, b), each value at least 1e-300
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -50,6 +51,17 @@ Methods:
                 cancels the leading -log10 Q(a, x) digits. Where that leaves fewer digits than the context's (Q falls
                 like a for small a), it is computed again with 20 more digits than it cancelled, or twice the extra
                 digits where the difference is 0.
+    I_x(a, b)   beta_inc: for 0 < x <= 1/2, x^a (1 - x)^b / (a B(a, b)) times the sum over n >= 0 of
+                (a + b)_n / (a + 1)_n x^n, with (q)_n = q (q + 1) ... (q + n - 1). The terms are positive, and the ratio
+                of each to the one before, x (a + b + n) / (a + 1 + n), moves monotonically towards x; so once
+                r = max(the next ratio, x) is below 1, the remainder is below the last term times r / (1 - r), and the
+                sum stops when that bound leaves it unchanged. The exponent a ln x + b ln(1 - x) - ln B(a, b) is formed
+                at the context precision plus GUARD plus the digits of its largest term, ln(1 - x) at as many more
+                digits as x has leading zeros, and ln B(a, b) from ln_gamma_precise, which holds at any precision. For
+                x > 1/2, 1 - I_(1 - x)(b, a) with 1 - x exact, at 30 more digits; where the subtraction leaves fewer
+                digits than the context's, it is computed again as Q(a, x) is. For whole a and b with a + b <= 200 the
+                section also sums I_x(a, b) = the sum over j = a..a+b-1 of C(a + b - 1, j) x^j (1 - x)^(a + b - 1 - j)
+                in exact fractions, and exits 1 unless both give the same double.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -409,6 +421,88 @@ def gamma_q(a, x) -> Decimal:
             return +result
 
 
+def magnitude_digits(*values: float) -> int:
+    """The digits in the integer part of the largest |value|, at least 1."""
+    return math.floor(math.log10(max(1.0, *(abs(v) for v in values)))) + 1
+
+
+def beta_ln_precise(a: Decimal, b: Decimal) -> Decimal:
+    """ln B(a, b) = ln Gamma(a) + ln Gamma(b) - ln Gamma(a + b) for a, b > 0 at any context precision p: absolute error
+    below 10^-p, from ln_gamma_precise at the digits of its largest term more."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        s = float(a + b)
+        # |ln Gamma(z)| is below |ln z| + 1 for z < 2 and below z ln z for z >= 2.
+        ctx.prec += magnitude_digits(math.log(float(a)) - 1, math.log(float(b)) - 1, s * math.log(s) - 1)
+        result = ln_gamma_precise(a) + ln_gamma_precise(b) - ln_gamma_precise(a + b)
+    return +result
+
+
+def incomplete_beta_sum(a: Decimal, b: Decimal, x: Decimal) -> Decimal:
+    """The sum over n >= 0 of (a + b)_n / (a + 1)_n x^n, at the precision of the current context, for a, b > 0 and
+    0 < x <= 1/2."""
+    term = Decimal(1)
+    total = term
+    n = 0
+    while True:
+        term = term * x * (a + b + n) / (a + 1 + n)
+        n += 1
+        total += term
+        # The ratio of each term to the one before moves monotonically towards x, so every later ratio is below r.
+        r = max(x * (a + b + n) / (a + 1 + n), x)
+        if r < 1 and total + term * r / (1 - r) == total:
+            return total
+
+
+def beta_inc_lower(a: Decimal, b: Decimal, x: Decimal) -> Decimal:
+    """I_x(a, b) for a, b > 0 and 0 < x <= 1/2, by its series."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        # The exponent's terms reach |a ln x|, |b ln(1 - x)| and |ln B(a, b)|; it needs absolute precision.
+        fa, fb, fx = float(a), float(b), float(x)
+        s = fa + fb
+        ln_b_bound = abs(math.log(fa)) + abs(math.log(fb)) + s * math.log(s + 2) + 2
+        ctx.prec += magnitude_digits(fa * math.log(fx), fb * math.log1p(-fx), ln_b_bound)
+        with localcontext() as inner:
+            # 1 - x keeps the relative precision of x.
+            inner.prec += max(0, -x.adjusted())
+            ln_y = (1 - x).ln()
+        exponent = a * x.ln() + b * ln_y - beta_ln_precise(a, b)
+        result = exponent.exp() * incomplete_beta_sum(a, b, x) / a
+    return +result
+
+
+def beta_inc(a, b, x) -> Decimal:
+    """I_x(a, b), the regularised incomplete beta function, for a, b > 0 and 0 <= x <= 1."""
+    a, b, x = Decimal(a), Decimal(b), Decimal(x)
+    if x == 0:
+        return Decimal(0)
+    if x == 1:
+        return Decimal(1)
+    if x <= Decimal("0.5"):
+        return beta_inc_lower(a, b, x)
+    extra = 30
+    while True:
+        with localcontext() as ctx:
+            ctx.prec += extra
+            # x has at most 53 digits after the point, so 1 - x is exact.
+            result = 1 - beta_inc_lower(b, a, 1 - x)
+        # The subtraction leaves extra + result.adjusted() digits more than the context's.
+        if result == 0:
+            extra *= 2
+        elif extra + result.adjusted() < 0:
+            extra = 20 - result.adjusted()
+        else:
+            return +result
+
+
+def beta_inc_exact(a: int, b: int, x: float) -> Fraction:
+    """I_x(a, b) for whole a, b >= 1, exactly: the sum over j = a..a+b-1 of C(a+b-1, j) x^j (1 - x)^(a + b - 1 - j)."""
+    n = a + b - 1
+    x = Fraction(x)
+    return sum(math.comb(n, j) * x**j * (1 - x) ** (n - j) for j in range(a, n + 1))
+
+
 def two_over_sqrt_pi() -> Decimal:
     return 2 / pi().sqrt()
 
@@ -593,7 +687,60 @@ def section_incgamma() -> None:
     )
 
 
-SECTIONS = {"gamma": section_gamma, "erf": section_erf, "incgamma": section_incgamma}
+def incbeta_rows(abxs: list[tuple[float, float, float]]) -> list[tuple]:
+    """(a, b, x, I_x(a, b)) for each triple; exits 1 where I_x(a, b) is below 1e-300, or where whole a and b with
+    a + b <= 200 give another double by the exact binomial sum."""
+    rows = []
+    for a, b, x in abxs:
+        v = value(beta_inc, a, b, x)
+        if v < 1e-300:
+            sys.exit(f"beta_inc{(a, b, x)} = {v!r} is below 1e-300")
+        if a == int(a) and b == int(b) and a + b <= 200:
+            exact = float(beta_inc_exact(int(a), int(b), x))
+            if exact != v:
+                sys.exit(f"beta_inc{(a, b, x)}: {v!r} by the series, {exact!r} by the exact binomial sum")
+        rows.append((a, b, x, v))
+    return rows
+
+
+def section_incbeta() -> None:
+    print("// python -I tests/reference/special.py incbeta")
+    print()
+
+    incbeta_abxs = [
+        (1.0, 1.0, 0.3), (0.5, 0.5, 0.2), (2.0, 3.0, 0.4), (5.0, 10.0, 0.1), (10.0, 5.0, 0.9), (0.1, 10.0, 0.01),
+        (50.0, 50.0, 0.5), (50.0, 60.0, 0.4), (200.0, 300.0, 0.4), (0.001, 0.001, 0.5), (30.0, 2.0, 0.01),
+        (1000.0, 1000.0, 0.49), (0.5, 1000.0, 1e-4), (7.5, 0.25, 0.999),
+    ]
+    print_cases("incompleteBetaCases", "(float * float * float * float)[]", incbeta_rows(incbeta_abxs))
+
+    incbeta_scan_abxs = [
+        # The worst points of a dense seeded scan of 7,748 points on .NET and JavaScript: below the switch by the
+        # continued fraction for a, b >= 8, for one of them below 8 and for both below 8; above it by
+        # 1 - I_(1 - x)(b, a) for the same three, and by the split for b < 1 with a above and below 8.
+        (26.47726446673045, 122.94025167092182, 1.0975185646430612e-11),
+        (38.04870023325283, 530.2670642127772, 3.682337338018041e-09),
+        (526.934562703818, 377.3827200800417, 0.11432183348485359),
+        (648.9439616655302, 0.13591441112284136, 0.3901655144016795),
+        (1.33887962351026, 3.0156634547318433, 3.393673180998573e-171),
+        (187.03445169233888, 676.1498087962242, 0.21758279285097282),
+        (96.77412815163682, 5.399004386837298, 0.9463164204577453),
+        (6.729458999421565, 1.0893450340321005, 0.7964308989536404),
+        (689.6875600619811, 1.525515418979068e-10, 0.9987418730036892),
+        (0.06574199246585886, 0.01713668015682447, 0.524342739714624),
+        # The worst point before the rounding of a + b, a/(a + b) and b/(a + b) was carried exactly.
+        (802.5335441586208, 364.46238711754455, 0.31261349811999317),
+        # Where the method as first written missed the bound: (x - x0) / x0 near -1 loses x for a, b >= 8, and
+        # 1 - I_(1 - x)(b, a) cancels for small b (at the split's worst point above it gave 7.4e7 times the bound).
+        (12.160964710731095, 36.5970243760941, 7.663753456911437e-19), (2.0, 1e-300, 0.9),
+        # The ends of the double range: x = 5e-324, x = 1 - 2^-53, x = 2^-53, a = 5e-324 and a just below 1000.
+        (0.5, 0.5, 5e-324), (0.25, 1000.0, 5e-324), (1000.0, 1e-10, 0.9999999999999999), (1e-10, 1000.0, 2**-53),
+        (5e-324, 1.0, 0.5), (999.9999999999999, 1000.0, 0.5),
+    ]
+    print_cases("incompleteBetaScanCases", "(float * float * float * float)[]", incbeta_rows(incbeta_scan_abxs))
+
+
+SECTIONS = {"gamma": section_gamma, "erf": section_erf, "incgamma": section_incgamma, "incbeta": section_incbeta}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in SECTIONS:

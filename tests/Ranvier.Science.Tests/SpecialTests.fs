@@ -2,6 +2,7 @@
 //   python -I tests/reference/special.py gamma
 //   python -I tests/reference/special.py erf
 //   python -I tests/reference/special.py incgamma
+//   python -I tests/reference/special.py incbeta
 // and the identities and series written in each test.
 module Ranvier.Science.Tests.SpecialTests
 
@@ -264,6 +265,48 @@ let private incompleteGammaCases: (float * float * float * float)[] =
         0.5, 5e-324, 2.508114666398235e-162, 1.0
         5e-324, 0.5, 1.0, 0.0
         1e-12, 5e-324, 0.9999999992561371, 7.438628559798145e-10
+    |]
+
+// python -I tests/reference/special.py incbeta
+let private incompleteBetaCases: (float * float * float * float)[] =
+    [|
+        1.0, 1.0, 0.3, 0.3
+        0.5, 0.5, 0.2, 0.2951672353008666
+        2.0, 3.0, 0.4, 0.5248
+        5.0, 10.0, 0.1, 0.009230212455850002
+        10.0, 5.0, 0.9, 0.99076978754415
+        0.1, 10.0, 0.01, 0.8244896709066988
+        50.0, 50.0, 0.5, 0.5
+        50.0, 60.0, 0.4, 0.12470685834310036
+        200.0, 300.0, 0.4, 0.502428616319932
+        0.001, 0.001, 0.5, 0.5
+        30.0, 2.0, 0.01, 3.0700000000000017e-59
+        1000.0, 1000.0, 0.49, 0.18555265943151145
+        0.5, 1000.0, 0.0001, 0.3452468691021009
+        7.5, 0.25, 0.999, 0.6798199172452066
+    |]
+
+let private incompleteBetaScanCases: (float * float * float * float)[] =
+    [|
+        26.47726446673045, 122.94025167092182, 1.0975185646430612e-11, 9.509433838750919e-262
+        38.04870023325283, 530.2670642127772, 3.682337338018041e-09, 3.4181834998388033e-262
+        526.934562703818, 377.3827200800417, 0.11432183348485359, 5.952196805299492e-252
+        648.9439616655302, 0.13591441112284136, 0.3901655144016795, 4.5684369660301066e-269
+        1.33887962351026, 3.0156634547318433, 3.393673180998573e-171, 2.2727489071285554e-228
+        187.03445169233888, 676.1498087962242, 0.21758279285097282, 0.5318529746991384
+        96.77412815163682, 5.399004386837298, 0.9463164204577453, 0.43248441136500787
+        6.729458999421565, 1.0893450340321005, 0.7964308989536404, 0.2422456528613247
+        689.6875600619811, 1.525515418979068e-10, 0.9987418730036892, 4.200060598935009e-11
+        0.06574199246585886, 0.01713668015682447, 0.524342739714624, 0.20753207703665882
+        802.5335441586208, 364.46238711754455, 0.31261349811999317, 1.7924595508915173e-152
+        12.160964710731095, 36.5970243760941, 7.663753456911437e-19, 3.839137684992898e-210
+        2.0, 1e-300, 0.9, 1.4025850929940459e-300
+        0.5, 0.5, 5e-324, 1.41505216912524e-162
+        0.25, 1000.0, 5e-324, 9.248778146509729e-81
+        1000.0, 1e-10, 0.9999999999999999, 2.9252329666424127e-09
+        1e-10, 1000.0, 1.1102230246251565e-16, 0.999999997074767
+        5e-324, 1.0, 0.5, 1.0
+        999.9999999999999, 1000.0, 0.5, 0.500000000000001
     |]
 
 let private raises (name: string) (f: unit -> float) : unit =
@@ -564,6 +607,141 @@ let tests =
                         "Q(1, NaN)", Special.gammaUpperRegularized 1.0 nan
                         "inverse(NaN, 0.5)", Special.gammaLowerRegularizedInverse nan 0.5
                         "inverse(1, NaN)", Special.gammaLowerRegularizedInverse 1.0 nan
+                    ] do
+                    Expect.isTrue (Double.IsNaN value) name
+            }
+
+            test "incomplete beta matches the reference" {
+                for a, b, x, expected in Array.append incompleteBetaCases incompleteBetaScanCases do
+                    let at = sprintf "I_x(a, b) at a = %.17g, b = %.17g, x = %.17g" a b x
+                    Expect.isTrue (expected >= 1e-300) ("the value is at least 1e-300 " + at)
+                    expectClose 1e-12 0.0 expected (Special.betaRegularized a b x) at
+            }
+
+            test "closed forms" {
+                // I_x(½, ½) = (2/π) asin √x.
+                let arcsine = 2.0 / Math.PI * asin (sqrt 0.2)
+                expectClose 1e-12 0.0 arcsine (Special.betaRegularized 0.5 0.5 0.2) "I_0.2(0.5, 0.5)"
+
+                // I_x(a, 1) = xᵃ and I_x(1, b) = 1 − (1 − x)ᵇ.
+                for s in [ 0.5; 3.0; 20.0 ] do
+                    for x in [ 0.1; 0.5; 0.9 ] do
+                        expectClose 1e-12 0.0 (x ** s) (Special.betaRegularized s 1.0 x) (sprintf "I_%g(%g, 1)" x s)
+                        let expected = 1.0 - (1.0 - x) ** s
+                        expectClose 1e-12 0.0 expected (Special.betaRegularized 1.0 s x) (sprintf "I_%g(1, %g)" x s)
+            }
+
+            test "symmetry" {
+                // I_u(a, b) + I_(1 − u)(b, a) = 1, at u = x where 1 − x is exact (x ≥ 0.5), and otherwise at
+                // u = 1 − (1 − x), whose complement 1 − x is exact because it is at least 0.5.
+                for a, b, x, _ in incompleteBetaCases do
+                    let u = if x >= 0.5 then x else 1.0 - (1.0 - x)
+                    let sum = Special.betaRegularized a b u + Special.betaRegularized b a (1.0 - u)
+                    expectClose 0.0 1e-15 1.0 sum (sprintf "a = %.17g, b = %.17g, u = %.17g" a b u)
+            }
+
+            test "incomplete beta limits" {
+                for a, b in [ 0.5, 2.0; 30.0, 40.0 ] do
+                    Expect.equal (Special.betaRegularized a b 0.0) 0.0 (sprintf "I_0(%g, %g)" a b)
+                    Expect.equal (Special.betaRegularized a b 1.0) 1.0 (sprintf "I_1(%g, %g)" a b)
+            }
+
+            test "the beta inverse round-trips" {
+                for a, b in [ 0.5, 0.5; 1.0, 1.0; 2.0, 5.0; 10.0, 10.0; 0.1, 3.0; 100.0, 200.0 ] do
+                    for p in [ 1e-10; 1e-3; 0.05; 0.5; 0.95; 0.999; 1.0 - 1e-10 ] do
+                        // No double meets the bound at (½, ½) and p = 1 − 1e-10: `the beta inverse at 0 and 1`.
+                        if not (a = 0.5 && b = 0.5 && p = 1.0 - 1e-10) then
+                            let x = Special.betaRegularizedInverse a b p
+                            let at = sprintf "a = %g, b = %g, p = %.17g, x = %.17g" a b p x
+                            expectClose 1e-12 0.0 p (Special.betaRegularized a b x) at
+
+                // The worst cases of a dense seeded scan of 3,532 triples on .NET and JavaScript, in the lower tail,
+                // between the tails and in the upper tail; the deep lower tail, where the method as first written gave
+                // NaN or stopped far from the root; and a tiny a with p near 1, where I_x(a, b) is flat.
+                for a, b, p in
+                    [
+                        520.5272457067133, 482.40015784157526, 9.421765318857333e-291
+                        907.0707331834819, 179.18759978641594, 1.2022354659975348e-248
+                        151.14317283317897, 0.5817356088616344, 3.042247392967044e-284
+                        32.53993451221309, 0.21281835074738098, 0.8879382163125997
+                        1000.0, 1.0, 0.95
+                        1000.0, 1.0, 0.9999999999
+                        388.118816571457, 14.38984189291441, 4.9997291934613676e-161
+                        1000.0, 1.0, 1e-300
+                        1000.0, 1000.0, 1e-300
+                        10.0, 10.0, 1e-300
+                        100.0, 200.0, 1e-300
+                        6.157292559366567e-07, 10.68992791033839, 0.9996490099838193
+                    ] do
+                    let x = Special.betaRegularizedInverse a b p
+                    let at = sprintf "a = %.17g, b = %.17g, p = %.17g, x = %.17g" a b p x
+                    expectClose 1e-12 0.0 p (Special.betaRegularized a b x) at
+            }
+
+            test "the beta inverse near 1 for b below 1" {
+                // There I_x(a, b) steps by more than 1e-12 p between adjacent doubles, spaced 2⁻⁵³ in [½, 1), so no
+                // double meets the bound; the root lies within one double of the result. Cases from the scan.
+                let spacing = Math.Pow (2.0, -53.0)
+
+                for a, b, p in
+                    [
+                        1.8616811097043242, 0.005844168300205897, 0.1799916473362808
+                        351.6137553093089, 0.018377542727907845, 0.23162757870093953
+                        1000.0, 0.5, 0.9999999999
+                    ] do
+                    let x = Special.betaRegularizedInverse a b p
+                    let at = sprintf "a = %.17g, b = %.17g, p = %.17g, x = %.17g" a b p x
+                    let below = Special.betaRegularized a b (x - spacing)
+                    let above = if x < 1.0 then Special.betaRegularized a b (x + spacing) else 1.0
+                    Expect.isTrue (x >= 0.5) ("the result is in [1/2, 1] " + at)
+                    Expect.isTrue (below <= p && p <= above) ("the root lies within one double " + at)
+
+                    for neighbour in [ below; Special.betaRegularized a b x; above ] do
+                        Expect.isGreaterThan (abs (neighbour - p)) (1e-12 * p) ("no double meets the bound " + at)
+            }
+
+            test "the beta inverse at 0 and 1" {
+                Expect.equal (Special.betaRegularizedInverse 2.0 3.0 0.0) 0.0 "p = 0"
+                Expect.equal (Special.betaRegularizedInverse 2.0 3.0 1.0) 1.0 "p = 1"
+
+                // 1 − I_x(½, ½) = I_(1 − x)(½, ½) = (2/π) asin √(1 − x) is 6.7e-9 at x = 1 − 2⁻⁵³, the largest double
+                // below 1, so the root of I_x(½, ½) = 1 − 1e-10, near 1 − 2.5e-20, lies above it: 1 is the double
+                // nearest the root.
+                let gapBelowOne = 2.0 / Math.PI * asin (sqrt (Math.Pow (2.0, -53.0)))
+                Expect.isGreaterThan gapBelowOne (1.0 - (1.0 - 1e-10)) "1 - I below 1, against 1 - p"
+                let nearOne = Special.betaRegularizedInverse 0.5 0.5 (1.0 - 1e-10)
+                Expect.equal nearOne 1.0 "a root nearer 1 than any other double"
+
+                // I_x(0.01, 1) = x^0.01 exceeds 1e-10 at every positive double x, so the root of I_x(0.01, 1) = 1e-10
+                // is below them all.
+                Expect.isGreaterThan (Special.betaRegularized 0.01 1.0 5e-324) 1e-10 "I at 5e-324"
+                let belowAll = Special.betaRegularizedInverse 0.01 1.0 1e-10
+                Expect.equal belowAll 0.0 "a root below the least positive double"
+            }
+
+            test "incomplete beta domain and NaN" {
+                raises "I with a = 0" (fun () -> Special.betaRegularized 0.0 1.0 0.5)
+                raises "I with b = -1" (fun () -> Special.betaRegularized 1.0 -1.0 0.5)
+                raises "I with a = infinity" (fun () -> Special.betaRegularized infinity 1.0 0.5)
+                raises "I with x = -0.1" (fun () -> Special.betaRegularized 1.0 1.0 -0.1)
+                raises "I with x = 1.1" (fun () -> Special.betaRegularized 1.0 1.0 1.1)
+                raises "inverse with a = 0" (fun () -> Special.betaRegularizedInverse 0.0 1.0 0.5)
+                raises "inverse with b = -1" (fun () -> Special.betaRegularizedInverse 1.0 -1.0 0.5)
+                raises "inverse with b = infinity" (fun () -> Special.betaRegularizedInverse 1.0 infinity 0.5)
+                raises "inverse with p = 2" (fun () -> Special.betaRegularizedInverse 1.0 1.0 2.0)
+                raises "inverse with p = -0.1" (fun () -> Special.betaRegularizedInverse 1.0 1.0 -0.1)
+                // An argument outside the domain raises even beside a NaN.
+                raises "I with a = NaN and x = 1.1" (fun () -> Special.betaRegularized nan 1.0 1.1)
+                raises "inverse with a = -1 and p = NaN" (fun () -> Special.betaRegularizedInverse -1.0 1.0 nan)
+
+                for name, value in
+                    [
+                        "I(NaN, 1, 0.5)", Special.betaRegularized nan 1.0 0.5
+                        "I(1, NaN, 0.5)", Special.betaRegularized 1.0 nan 0.5
+                        "I(1, 1, NaN)", Special.betaRegularized 1.0 1.0 nan
+                        "inverse(NaN, 1, 0.5)", Special.betaRegularizedInverse nan 1.0 0.5
+                        "inverse(1, NaN, 0.5)", Special.betaRegularizedInverse 1.0 nan 0.5
+                        "inverse(1, 1, NaN)", Special.betaRegularizedInverse 1.0 1.0 nan
                     ] do
                     Expect.isTrue (Double.IsNaN value) name
             }

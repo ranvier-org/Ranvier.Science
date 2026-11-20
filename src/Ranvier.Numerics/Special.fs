@@ -686,3 +686,358 @@ module Special =
                 finished <- abs step < 1e-15 * x || Double.IsNaN x
 
             x
+
+    /// The most continued-fraction steps or series terms the incomplete beta function takes before giving NaN.
+    let private incompleteBetaCap = 10000
+
+    /// Raises unless a and b are greater than 0 and finite; a NaN passes.
+    let private checkBetaShapes (a: float) (b: float) : unit =
+        if not (Double.IsNaN a) && not (a > 0.0 && a < infinity) then
+            raise (
+                ArgumentOutOfRangeException(
+                    nameof a,
+                    sprintf "The regularised incomplete beta needs a > 0 and finite; a = %g." a
+                )
+            )
+
+        if not (Double.IsNaN b) && not (b > 0.0 && b < infinity) then
+            raise (
+                ArgumentOutOfRangeException(
+                    nameof b,
+                    sprintf "The regularised incomplete beta needs b > 0 and finite; b = %g." b
+                )
+            )
+
+    /// ln Γ(z) − ln Γ(z + s) for z > 0 and s ≥ 0, accurate in absolute terms for small s, where ln Γ(z) and
+    /// ln Γ(z + s) nearly cancel: the sum of ln(1 + s/(z + k)) for z + k < 8, plus, at the first w = z + k ≥ 8,
+    /// Stirling's series −((w − ½) ln(1 + s/w) + s ln(w + s) − s + R(w + s) − R(w)), R the remainder
+    /// `stirlingRemainder`.
+    let private lnGammaDifference (z: float) (s: float) : float =
+        let mutable sum = 0.0
+        let mutable w = z
+
+        while w < 8.0 do
+            sum <- sum + log1p (s / w)
+            w <- w + 1.0
+
+        sum - ((w - 0.5) * log1p (s / w) + s * Math.Log (w + s) - s + (stirlingRemainder (w + s) - stirlingRemainder w))
+
+    /// ln Γ(1 + a) + ln Γ(1 + b) − ln Γ(1 + a + b) = ln(B(a, b) ab/(a + b)) for a, b > 0, by `lnGammaDifference` on the
+    /// smaller shape: of the order of min(a, b) for a small shape, where ln B(a, b) is near −ln a − ln b.
+    let private lnBetaReduced (a: float) (b: float) : float =
+        let s, t = if a <= b then a, b else b, a
+        lnGammaDifference (1.0 + t) s - lnGammaDifference 1.0 s
+
+    /// Which shape, if either, `betaPowers` divides by.
+    type private BetaScale =
+        | Unscaled
+        | OverA
+        | OverB
+
+    /// xᵃ(1 − x)ᵇ/B(a, b), divided by the divisor q that the scale gives (1, a or b), for a, b > 0 and 0 < x < 1, given
+    /// ln x and ln(1 − x); the same for (a, b, x) and (b, a, 1 − x) with the scale swapped.
+    ///
+    /// For a, b ≥ 8 it is √(ab/(2πc)) exp(a(ln(1 + t) − t) + b(ln(1 + u) − u) − R(a) − R(b) + R(c))/q, with c = a + b,
+    /// t = x/x₀ − 1, u = (1 − x)/y₀ − 1, x₀ = a/c, y₀ = b/c and R the remainder `stirlingRemainder`, so that no large
+    /// ln Γ is subtracted. The rounding of c, x₀ and y₀ is carried exactly by Knuth's and Dekker's error-free sum and
+    /// product: with a + b = c + γ, x₀c = a + ρ₁ and y₀c = b + ρ₂, the linear part a t + b u, 0 in exact arithmetic,
+    /// is −(ρ₁t + ρ₂u), and (1 − x) − y₀ is −(x − x₀) − (ρ₁ + ρ₂ + γ)/c. a(ln(1 + t) − t) is `a * log1pmx t` for
+    /// t > −½ and a(ln(x/x₀) − t) below, where forming 1 + t would lose the precision of x; likewise for u, whose
+    /// second form takes 1 − x only for x > ½, where it is exact.
+    ///
+    /// Where a or b is below 1 it is exp(a ln x + b ln(1 − x) − G) times ab/(a + b), b/(a + b) or a/(a + b), with G
+    /// from `lnBetaReduced`: the exponent then holds no large ln a or ln b, and a subnormal shape scales the result.
+    /// Otherwise it is exp(a ln x + b ln(1 − x) − ln B(a, b) − ln q).
+    let private betaPowers (a: float) (b: float) (x: float) (lnX: float) (lnY: float) (scale: BetaScale) : float =
+        if a >= 8.0 && b >= 8.0 then
+            let s =
+                match scale with
+                | Unscaled -> 0.0
+                | OverA -> Math.Log a
+                | OverB -> Math.Log b
+
+            let struct (c, gamma) = twoSum a b
+            let x0 = a / c
+            let y0 = b / c
+            let struct (p1, e1) = twoProduct x0 c
+            let struct (p2, e2) = twoProduct y0 c
+            let rho1 = (p1 - a) + e1
+            let rho2 = (p2 - b) + e2
+            let dx = x - x0
+            let dy = -dx - (rho1 + rho2 + gamma) / c
+            let t = dx / x0
+            let u = dy / y0
+            let xTerm = if t > -0.5 then a * log1pmx t else a * (Math.Log (x / x0) - t)
+            let yTerm = if u > -0.5 then b * log1pmx u else b * (Math.Log ((1.0 - x) / y0) - u)
+            let remainders = stirlingRemainder a + stirlingRemainder b - stirlingRemainder c
+
+            Math.Sqrt (a * b / (2.0 * Math.PI * c))
+            * Math.Exp (xTerm + yTerm - (rho1 * t + rho2 * u) - remainders - s)
+        elif a < 1.0 || b < 1.0 then
+            let shapes =
+                match scale with
+                | Unscaled -> a * (b / (a + b))
+                | OverA -> b / (a + b)
+                | OverB -> a / (a + b)
+
+            Math.Exp (a * lnX + b * lnY - lnBetaReduced a b) * shapes
+        else
+            let s =
+                match scale with
+                | Unscaled -> 0.0
+                | OverA -> Math.Log a
+                | OverB -> Math.Log b
+
+            Math.Exp (a * lnX + b * lnY - betaLn a b - s)
+
+    /// The continued fraction of Numerical Recipes, 3rd edition, §6.4 (`betacf`, from documentation),
+    /// I_x(a, b) = xᵃ(1 − x)ᵇ/(a B(a, b)) · 1/(1 + d₁/(1 + d₂/(1 + …))), with
+    /// d₂ₘ₊₁ = −(a + m)(a + b + m)x/((a + 2m)(a + 2m + 1)) and d₂ₘ = m(b − m)x/((a + 2m − 1)(a + 2m)), by the modified
+    /// Lentz method; it converges fast for x < (a + 1)/(a + b + 2). The first denominator,
+    /// 1 + d₁ = ((a + 1) − (a + b)x)/(a + 1), is near 2/(a + b + 2) at that switch, and its numerator is formed from
+    /// the error-free sums and product of its terms. NaN when it has not converged after `incompleteBetaCap` steps of
+    /// two terms.
+    let private betaContinuedFraction (a: float) (b: float) (x: float) : float =
+        let tiny = 1e-300
+        let struct (qab, qabLow) = twoSum a b
+        let struct (qap, qapLow) = twoSum a 1.0
+        let qam = a - 1.0
+        let struct (p, pLow) = twoProduct qab x
+        let mutable c = 1.0
+        let mutable d = ((qap - p) + qapLow - (pLow + qabLow * x)) / qap
+
+        if abs d < tiny then
+            d <- tiny
+
+        d <- 1.0 / d
+        let mutable h = d
+        let mutable m = 0
+        let mutable converged = false
+
+        while not converged && m < incompleteBetaCap do
+            m <- m + 1
+            let fm = float m
+            let m2 = 2.0 * fm
+            let even = fm * (b - fm) * x / ((qam + m2) * (a + m2))
+            d <- 1.0 + even * d
+
+            if abs d < tiny then
+                d <- tiny
+
+            c <- 1.0 + even / c
+
+            if abs c < tiny then
+                c <- tiny
+
+            d <- 1.0 / d
+            h <- h * (d * c)
+            let odd = -(a + fm) * (qab + fm) * x / ((a + m2) * (qap + m2))
+            d <- 1.0 + odd * d
+
+            if abs d < tiny then
+                d <- tiny
+
+            c <- 1.0 + odd / c
+
+            if abs c < tiny then
+                c <- tiny
+
+            d <- 1.0 / d
+            let delta = d * c
+            h <- h * delta
+            converged <- abs (delta - 1.0) <= 2.220446049250313e-16 // 2⁻⁵²
+
+        if converged then h else nan
+
+    /// I_x(a, b) for b < 1 and b ≤ a, at or above s = (a + 1)/(a + b + 2), where 1 − I_(1 − x)(b, a) would cancel:
+    /// I_s(a, b) + (1/B(a, b)) ∫ₛˣ tᵃ⁻¹(1 − t)ᵇ⁻¹ dt, a sum of two positive terms. With y = 1 − x and yₛ = 1 − s, both
+    /// exact because s ≥ ½, the integral is Σₖ cₖ (yₛᵇ⁺ᵏ − yᵇ⁺ᵏ)/(b + k), with cₖ = (1 − a)(2 − a)…(k − a)/k! from the
+    /// binomial series of (1 − u)ᵃ⁻¹ at u = 1 − t. I_s comes from the continued fraction, and the k = 0 term is
+    /// yᵇ(e^(b ln(yₛ/y)) − 1) by `expm1`. The sum runs until a term leaves it unchanged; its terms fall from k = 2 on,
+    /// because a·yₛ < b + 1 < 2. NaN when a term still changes the sum after `incompleteBetaCap` terms.
+    let private betaAboveSmallB (a: float) (b: float) (x: float) : float =
+        let s = (a + 1.0) / (a + b + 2.0)
+        let ys = 1.0 - s
+        let y = 1.0 - x
+        let atS = betaPowers a b s (Math.Log s) (log1p (-s)) OverA * betaContinuedFraction a b s
+        let ysb = Math.Exp (b * Math.Log ys)
+        let yb = Math.Exp (b * Math.Log y)
+        let first = yb * expm1 (b * Math.Log (ys / y))
+        let mutable tail = 0.0
+        let mutable coefficient = 1.0
+        let mutable powerS = ysb
+        let mutable powerX = yb
+        let mutable k = 0
+        let mutable converged = false
+
+        while not converged && k < incompleteBetaCap do
+            k <- k + 1
+            coefficient <- coefficient * (float k - a) / float k
+            powerS <- powerS * ys
+            powerX <- powerX * y
+            let next = tail + coefficient * (powerS - powerX) / (b + float k)
+            converged <- next = tail
+            tail <- next
+
+        if converged then
+            // 1/(b B(a, b)) = (a/(a + b)) e^(−G), with G from `lnBetaReduced`.
+            atS + (first + b * tail) * (a / (a + b)) * Math.Exp (-(lnBetaReduced a b))
+        else
+            nan
+
+    /// I_x(a, b) for a, b > 0 finite and 0 < x < 1: ½ at x = ½ when a = b, by symmetry. Below s = (a + 1)/(a + b + 2)
+    /// it is the continued fraction; at or above s, 1 − I_(1 − x)(b, a) by the continued fraction, or
+    /// `betaAboveSmallB` where b < 1, b ≤ a and I_(1 − x)(b, a) > ½, where the subtraction would cancel.
+    let private regularizedBeta (a: float) (b: float) (x: float) : float =
+        let lnX = Math.Log x
+        let lnY = log1p (-x)
+
+        if a = b && x = 0.5 then
+            0.5
+        elif x < (a + 1.0) / (a + b + 2.0) then
+            betaPowers a b x lnX lnY OverA * betaContinuedFraction a b x
+        else
+            let complement = betaPowers a b x lnX lnY OverB * betaContinuedFraction b a (1.0 - x)
+
+            if complement > 0.5 && b < 1.0 && b <= a then
+                betaAboveSmallB a b x
+            else
+                1.0 - complement
+
+    /// I_x(a, b) = (1/B(a, b)) ∫₀ˣ tᵃ⁻¹(1 − t)ᵇ⁻¹ dt, the regularised incomplete beta function, for a, b > 0 finite
+    /// and 0 ≤ x ≤ 1: 0 at x = 0, 1 at x = 1, NaN when a, b or x is NaN. Raises `ArgumentOutOfRangeException` when
+    /// a ≤ 0, b ≤ 0, a or b is +∞, or x is outside [0, 1], even with another argument NaN. Relative error at most 1e-12
+    /// over 0 < a, b ≤ 1000 where I_x(a, b) ≥ 1e-300, pinned by the `Special` tests against
+    /// `tests/reference/special.py` (measured here). Cost: a continued fraction of at most 10 000 steps, and for b < 1
+    /// a series of as many terms, NaN past them; a dense scan of a, b ≤ 1000 took at most 92 steps and 53 terms
+    /// (measured here).
+    let betaRegularized (a: float) (b: float) (x: float) : float =
+        checkBetaShapes a b
+
+        if x < 0.0 || x > 1.0 then
+            raise (
+                ArgumentOutOfRangeException(
+                    nameof x,
+                    sprintf "The regularised incomplete beta needs 0 <= x <= 1; x = %g." x
+                )
+            )
+
+        if Double.IsNaN a || Double.IsNaN b || Double.IsNaN x then nan
+        elif x = 0.0 then 0.0
+        elif x = 1.0 then 1.0
+        else regularizedBeta a b x
+
+    /// The starting point of Numerical Recipes, 3rd edition, §6.14.1 (`invbetai`, from documentation). For a, b ≥ 1 it
+    /// is a/(a + b e^(2w)), with w from the normal quantile of p (Abramowitz and Stegun 26.5.22, the quantile by
+    /// 26.2.22), held to bounds of the root: for p < ½ to at least (p a B(a, b))^(1/a), since
+    /// I_x(a, b) ≤ xᵃ/(a B(a, b)) when b ≥ 1, and for p ≥ ½ to at most 1 − ((1 − p) b B(a, b))^(1/b), since
+    /// 1 − I_x(a, b) ≤ (1 − x)ᵇ/(b B(a, b)) when a ≥ 1. Otherwise, with w = (a/(a + b))ᵃ/a + (b/(a + b))ᵇ/b, it is
+    /// (a w p)^(1/a) when p < (a/(a + b))ᵃ/(a w), and 1 − (b w (1 − p))^(1/b) above. A starting point that rounds to 1
+    /// becomes the largest double below 1.
+    let private betaInverseGuess (a: float) (b: float) (p: float) : float =
+        let x =
+            if a >= 1.0 && b >= 1.0 then
+                let tail = if p < 0.5 then p else 1.0 - p
+                let t = Math.Sqrt (-2.0 * Math.Log tail)
+                let upper = t - (2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481))
+                let z = if p < 0.5 then upper else -upper
+                let lambda = (z * z - 3.0) / 6.0
+                let h = 2.0 / (1.0 / (2.0 * a - 1.0) + 1.0 / (2.0 * b - 1.0))
+
+                let w =
+                    z * Math.Sqrt (lambda + h) / h
+                    - (1.0 / (2.0 * b - 1.0) - 1.0 / (2.0 * a - 1.0)) * (lambda + 5.0 / 6.0 - 2.0 / (3.0 * h))
+
+                let normal = a / (a + b * Math.Exp (2.0 * w))
+                let lnB = betaLn a b
+
+                if p < 0.5 then
+                    max normal (Math.Exp ((Math.Log p + Math.Log a + lnB) / a))
+                else
+                    min normal (1.0 - Math.Exp ((Math.Log (1.0 - p) + Math.Log b + lnB) / b))
+            else
+                let t = Math.Exp (a * Math.Log (a / (a + b))) / a
+                let u = Math.Exp (b * Math.Log (b / (a + b))) / b
+                let w = t + u
+
+                if p < t / w then
+                    Math.Pow (a * w * p, 1.0 / a)
+                else
+                    1.0 - Math.Pow (b * w * (1.0 - p), 1.0 / b)
+
+        if x >= 1.0 then 0.9999999999999999 else x // 1 − 2⁻⁵³
+
+    /// The x in [0, 1] with I_x(a, b) = p, for a, b > 0 finite and 0 ≤ p ≤ 1: 0 at p = 0, 1 at p = 1, NaN when a, b or
+    /// p is NaN. Raises `ArgumentOutOfRangeException` when a ≤ 0, b ≤ 0, a or b is +∞, or p is outside [0, 1], even
+    /// with another argument NaN. From the starting point of Numerical Recipes, 3rd edition, §6.14.1 (`invbetai`, from
+    /// documentation), held to bounds of the root in the tails, it takes Halley steps on I_x(a, b) − p, or Newton steps
+    /// on ln I_x(a, b) against ln x while p < ½ and I_x(a, b) is off p by more than a factor e, and halves the distance
+    /// to 0 or 1 where a step would leave (0, 1). It stops when a step is below 1e-15 of the distance from x to the
+    /// nearer end of (0, 1) or below 2⁻⁵² x, when a step below 1e-9 of that distance is no smaller than the one
+    /// before, when I_x(a, b) is within 1e-14 p of p, or after 100 steps. It gives 0 where the starting point
+    /// underflows, 1 where the root lies above the largest double below 1, and NaN where `betaRegularized` gives NaN
+    /// on the way. I_x(a, b) at the result is within relative 1e-12 of p over 0 < a, b ≤ 1000 where the result is a
+    /// normal double and the doubles beside the root resolve p; near 1 for b < 1, where I_x(a, b) can step by more than
+    /// 1e-12 p between adjacent doubles, the root lies within one double of the result. Both are pinned by the
+    /// `Special` tests, and a dense scan found the root below the least positive double wherever the result was 0
+    /// (measured here). Cost: at most 100 evaluations of `betaRegularized`; the scan took at most 12 (measured here).
+    let betaRegularizedInverse (a: float) (b: float) (p: float) : float =
+        checkBetaShapes a b
+
+        if p < 0.0 || p > 1.0 then
+            raise (
+                ArgumentOutOfRangeException(nameof p, sprintf "The inverse of I_x(a, b) needs 0 <= p <= 1; p = %g." p)
+            )
+
+        if Double.IsNaN a || Double.IsNaN b || Double.IsNaN p then
+            nan
+        elif p = 0.0 then
+            0.0
+        elif p = 1.0 then
+            1.0
+        else
+            let mutable x = betaInverseGuess a b p
+            let mutable steps = 0
+            let mutable previous = infinity
+            let mutable finished = false
+
+            while not finished && steps < 100 do
+                if x = 0.0 || x = 1.0 || Double.IsNaN x then
+                    finished <- true
+                else
+                    steps <- steps + 1
+                    let y = 1.0 - x
+                    let value = regularizedBeta a b x
+                    let factor = betaPowers a b x (Math.Log x) (log1p (-x)) Unscaled
+                    let error = value - p
+                    let logRatio = Math.Log (value / p)
+
+                    let step =
+                        if p < 0.5 && value > 0.0 && factor > 0.0 && abs logRatio > 1.0 then
+                            // d ln I/d ln x = xI′/I = F/((1 − x)I), with F = xᵃ(1 − x)ᵇ/B(a, b).
+                            x - x * Math.Exp (-logRatio * y * value / factor)
+                        else
+                            // With I′ = F/(x(1 − x)) and I″/I′ = (a − 1)/x − (b − 1)/(1 − x), the Halley step
+                            // u/(1 − ½uI″/I′) for u = (I − p)/I′, written with r = (I − p)/F so that x and 1 − x are
+                            // only factors. Where F underflows, r is infinite and the step takes the sign of r.
+                            let r = error / factor
+                            let halley = r * x * y / (1.0 - 0.5 * min 1.0 (r * ((a - 1.0) * y - (b - 1.0) * x)))
+
+                            if Double.IsNaN halley && not (Double.IsNaN r) then
+                                (if r > 0.0 then infinity else -infinity)
+                            else
+                                halley
+
+                    let next = x - step
+                    x <- if next <= 0.0 then 0.5 * x elif next >= 1.0 then 0.5 * (x + 1.0) else next
+                    let size = abs step
+                    let nearer = min x (1.0 - x)
+
+                    finished <-
+                        size < max (1e-15 * nearer) (max (2.220446049250313e-16 * x) 1e-323) // 2⁻⁵² x
+                        || (size < 1e-9 * nearer && size >= previous)
+                        || abs error <= 1e-14 * p
+
+                    previous <- size
+
+            x
