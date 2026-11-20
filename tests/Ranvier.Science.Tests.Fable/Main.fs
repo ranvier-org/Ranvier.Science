@@ -43,6 +43,7 @@ let all =
             testList "HistogramTests.fs" [ Ranvier.Science.Tests.HistogramTests.tests ]
             testList "WindowTests.fs" [ Ranvier.Science.Tests.WindowTests.tests ]
             testList "ContinuousTests.fs" [ Ranvier.Science.Tests.ContinuousTests.tests ]
+            testList "DiscreteTests.fs" [ Ranvier.Science.Tests.DiscreteTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]

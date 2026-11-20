@@ -22,6 +22,9 @@ Sections:
             freedom of 0.5 far into either tail, where a single form would cancel or round 1 - x
     dist-edges
             the same at the ends of the parameter ranges that Continuous.fs states for the five families
+    discrete
+            the mass, cdf and survival of the binomial, Poisson, negative binomial and hypergeometric distributions
+            at the points of DiscreteTests.fs
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -107,6 +110,15 @@ Methods:
                 term leaves it unchanged past k = t (general knowledge: the Poisson identity for a whole shape). Both
                 sums are of positive terms. gamma_q forms 1 - P at x / ln 10 extra digits, out of reach at x near 1e5.
                 dist-edges first checks both sums against gamma_q and gamma_p at (3, 2.5) and (40, 37) to 1e-50.
+    discrete    exact fractions at the exact value of each double p, where the masses are rational: the binomial
+                C(n, k) p^k (1 - p)^(n - k), the negative binomial at a whole r, C(k + r - 1, k) p^r (1 - p)^k, and the
+                hypergeometric C(K, k) C(N - K, n - k) / C(N, n); the cdf is the exact sum of the masses at and below
+                k and the survival 1 minus it, each rounded once to a double (float of a fraction rounds correctly).
+                In decimal where they are not: the Poisson mass e^-lambda lambda^k / k!, its cdf and survival from the
+                Poisson sums above (poisson_head and poisson_tail); the negative binomial mass at a real r,
+                prod_(j<k) (r + j) / k! p^r (1 - p)^k, its cdf the sum of those masses and its survival 1 minus that
+                sum at 30 more digits. The section first checks the Poisson sums as dist-edges does, and the decimal
+                negative binomial mass at r = 3 against the exact fraction at k = 0, 5 and 15, to 1e-50.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -1374,6 +1386,330 @@ def section_dist_edges() -> None:
     )
 
 
+def emit_typed(name: str, types: tuple[str, ...], rows: list[tuple]) -> None:
+    """Prints `let private name: struct (types)[]` with one struct tuple per row; an int prints as written."""
+    print(f"let private {name}: struct ({' * '.join(types)})[] =")
+    print("    [|")
+    for row in rows:
+        print("        struct (" + ", ".join(literal(v) for v in row) + ")")
+    print("    |]")
+    print()
+
+
+def exact_rows(masses: dict[int, Fraction], ks) -> list[tuple[int, float, float, float]]:
+    """(k, mass, cdf, survival) at each k from exact masses that cover every j <= k of the support, each rounded once
+    to a double; the survival is 1 minus the exact cdf."""
+    rows = []
+    for k in ks:
+        cdf = sum((m for j, m in masses.items() if j <= k), Fraction(0))
+        rows.append((k, float(masses.get(k, Fraction(0))), float(cdf), float(1 - cdf)))
+    return rows
+
+
+def binomial_masses(n: int, p: float) -> dict[int, Fraction]:
+    """C(n, k) p^k (1 - p)^(n - k) for k = 0..n, exact at the double p."""
+    q = Fraction(p)
+    return {k: math.comb(n, k) * q**k * (1 - q) ** (n - k) for k in range(n + 1)}
+
+
+def negative_binomial_masses(r: int, p: float, k_max: int) -> dict[int, Fraction]:
+    """C(k + r - 1, k) p^r (1 - p)^k for k = 0..k_max and a whole r, exact at the double p."""
+    q = Fraction(p)
+    return {k: math.comb(k + r - 1, k) * q**r * (1 - q) ** k for k in range(k_max + 1)}
+
+
+def hypergeometric_masses(population: int, successes: int, draws: int) -> dict[int, Fraction]:
+    """C(K, k) C(N - K, n - k) / C(N, n) over the support max(0, n - (N - K))..min(n, K), exact."""
+    total = math.comb(population, draws)
+    lo, hi = max(0, draws - (population - successes)), min(draws, successes)
+    return {
+        k: Fraction(math.comb(successes, k) * math.comb(population - successes, draws - k), total)
+        for k in range(lo, hi + 1)
+    }
+
+
+def poisson_mass(lam, k: int) -> Decimal:
+    """e^-lambda lambda^k / k!."""
+    t = Decimal(lam)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = (-t).exp() * t**k / math.factorial(k)
+    return +result
+
+
+def poisson_cdf(lam, k: int) -> Decimal:
+    """P(X <= k), the sum of the masses at 0..k, by poisson_head."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = poisson_head(k + 1, Decimal(lam))
+    return +result
+
+
+def poisson_sf(lam, k: int) -> Decimal:
+    """P(X > k), the sum of the masses from k + 1 on, by poisson_tail."""
+    return poisson_tail(k + 1, Decimal(lam))
+
+
+def negative_binomial_mass(r, p, k: int) -> Decimal:
+    """prod_(j<k) (r + j) / k! p^r (1 - p)^k, for real r > 0."""
+    r, p = Decimal(r), Decimal(p)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        product = Decimal(1)
+        for j in range(k):
+            product *= r + j
+        result = product / math.factorial(k) * (r * p.ln()).exp() * (1 - p) ** k
+    return +result
+
+
+def negative_binomial_cdf(r, p, k: int) -> Decimal:
+    """P(X <= k), the sum of the masses at 0..k."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = sum(negative_binomial_mass(r, p, j) for j in range(k + 1))
+    return +result
+
+
+def negative_binomial_sf(r, p, k: int) -> Decimal:
+    """P(X > k) = 1 - P(X <= k), at 30 more digits than the context's."""
+    with localcontext() as ctx:
+        ctx.prec += 30
+        result = 1 - negative_binomial_cdf(r, p, k)
+    return +result
+
+
+def negative_binomial_log_mass(r, p, k: int) -> Decimal:
+    """ln Gamma(r + k) - ln Gamma(r) - ln k! + r ln p + k ln(1 - p), from ln_gamma_precise, at the context precision
+    plus the digits of its largest term, so that it keeps the context's precision in absolute terms."""
+    r, p = Decimal(r), Decimal(p)
+    with localcontext() as ctx:
+        z = float(r) + k
+        ctx.prec += GUARD + magnitude_digits(z * math.log(z + 1), k * math.log(float(p)))
+        result = ln_gamma_precise(r + k) - ln_gamma_precise(r) - ln_gamma_precise(k + 1) + r * p.ln() + k * (1 - p).ln()
+    return +result
+
+
+def negative_binomial_tail(r, p, k: int) -> Decimal:
+    """P(X > k) for k past the mode: the masses from k + 1 on, the first from its logarithm and each next by the ratio
+    (r + j)(1 - p) / (j + 1), until a term leaves the sum unchanged together with the bound term rho / (1 - rho) on the
+    rest, rho = max(ratio, 1 - p) bounding every later ratio (the ratios fall towards 1 - p for r > 1 and rise towards
+    it for r < 1)."""
+    rr, pp = Decimal(r), Decimal(p)
+    assert k > (r - 1) * (1 - p) / p, (r, p, k)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        term = negative_binomial_log_mass(r, p, k + 1).exp()
+        total = term
+        j = k + 1
+        while True:
+            ratio = (rr + j) * (1 - pp) / (j + 1)
+            term *= ratio
+            j += 1
+            rho = max(ratio, 1 - pp)
+            if total + term * rho / (1 - rho) == total:
+                break
+            total += term
+    return +total
+
+
+def negative_binomial_tail_mass(r, p, k: int) -> Decimal:
+    """The mass from its logarithm, for k past the mode, where the product of negative_binomial_mass is long."""
+    return negative_binomial_log_mass(r, p, k).exp()
+
+
+def negative_binomial_tail_cdf(r, p, k: int) -> Decimal:
+    """P(X <= k) = 1 - P(X > k) for k past the mode, at 30 more digits than the context's."""
+    with localcontext() as ctx:
+        ctx.prec += 30
+        result = 1 - negative_binomial_tail(r, p, k)
+    return +result
+
+
+def geometric_mass(p, k: int) -> Decimal:
+    """p (1 - p)^k, the power by its logarithm at the context precision plus the digits of the exponent."""
+    t = Decimal(p)
+    with localcontext() as ctx:
+        ctx.prec += GUARD + magnitude_digits(k * math.log1p(-p))
+        result = t * (k * (1 - t).ln()).exp()
+    return +result
+
+
+def geometric_sf(p, k: int) -> Decimal:
+    """(1 - p)^(k + 1)."""
+    t = Decimal(p)
+    with localcontext() as ctx:
+        ctx.prec += GUARD + magnitude_digits((k + 1) * math.log1p(-p))
+        result = ((k + 1) * (1 - t).ln()).exp()
+    return +result
+
+
+def geometric_cdf(p, k: int) -> Decimal:
+    """1 - (1 - p)^(k + 1), at 30 more digits than the context's."""
+    with localcontext() as ctx:
+        ctx.prec += 30
+        result = 1 - geometric_sf(p, k)
+    return +result
+
+
+def check_negative_binomial_mass() -> None:
+    """Exits 1 unless the decimal negative binomial mass at r = 3, p = 0.4 equals the exact fraction at k = 0, 5 and 15
+    to 1e-50 at 60 digits."""
+    exact = negative_binomial_masses(3, 0.4, 15)
+    with localcontext() as ctx:
+        ctx.prec = DIGITS
+        tolerance = Decimal("1e-50")
+        for k in (0, 5, 15):
+            difference = negative_binomial_mass(3, 0.4, k) - dec(exact[k])
+            if abs(difference) > tolerance:
+                sys.exit(f"check failed: negative_binomial_mass(3, 0.4, {k}) = exact, off by {difference}")
+        checks = [
+            (
+                "negative_binomial_log_mass(3, 0.4, 15) = ln exact",
+                negative_binomial_log_mass(3, 0.4, 15) - dec(exact[15]).ln(),
+            ),
+            (
+                "negative_binomial_tail(3, 0.4, 15) = 1 - exact cdf",
+                negative_binomial_tail(3, 0.4, 15) - dec(1 - sum(exact.values())),
+            ),
+            (
+                "geometric_mass(0.4, 7) = negative binomial at r = 1",
+                geometric_mass(0.4, 7) - negative_binomial_log_mass(1, 0.4, 7).exp(),
+            ),
+            (
+                "geometric_sf(0.4, 7) = negative binomial tail at r = 1",
+                geometric_sf(0.4, 7) - negative_binomial_tail(1, 0.4, 7),
+            ),
+        ]
+        for label, difference in checks:
+            if abs(difference) > tolerance:
+                sys.exit(f"check failed: {label}, off by {difference}")
+
+
+def negative_binomial_row(r: float, p: float, k: int) -> tuple:
+    """(r, p, k, mass, cdf, survival): at and below the mode from the masses' head sum, past it from the tail sum."""
+    if k <= (r - 1) * (1 - p) / p:
+        fs = (negative_binomial_mass, negative_binomial_cdf, negative_binomial_sf)
+    else:
+        fs = (negative_binomial_tail_mass, negative_binomial_tail_cdf, negative_binomial_tail)
+    return (r, p, k) + tuple(value(f, r, p, k) for f in fs)
+
+
+def section_discrete() -> None:
+    print("// python -I tests/reference/special.py discrete")
+    print()
+    check_poisson_sums()
+    check_negative_binomial_mass()
+    emit_typed(
+        "binomialCases",
+        ("int", "float", "int", "float", "float", "float"),
+        [(10, 0.3) + row for row in exact_rows(binomial_masses(10, 0.3), range(-1, 12))],
+    )
+    tail_points = {(1000, 0.5): [400, 450, 550, 600], (100, 0.01): [0, 3, 5, 10]}
+    emit_typed(
+        "binomialTailCases",
+        ("int", "float", "int", "float", "float", "float"),
+        [(n, p) + row for (n, p), ks in tail_points.items() for row in exact_rows(binomial_masses(n, p), ks)],
+    )
+    poisson_points = {4.0: list(range(21)) + [40], 1000.0: [900, 1100]}
+    emit_typed(
+        "poissonCases",
+        ("float", "int", "float", "float", "float"),
+        [
+            (lam, k, value(poisson_mass, lam, k), value(poisson_cdf, lam, k), value(poisson_sf, lam, k))
+            for lam, ks in poisson_points.items()
+            for k in ks
+        ],
+    )
+    whole = [(3.0, 0.4) + row for row in exact_rows(negative_binomial_masses(3, 0.4, 15), range(16))]
+    real = [
+        (r, p, k, value(negative_binomial_mass, r, p, k), value(negative_binomial_cdf, r, p, k),
+         value(negative_binomial_sf, r, p, k))
+        for r, p in [(2.5, 0.4)]
+        for k in [0, 3, 10]
+    ]
+    emit_typed("negativeBinomialCases", ("float", "float", "int", "float", "float", "float"), whole + real)
+    hypergeometric_points = {(50, 10, 5): range(6), (1000, 400, 100): [20, 40, 60]}
+    emit_typed(
+        "hypergeometricCases",
+        ("int", "int", "int", "int", "float", "float", "float"),
+        [
+            (n, s, d) + row
+            for (n, s, d), ks in hypergeometric_points.items()
+            for row in exact_rows(hypergeometric_masses(n, s, d), ks)
+        ],
+    )
+    # The ends of the domains that Discrete.fs states, and its worst points there.
+    binomial_edges = {
+        (1, 0.3): [0, 1],
+        (1000, 1e-10): [0, 1, 2],
+        (1000, 0.3): [300, 794],
+        (1000, 0.999): [990, 999, 1000],
+    }
+    emit_typed(
+        "binomialEdgeCases",
+        ("int", "float", "int", "float", "float", "float"),
+        [(n, p) + row for (n, p), ks in binomial_edges.items() for row in exact_rows(binomial_masses(n, p), ks)],
+    )
+    poisson_edges = {0.001: [0, 1, 10], 1000.0: [1000, 2374]}
+    emit_typed(
+        "poissonEdgeCases",
+        ("float", "int", "float", "float", "float"),
+        [
+            (lam, k, value(poisson_mass, lam, k), value(poisson_cdf, lam, k), value(poisson_sf, lam, k))
+            for lam, ks in poisson_edges.items()
+            for k in ks
+        ],
+    )
+    geometric_edges = {1e-10: [0, 2000000000], 0.999: [0, 99]}
+    emit_typed(
+        "geometricEdgeCases",
+        ("float", "int", "float", "float", "float"),
+        [
+            (p, k, value(geometric_mass, p, k), value(geometric_cdf, p, k), value(geometric_sf, p, k))
+            for p, ks in geometric_edges.items()
+            for k in ks
+        ],
+    )
+    negative_binomial_edges = {
+        (0.5, 0.002): [0, 100, 270000],
+        (100.0, 0.0909091): [1000, 5000],
+        (0.5, 0.999): [0, 1, 5],
+        (100.0, 0.999): [0, 1, 5],
+    }
+    emit_typed(
+        "negativeBinomialEdgeCases",
+        ("float", "float", "int", "float", "float", "float"),
+        [negative_binomial_row(r, p, k) for (r, p), ks in negative_binomial_edges.items() for k in ks],
+    )
+    hypergeometric_edges = {(1000, 400, 500): [149, 200, 284], (1000, 10, 999): [9, 10]}
+    emit_typed(
+        "hypergeometricEdgeCases",
+        ("int", "int", "int", "int", "float", "float", "float"),
+        [
+            (n, s, d) + row
+            for (n, s, d), ks in hypergeometric_edges.items()
+            for row in exact_rows(hypergeometric_masses(n, s, d), ks)
+        ],
+    )
+    # Where e^-lambda lambda^k / k! from its logarithm loses more than 1e-12, and where the rounding of 1 - p does in
+    # I_(1 - p)(k + 1, r): p = 0.00272 and 0.00938 round 1 - p by 2^-54.
+    poisson_regimes = {300.0: [858, 1040], 1000.0: [2374]}
+    emit_typed(
+        "poissonRegimeCases",
+        ("float", "int", "float", "float", "float"),
+        [
+            (lam, k, value(poisson_mass, lam, k), value(poisson_cdf, lam, k), value(poisson_sf, lam, k))
+            for lam, ks in poisson_regimes.items()
+            for k in ks
+        ],
+    )
+    emit_typed(
+        "negativeBinomialRegimeCases",
+        ("float", "float", "int", "float", "float", "float"),
+        [negative_binomial_row(r, p, k) for r, p, k in [(0.5, 0.00272, 200000), (0.5, 0.00938, 60000)]],
+    )
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -1390,6 +1726,7 @@ SECTIONS = {
     "dist-fisher-f": section_dist_fisher_f,
     "dist-regimes": section_dist_regimes,
     "dist-edges": section_dist_edges,
+    "discrete": section_discrete,
 }
 
 if __name__ == "__main__":

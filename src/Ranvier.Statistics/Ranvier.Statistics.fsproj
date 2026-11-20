@@ -11,6 +11,7 @@
         <Compile Include="Check.fs" />
         <Compile Include="ConfidenceSequence.fs" />
         <Compile Include="Continuous.fs" />
+        <Compile Include="Discrete.fs" />
     </ItemGroup>
 
     <ItemGroup>
