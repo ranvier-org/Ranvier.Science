@@ -15,6 +15,7 @@
         <Compile Include="Describe.fs" />
         <Compile Include="Intervals.fs" />
         <Compile Include="HypothesisTest.fs" />
+        <Compile Include="Sequential.fs" />
     </ItemGroup>
 
     <ItemGroup>
