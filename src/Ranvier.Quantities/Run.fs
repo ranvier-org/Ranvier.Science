@@ -108,7 +108,7 @@ module Run =
     /// <para>
     /// This is <c>create</c> with a start that returns <c>Time = 0</c> and a copy of the array <c>start</c> returned,
     /// and an advance that integrates from the held time over the clock's gap. <c>Time</c> counts from 0 at each start
-    /// and not from the clock. A gap of 0 leaves <c>Time</c> and <c>State</c> unchanged. The state array of each read
+    /// and not from the clock. As for <c>create</c>, an advance happens only when the clock moves forward by more than 1e-9 above its last value; a move inside that band leaves <c>Time</c> and <c>State</c> unchanged. The state array of each read
     /// is a fresh array; the one <c>start</c> returned is never held.
     /// </para>
     /// <para>

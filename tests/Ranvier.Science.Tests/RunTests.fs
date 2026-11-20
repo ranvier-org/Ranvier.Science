@@ -544,7 +544,7 @@ let tests =
                     expectClose 0.0 1e-9 (exp -1.5) run.State.State[0] "y at t = 3")
             }
 
-            test "a repeated clock value leaves the time and state unchanged" {
+            test "a clock move inside the band leaves the time, state and array unchanged" {
                 withGraph (fun () ->
                     let clock = createSignal 0.0
                     let k = createSignal 0.5
@@ -555,9 +555,12 @@ let tests =
                     let time = run.State.Time
                     let state = run.State.State[0]
                     Expect.equal time 2.0 "advanced to the clock"
-                    clock.Value <- 2.0
-                    Expect.equal run.State.Time time "time is unchanged at a repeated clock value"
-                    Expect.equal run.State.State[0] state "state is unchanged at a repeated clock value")
+                    let array = run.State.State
+                    // 1e-10 below the last clock is inside the 1e-9 band of Run.create: no advance
+                    clock.Value <- 2.0 - 1e-10
+                    Expect.equal run.State.Time time "time is unchanged inside the band"
+                    Expect.equal run.State.State[0] state "state is unchanged inside the band"
+                    Expect.isTrue (obj.ReferenceEquals (run.State.State, array)) "the state array is the same instance")
             }
 
             test "a value read by start restarts the run" {
