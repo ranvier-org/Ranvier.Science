@@ -244,16 +244,13 @@ module Quantity =
         model.Check id
         derived model id name unit (createMemo (fun previous -> Tolerance.hold tolerance previous (float (compute ()))))
 
-    /// The value of `compute`, with the standard uncertainty and contributions of its result: first-order propagation
-    /// from the `Entry.Measured` reads in `compute`. A `QuantityKind.Derived` over two memos owned by the current owner,
-    /// the result and its value. `Entry.Uncertainty` and `Entry.Measured` read the result and are notified on every
-    /// recomputation; `Value`, `Entry.Read` and `Entry.Status` read the value and are notified only when it changes, so
-    /// they stay clean through a change of an uncertainty alone. Raises `ArgumentException` as `input` does.
-    let deriveMeasured
+    /// `deriveMeasured` with `source` as the entry's `Source`.
+    let internal deriveMeasuredFrom
         (model: Model)
         (id: string)
         (name: string)
         (unit: UnitOf<'u>)
+        (source: string)
         (compute: unit -> Uncertain)
         : Quantity<'u> =
         model.Check id
@@ -266,7 +263,7 @@ module Quantity =
                 name
                 unit.Info
                 QuantityKind.Derived
-                ""
+                source
                 (fun () -> value.Value)
                 (statusOf value)
                 (fun () -> Uncertain.standardUncertainty result.Value)
@@ -275,6 +272,20 @@ module Quantity =
 
         add model e
         Quantity<'u>(e)
+
+    /// The value of `compute`, with the standard uncertainty and contributions of its result: first-order propagation
+    /// from the `Entry.Measured` reads in `compute`. A `QuantityKind.Derived` over two memos owned by the current owner,
+    /// the result and its value. `Entry.Uncertainty` and `Entry.Measured` read the result and are notified on every
+    /// recomputation; `Value`, `Entry.Read` and `Entry.Status` read the value and are notified only when it changes, so
+    /// they stay clean through a change of an uncertainty alone. Raises `ArgumentException` as `input` does.
+    let deriveMeasured
+        (model: Model)
+        (id: string)
+        (name: string)
+        (unit: UnitOf<'u>)
+        (compute: unit -> Uncertain)
+        : Quantity<'u> =
+        deriveMeasuredFrom model id name unit "" compute
 
     /// The entry of the formula `text` over the identifiers of `model`: a `QuantityKind.Derived` with the unit
     /// `Formula.check` gives and `Entry.Formula` set to `text`, over two memos owned by the current owner, the value

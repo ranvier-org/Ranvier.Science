@@ -12,6 +12,7 @@
         <Compile Include="Model.fs" />
         <Compile Include="Formula.fs" />
         <Compile Include="Quantity.fs" />
+        <Compile Include="Constants.fs" />
         <Compile Include="Run.fs" />
     </ItemGroup>
 
