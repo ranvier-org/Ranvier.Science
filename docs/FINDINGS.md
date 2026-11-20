@@ -4,7 +4,7 @@ The slice built, in this repository, a library of units, quantities, a float pol
 `Run`; a sequential monitor page for a native window and a browser (`examples/Monitor`); and two AstroShowcase pages
 ported onto tracked quantities in a versioned copy of the app (`examples/AstroTracked`). It was built to answer five
 questions, Q1 to Q5, of its design (`Ranvier/docs/superpowers/specs/2026-11-19-science-vertical-slice-design.md`, §1).
-This report gives the answers and what follows from them, as the design's §10 asks. The design documents, and the plans cited below, are not yet published: they are committed only on a local branch of the core checkout.
+This report gives the answers and what follows from them, as the design's §10 asks. The design documents and the plans cited below were merged into the core repository on 2026-11-20 ([ranvier-org/Ranvier#381](https://github.com/ranvier-org/Ranvier/pull/381)); a path that starts `Ranvier/docs/superpowers` names a file [in that commit](https://github.com/ranvier-org/Ranvier/tree/7781bf7/docs/superpowers).
 
 The AstroTracked sources were removed on 2026-11-20 at the owner's request, and the repository's history was rewritten without them before it was made public. Every citation of `examples/AstroTracked` in this file, and every commit id it cites after `3659fd8`, refers to the history before that rewrite, which the owner keeps in a private archive.
 
