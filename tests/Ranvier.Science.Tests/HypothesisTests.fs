@@ -96,6 +96,22 @@ let private allTests: (string * (Alternative -> TestResult))[] =
         "varianceRatio", (fun alt -> HypothesisTest.varianceRatio alt (moments sleepA) (moments sleepB))
     |]
 
+// Minimal-standard LCG (16807 mod 2^31 - 1): exact in doubles, so both targets see the same samples.
+let private seededSamples (seed: float) (pairs: int) : (float[] * float[])[] =
+    let mutable state = seed
+
+    let next () =
+        state <- (state * 16807.0) % 2147483647.0
+        state / 2147483647.0 * 10.0
+
+    [|
+        for i in 0 .. pairs - 1 do
+            let sample (size: int) = Array.init size (fun _ -> next ())
+            let a = sample (3 + i % 10)
+            let b = sample (3 + (i * 7) % 10)
+            a, b
+    |]
+
 let private allNaN (message: string) (r: TestResult) : unit =
     Expect.isTrue (isNaN r.Statistic) (message + " Statistic is NaN")
     Expect.isTrue (isNaN r.DegreesOfFreedom) (message + " DegreesOfFreedom is NaN")
@@ -162,6 +178,37 @@ let tests =
                     let two = (run TwoSided).PValue
                     Expect.isLessThanOrEqual (abs (less + greater - 1.0)) 1e-15 (name + ": Less + Greater is 1")
                     Expect.equal two (min 1.0 (2.0 * min less greater)) (name + ": TwoSided is min 1 (2 min)"))
+
+            testCase "Less + Greater is 1 on seeded samples" (fun () ->
+                // t, z, Welch and pooled measured 0 here; the F tails are separate incomplete-beta evaluations, whose
+                // errors add: measured here on .NET (this test, 5000 pairs) the worst F deviation is 1.4e-15, and
+                // 2.2e-15 by the reviewer over 20000 pairs. The bounds are 1e-15 and 4e-15.
+                let mutable worstF = 0.0
+                let mutable worstOther = 0.0
+
+                for (a, b) in seededSamples 20260401.0 5000 do
+                    let ma = moments a
+                    let mb = moments b
+
+                    let runs: (bool * (Alternative -> TestResult))[] =
+                        [|
+                            false, (fun alt -> HypothesisTest.oneSampleT alt 5.0 ma)
+                            false, (fun alt -> HypothesisTest.oneSampleZ alt 5.0 3.0 ma)
+                            false, (fun alt -> HypothesisTest.welchT alt ma mb)
+                            false, (fun alt -> HypothesisTest.pooledT alt ma mb)
+                            true, (fun alt -> HypothesisTest.varianceRatio alt ma mb)
+                        |]
+
+                    for (isF, run) in runs do
+                        let err = abs ((run Less).PValue + (run Greater).PValue - 1.0)
+
+                        if isF then
+                            worstF <- max worstF err
+                        else
+                            worstOther <- max worstOther err
+
+                Expect.isLessThanOrEqual worstOther 1e-15 ("t, z, Welch and pooled: worst " + string worstOther)
+                Expect.isLessThanOrEqual worstF 4e-15 ("variance ratio: worst " + string worstF))
 
             testCase "fewer than two observations give NaN fields" (fun () ->
                 let one = moments [| 3.0 |]

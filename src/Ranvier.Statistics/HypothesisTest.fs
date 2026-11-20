@@ -32,7 +32,9 @@ type TestResult =
 
 module internal PValue =
     /// Less: the cdf at the statistic; Greater: the survival; TwoSided: min 1 (2 · min cdf survival). NaN statistic
-    /// gives NaN. Each tail is computed directly, so Less and Greater sum to 1 within about 1e-16.
+    /// gives NaN. Each tail is computed directly, so Less + Greater differs from 1 by the two tails' rounding: 0 measured here
+    /// for the t and normal distributions over the seeded samples of the test "Less + Greater is 1 on seeded samples",
+    /// and 2.2e-15 for the F distribution (measured by the reviewer over 20000 random pairs on .NET).
     let continuous (alternative: Alternative) (d: Continuous) (statistic: float) : float =
         if Double.IsNaN statistic then
             nan
