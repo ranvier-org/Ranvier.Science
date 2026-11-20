@@ -224,6 +224,24 @@ let tests =
                     Expect.throwsT<ArgumentException> (fun () -> Constants.declare model |> ignore) "the second declare raises")
             }
 
+            test "a declare that raises leaves the model unchanged" {
+                Expect.isTrue Graph.TryCurrent.IsNone "no graph is active"
+                let model = Model.create "m"
+                Expect.throwsT<InvalidOperationException> (fun () -> Constants.declare model |> ignore) "with no active graph"
+                Expect.isEmpty model.Entries "no entry after the raise with no active graph"
+
+                withGraph (fun () ->
+                    Constants.declare model |> ignore
+                    Expect.equal model.Entries.Length 19 "a retry under a graph declares the 19")
+
+                withGraph (fun () ->
+                    let held = Model.create "held"
+                    // au is the last identifier declare adds.
+                    Quantity.input held "au" "Held" Units.one 1.0 |> ignore
+                    Expect.throwsT<ArgumentException> (fun () -> Constants.declare held |> ignore) "au is held"
+                    Expect.equal (held.Entries |> List.map (fun e -> e.Id)) [ "au" ] "the model holds au alone")
+            }
+
             test "a formula over the constants" {
                 withGraph (fun () ->
                     let model = Model.create "m"
