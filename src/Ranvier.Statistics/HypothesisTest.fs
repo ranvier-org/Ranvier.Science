@@ -326,7 +326,8 @@ module HypothesisTest =
     /// plus the far tail made of the outcomes, counted from the end, whose mass is at most the mass at x times
     /// 1 + 1e-7 (the slack that lets tied outcomes count, as 7 and 13 of 20 at ½), each tail by <c>Discrete.cdf</c>
     /// or <c>Discrete.survival</c>, capped at 1 (read from R's binom.test.R at
-    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/binom.test.R, from documentation;
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/binom.test.R, from documentation,
+    /// including the x = trials · p0 branch that gives 1;
     /// R compares logarithms of the masses where this compares the masses). Every mass comes from
     /// <c>Discrete.mass</c>, the observed one included, so equal masses compare equal. At p0 of 0 or 1 the p-value is
     /// 1 at the only possible count and 0 elsewhere. Statistic is the successes; both degrees-of-freedom fields are
@@ -359,7 +360,9 @@ module HypothesisTest =
     /// p-value is the χ² survival at the statistic (there is no one-sided form). Raises ArgumentException unless the
     /// two arrays have the same length, at least 2; raises ArgumentOutOfRangeException for an observed count that is
     /// negative or not finite and an expected value that is not finite and greater than 0. An observed total of 0
-    /// gives every field NaN. The χ² approximation is poor where an expected count is below about 5 (general
+    /// gives every field NaN, and so does a statistic that is not a finite number (an overflow, or a cell whose
+    /// fitted count underflows to 0 after both arrays are divided by one power of two near the largest entry, which
+    /// keeps the sums from overflowing); it never returns an infinity from an overflow. The χ² approximation is poor where an expected count is below about 5 (general
     /// knowledge). Relative error of the p-value at most 1e-12 over the counts of the test "goodness of fit against
     /// Mendel's counts", which pins it, with the statistic, against the script <c>tests/reference/special.py</c>,
     /// section counts.
@@ -377,19 +380,29 @@ module HypothesisTest =
         for e in expected do
             Check.finitePositive (nameof expected) e
 
-        let totalObserved = Array.sum observed
-
-        if totalObserved <= 0.0 then
+        if Array.forall (fun o -> o = 0.0) observed then
             TestSupport.nanResult
         else
-            let scale = totalObserved / Array.sum expected
+            // Both arrays are divided by one power of two near the largest entry, so their sums cannot overflow; the
+            // statistic is homogeneous of degree 1 in the counts, so it is multiplied back at the end.
+            let largest = Math.Max(Array.max observed, Array.max expected)
+            let step = Math.Pow(2.0, Math.Floor(Math.Log(largest) / Math.Log(2.0)))
+            let o = observed |> Array.map (fun x -> x / step)
+            let e = expected |> Array.map (fun x -> x / step)
+            let scale = Array.sum o / Array.sum e
             let mutable statistic = 0.0
 
-            for i in 0 .. observed.Length - 1 do
-                let e = expected[i] * scale
-                statistic <- statistic + (observed[i] - e) * (observed[i] - e) / e
+            for i in 0 .. o.Length - 1 do
+                let fitted = e[i] * scale
+                let d = o[i] - fitted
+                statistic <- statistic + d * (d / fitted)
 
-            chiSquaredResult statistic (float (observed.Length - 1))
+            let statistic = statistic * step
+
+            if Double.IsNaN statistic || Double.IsInfinity statistic then
+                TestSupport.nanResult
+            else
+                chiSquaredResult statistic (float (observed.Length - 1))
 
     /// <summary>
     /// Pearson's chi-squared test of independence on a table of counts, one array per row: the expected count is

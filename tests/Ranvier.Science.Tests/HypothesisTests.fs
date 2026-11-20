@@ -52,6 +52,9 @@ let private binomialTestCases: struct (int * int * float * float * float * float
         struct (3, 20, 0.3, 0.10708680450373102, 0.9645168677015313, 0.2204182673807094)
         struct (0, 10, 0.2, 0.10737418239999999, 1.0, 0.228248064)
         struct (10, 10, 0.2, 1.0, 1.0240000000000006e-07, 1.0240000000000006e-07)
+        struct (10, 20, 0.5, 0.5880985260009766, 0.5880985260009766, 1.0)
+        struct (13, 20, 0.5, 0.9423408508300781, 0.13158798217773438, 0.26317596435546875)
+        struct (9, 10, 0.7, 0.9717524751000001, 0.14930834589999994, 0.2995766785)
     |]
 
 // Mendel's F2 seed counts against 9 : 3 : 3 : 1: the statistic, then the chi-squared survival at it
@@ -359,6 +362,24 @@ let tests =
                 let expected = 2.0 * Discrete.cdf (Discrete.binomial 20 0.5) 7
                 let actual = (HypothesisTest.binomial TwoSided 7 20 0.5).PValue
                 Expect.isLessThanOrEqual (abs (actual - expected)) (1e-15 * expected) "7 of 20 at 1/2")
+
+            testCase "goodness of fit at counts near the double maximum" (fun () ->
+                // The totals overflow, the statistic does not: observed (9e307, 1.1e308) against equal expected
+                // values has d = 1e307 on each cell, so the statistic is 2 d^2 / e = 2e306 with e = 1e308.
+                let big = HypothesisTest.chiSquaredGoodnessOfFit [| 9e307; 1.1e308 |] [| 1e308; 1e308 |]
+                Expect.isLessThanOrEqual (abs (big.Statistic - 2e306)) (1e-12 * 2e306) "statistic 2e306"
+                Expect.equal big.DegreesOfFreedom 1.0 "degrees of freedom"
+                Expect.equal big.PValue 0.0 "p-value of a statistic of 2e306 underflows to 0"
+
+                // Observed (1, 2) against equal expected values near the maximum: e = 3/2, statistic 1/3.
+                let small = HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; 2.0 |] [| 1e308; 1e308 |]
+                close "statistic 1/3" small.Statistic (1.0 / 3.0)
+                let plain = HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; 2.0 |] [| 1.0; 1.0 |]
+                close "p-value as at expected 1" small.PValue plain.PValue
+
+                // A statistic that cannot be represented, or a cell that underflows, gives NaN and never an infinity.
+                allNaN "unrepresentable" (HypothesisTest.chiSquaredGoodnessOfFit [| 1e308; 1e308 |] [| 1.0; 1e-300 |])
+                allNaN "zero total" (HypothesisTest.chiSquaredGoodnessOfFit [| 0.0; 0.0 |] [| 1.0; 1.0 |]))
 
             testCase "binomial at p0 of 0 and 1" (fun () ->
                 Expect.equal (HypothesisTest.binomial TwoSided 0 10 0.0).PValue 1.0 "p0 0, 0 successes"

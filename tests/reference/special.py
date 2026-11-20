@@ -2007,7 +2007,8 @@ def section_counts() -> None:
     print("// Fisher: a, b, c, d, then the Less, Greater and TwoSided p-values")
     print("// goodness of fit and independence: the statistic, then the chi-squared survival at it")
     print()
-    binomial_points = [(7, 20, 0.5), (3, 20, 0.3), (0, 10, 0.2), (10, 10, 0.2)]
+    # (10, 20, 0.5) is x = n p0, (13, 20, 0.5) and (9, 10, 0.7) are x above n p0 with a far tail of 1 and 6 outcomes
+    binomial_points = [(7, 20, 0.5), (3, 20, 0.3), (0, 10, 0.2), (10, 10, 0.2), (10, 20, 0.5), (13, 20, 0.5), (9, 10, 0.7)]
     emit_typed(
         "binomialTestCases",
         ("int", "int", "float", "float", "float", "float"),
