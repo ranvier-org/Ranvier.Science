@@ -13,6 +13,7 @@
         <Compile Include="Continuous.fs" />
         <Compile Include="Discrete.fs" />
         <Compile Include="Describe.fs" />
+        <Compile Include="Intervals.fs" />
     </ItemGroup>
 
     <ItemGroup>

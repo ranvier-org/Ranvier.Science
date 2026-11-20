@@ -25,6 +25,10 @@ Sections:
     discrete
             the mass, cdf and survival of the binomial, Poisson, negative binomial and hypergeometric distributions
             at the points of DiscreteTests.fs
+    intervals
+            the confidence-interval bounds of IntervalTests.fs: the Student and known-sigma intervals for a mean, the
+            chi-squared interval for a variance, the Wilson, Clopper-Pearson, Agresti-Coull and Jeffreys intervals for
+            a proportion, and the Welch and pooled intervals for a difference of means
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -119,6 +123,15 @@ Methods:
                 prod_(j<k) (r + j) / k! p^r (1 - p)^k, its cdf the sum of those masses and its survival 1 minus that
                 sum at 30 more digits. The section first checks the Poisson sums as dist-edges does, and the decimal
                 negative binomial mass at r = 3 against the exact fraction at k = 0, 5 and 15, to 1e-50.
+    intervals   the sample mean and variance exactly, as fractions of the exact values of the input doubles, rounded once;
+                the quantiles by invert on the exact tail alpha / 2 (alpha the double's exact value) of the Decimal cdfs,
+                the upper quantile on minus the survival: the normal z from normal_sf, the t from student_t_sf, the
+                chi-squared from gamma_cdf and gamma_sf, the beta from beta_cdf and beta_sf. The bounds are the formulas
+                of Intervals.fs written in Decimal, the Welch-Satterthwaite nu as
+                s^2 / (qa^2 / (na - 1) + qb^2 / (nb - 1)) with qa = var_a / na, qb = var_b / nb and s = qa + qb, the
+                square root by Decimal.sqrt. Wilson at 0 successes has lower bound 0 and at n successes upper bound 1
+                (the formula reaches them exactly in real arithmetic); Agresti-Coull is clipped to [0, 1];
+                Clopper-Pearson and Jeffreys have 0 and 1 at the ends.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -1715,6 +1728,147 @@ def section_discrete() -> None:
     )
 
 
+def exact_mean_variance(xs: list[float]) -> tuple[int, Decimal, Decimal]:
+    """(n, mean, sample variance) of the doubles in xs, exact as fractions and rounded once to the context."""
+    values = [Fraction(x) for x in xs]
+    n = len(values)
+    mean = sum(values) / n
+    variance = sum((v - mean) ** 2 for v in values) / (n - 1)
+    return n, dec(mean), dec(variance)
+
+
+def normal_upper(alpha) -> Decimal:
+    """z with P(Z > z) = alpha / 2."""
+    return invert(lambda z: -normal_sf(z), -(Decimal(alpha) / 2), 0, 40)
+
+
+def student_t_upper(nu, alpha) -> Decimal:
+    """t with P(T > t) = alpha / 2 for nu degrees of freedom."""
+    return invert(lambda t: -student_t_sf(nu, t), -(Decimal(alpha) / 2), 0, 1000)
+
+
+def chi_squared_bounds(dof, alpha) -> tuple[Decimal, Decimal]:
+    """The chi-squared quantiles at the tails alpha / 2 below and alpha / 2 above, dof degrees of freedom."""
+    k = Decimal(dof) / 2
+    hi = 10 * (k + 10 * k.sqrt() + 10) * 2
+    tail = Decimal(alpha) / 2
+    lower = invert(lambda x: gamma_cdf(k, 2, x), tail, 0, hi)
+    upper = invert(lambda x: -gamma_sf(k, 2, x), -tail, 0, hi)
+    return lower, upper
+
+
+def beta_bounds(a, b, alpha) -> tuple[Decimal, Decimal]:
+    """The beta quantiles at the tails alpha / 2 below and alpha / 2 above."""
+    tail = Decimal(alpha) / 2
+    lower = invert(lambda x: beta_cdf(a, b, x), tail, 0, 1)
+    upper = invert(lambda x: -beta_sf(a, b, x), -tail, 0, 1)
+    return lower, upper
+
+
+def student_interval(alpha, xs) -> tuple[Decimal, Decimal]:
+    n, mean, variance = exact_mean_variance(xs)
+    half = student_t_upper(n - 1, alpha) * (variance / n).sqrt()
+    return mean - half, mean + half
+
+
+def known_sigma_interval(alpha, sigma, xs) -> tuple[Decimal, Decimal]:
+    n, mean, _ = exact_mean_variance(xs)
+    half = normal_upper(alpha) * Decimal(sigma) / Decimal(n).sqrt()
+    return mean - half, mean + half
+
+
+def variance_interval(alpha, xs) -> tuple[Decimal, Decimal]:
+    n, _, variance = exact_mean_variance(xs)
+    lower, upper = chi_squared_bounds(n - 1, alpha)
+    return (n - 1) * variance / upper, (n - 1) * variance / lower
+
+
+def wilson_interval(alpha, x, n) -> tuple[Decimal, Decimal]:
+    z = normal_upper(alpha)
+    p = Decimal(x) / n
+    z2 = z * z
+    d = 1 + z2 / n
+    centre = (p + z2 / (2 * n)) / d
+    half = z / d * (p * (1 - p) / n + z2 / (4 * n * n)).sqrt()
+    return (Decimal(0) if x == 0 else centre - half), (Decimal(1) if x == n else centre + half)
+
+
+def clopper_pearson_interval(alpha, x, n) -> tuple[Decimal, Decimal]:
+    lower = Decimal(0) if x == 0 else beta_bounds(x, n - x + 1, alpha)[0]
+    upper = Decimal(1) if x == n else beta_bounds(x + 1, n - x, alpha)[1]
+    return lower, upper
+
+
+def agresti_coull_interval(alpha, x, n) -> tuple[Decimal, Decimal]:
+    z = normal_upper(alpha)
+    z2 = z * z
+    tilde_n = n + z2
+    p = (x + z2 / 2) / tilde_n
+    half = z * (p * (1 - p) / tilde_n).sqrt()
+    return max(Decimal(0), p - half), min(Decimal(1), p + half)
+
+
+def jeffreys_interval(alpha, x, n) -> tuple[Decimal, Decimal]:
+    half = Decimal(1) / 2
+    lower = Decimal(0) if x == 0 else beta_bounds(x + half, n - x + half, alpha)[0]
+    upper = Decimal(1) if x == n else beta_bounds(x + half, n - x + half, alpha)[1]
+    return lower, upper
+
+
+def welch_interval(alpha, xs, ys) -> tuple[Decimal, Decimal]:
+    na, ma, va = exact_mean_variance(xs)
+    nb, mb, vb = exact_mean_variance(ys)
+    qa, qb = va / na, vb / nb
+    s = qa + qb
+    nu = s * s / (qa * qa / (na - 1) + qb * qb / (nb - 1))
+    half = student_t_upper(nu, alpha) * s.sqrt()
+    return (ma - mb) - half, (ma - mb) + half
+
+
+def pooled_interval(alpha, xs, ys) -> tuple[Decimal, Decimal]:
+    na, ma, va = exact_mean_variance(xs)
+    nb, mb, vb = exact_mean_variance(ys)
+    pooled_variance = ((na - 1) * va + (nb - 1) * vb) / (na + nb - 2)
+    half = student_t_upper(na + nb - 2, alpha) * (pooled_variance * (Decimal(1) / na + Decimal(1) / nb)).sqrt()
+    return (ma - mb) - half, (ma - mb) + half
+
+
+def bound_pair(f, *args) -> tuple[float, float]:
+    """(lower, upper) of f(*args), each rounded to a double and checked at two precisions by value."""
+    return (
+        value(lambda *a: f(*a)[0], *args),
+        value(lambda *a: f(*a)[1], *args),
+    )
+
+
+INTERVAL_DATA = [5.0, 7.0, 8.0, 9.0, 9.0, 10.0, 11.0, 12.0, 14.0, 15.0]
+SLEEP_A = [0.7, -1.6, -0.2, -1.2, -0.1, 3.4, 3.7, 0.8, 0.0, 2.0]
+SLEEP_B = [1.9, 0.8, 1.1, 0.1, -0.1, 4.4, 5.5, 1.6, 4.6, 3.4]
+
+
+def section_intervals() -> None:
+    print("// python -I tests/reference/special.py intervals")
+    print()
+    check_distribution_helpers()
+    emit("studentIntervalCases", [(a,) + bound_pair(student_interval, a, INTERVAL_DATA) for a in (0.05, 0.01)])
+    emit("knownSigmaIntervalCases", [(0.05, 3.0) + bound_pair(known_sigma_interval, 0.05, 3.0, INTERVAL_DATA)])
+    emit("varianceIntervalCases", [(0.05,) + bound_pair(variance_interval, 0.05, INTERVAL_DATA)])
+    cases = [(0.05, 81, 263), (0.05, 0, 20), (0.05, 20, 20), (0.05, 1, 29), (0.01, 81, 263)]
+    for name, f in (
+        ("wilsonCases", wilson_interval),
+        ("clopperPearsonCases", clopper_pearson_interval),
+        ("agrestiCoullCases", agresti_coull_interval),
+        ("jeffreysCases", jeffreys_interval),
+    ):
+        emit_typed(
+            name,
+            ("float", "int", "int", "float", "float"),
+            [(a, x, n) + bound_pair(f, a, x, n) for a, x, n in cases],
+        )
+    emit("welchIntervalCases", [(0.05,) + bound_pair(welch_interval, 0.05, SLEEP_A, SLEEP_B)])
+    emit("pooledIntervalCases", [(0.05,) + bound_pair(pooled_interval, 0.05, SLEEP_A, SLEEP_B)])
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -1732,6 +1886,7 @@ SECTIONS = {
     "dist-regimes": section_dist_regimes,
     "dist-edges": section_dist_edges,
     "discrete": section_discrete,
+    "intervals": section_intervals,
 }
 
 if __name__ == "__main__":
