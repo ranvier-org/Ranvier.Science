@@ -1,4 +1,4 @@
-// Reference values: the closed forms and identities written in each test (hand-computed products, the 3-4-5 triangle).
+// Reference values: the closed forms and identities written in each test (hand-computed products, the 3-4-5 triangle, the Hilbert inverse formula, A.x = b in integers for x = [1; -2; 3]).
 module Ranvier.Science.Tests.LinearAlgebraTests
 
 open System
@@ -8,6 +8,8 @@ open Ranvier.Numerics
 let private m23 = Matrix.ofRows [| [| 1.0; 2.0; 3.0 |]; [| 4.0; 5.0; 6.0 |] |]
 let private m22a = Matrix.ofRows [| [| 1.0; 2.0 |]; [| 3.0; 4.0 |] |]
 let private m22b = Matrix.ofRows [| [| 5.0; 6.0 |]; [| 7.0; 8.0 |] |]
+let private matA = Matrix.ofRows [| [| 4.0; -2.0; 1.0 |]; [| -2.0; 4.0; -2.0 |]; [| 1.0; -2.0; 4.0 |] |]
+let private vecB = [| 11.0; -16.0; 17.0 |]
 
 [<Tests>]
 let tests =
@@ -163,5 +165,149 @@ let tests =
                 Expect.throwsT<ArgumentOutOfRangeException>
                     (fun () -> Matrix.init 2 -1 (fun _ _ -> 0.0) |> ignore)
                     "negative columns"
+            }
+
+            test "LU solves an integer system" {
+                let x = [| 1.0; -2.0; 3.0 |]
+                let d = Matrix.lu matA |> expectOk "lu"
+                let viaLu = LuDecomposition.solve d vecB
+                let direct = Matrix.solve matA vecB |> expectOk "solve"
+
+                for i in 0 .. 2 do
+                    expectClose 0.0 1e-14 x[i] viaLu[i] (sprintf "lu component %d" i)
+                    expectClose 0.0 1e-14 x[i] direct[i] (sprintf "solve component %d" i)
+            }
+
+            test "determinant" {
+                expectClose 1e-15 0.0 -2.0 (Matrix.determinant m22a) "2 x 2"
+                expectClose 1e-14 0.0 36.0 (Matrix.determinant matA) "3 x 3, cofactor expansion 4*12 + 2*(-6) + 1*0"
+            }
+
+            test "the inverse of the Hilbert matrix of order 5" {
+                let n = 5
+
+                // C(a, b) in exact integers (a <= 10, so every intermediate fits in an int64).
+                let binomial (a: int) (b: int) : int64 =
+                    if b < 0 || b > a then
+                        0L
+                    else
+                        let mutable r = 1L
+
+                        for t in 1 .. b do
+                            r <- r * int64 (a - b + t) / int64 t
+
+                        r
+
+                // Closed form (-1)^(i+j) (i+j+1) C(n+i, n-j-1) C(n+j, n-i-1) C(i+j, i)^2, 0-based.
+                let closed i j =
+                    let c = binomial (i + j) i
+                    let magnitude = int64 (i + j + 1) * binomial (n + i) (n - j - 1) * binomial (n + j) (n - i - 1) * c * c
+                    float (if (i + j) % 2 = 0 then magnitude else -magnitude)
+
+                let h = Matrix.init n n (fun i j -> 1.0 / float (i + j + 1))
+                let inv = Matrix.inverse h |> expectOk "inverse"
+
+                for i in 0 .. n - 1 do
+                    for j in 0 .. n - 1 do
+                        expectClose 1e-9 0.0 (closed i j) (Matrix.get inv i j) (sprintf "entry %d,%d" i j)
+            }
+
+            test "inverse times the matrix is the identity" {
+                let m =
+                    Matrix.init 6 6 (fun i j -> float ((i * 7 + j * 3) % 11) - 5.0 + (if i = j then 20.0 else 0.0))
+
+                let product = Matrix.multiply (Matrix.inverse m |> expectOk "inverse") m
+                let id6 = Matrix.identity 6
+
+                for i in 0 .. 5 do
+                    for j in 0 .. 5 do
+                        expectClose 0.0 1e-13 (Matrix.get id6 i j) (Matrix.get product i j) (sprintf "entry %d,%d" i j)
+            }
+
+            test "a singular matrix gives Error" {
+                let s = Matrix.ofRows [| [| 1.0; 2.0 |]; [| 2.0; 4.0 |] |]
+                Matrix.lu s |> expectError "singular" "lu"
+                Matrix.solve s [| 1.0; 2.0 |] |> expectError "singular" "solve"
+                Matrix.inverse s |> expectError "singular" "inverse"
+                Expect.equal (Matrix.determinant s) 0.0 "determinant"
+                let z = Matrix.zero 3 3
+                Matrix.lu z |> expectError "singular" "lu of zero"
+                Matrix.solve z [| 1.0; 2.0; 3.0 |] |> expectError "singular" "solve of zero"
+                Matrix.inverse z |> expectError "singular" "inverse of zero"
+                Expect.equal (Matrix.determinant z) 0.0 "determinant of zero"
+            }
+
+            test "scale does not decide singularity" {
+                let expected = [| 1.0; -2.0; 3.0 |]
+
+                for factor in [ 1e-150; 1e150 ] do
+                    let scaled = Matrix.scale factor matA
+                    Matrix.lu scaled |> expectOk "lu" |> ignore
+                    let x = Matrix.solve scaled (Vector.scale factor vecB) |> expectOk "solve"
+
+                    for i in 0 .. 2 do
+                        expectClose 0.0 1e-14 expected[i] x[i] (sprintf "factor %g component %d" factor i)
+            }
+
+            test "a decomposition is reusable" {
+                let d = Matrix.lu matA |> expectOk "lu"
+                let first = LuDecomposition.solve d vecB
+                let snapshot = Array.copy first
+                first[0] <- 99.0
+                let second = LuDecomposition.solve d vecB
+                Expect.equal second snapshot "the second solve is unaffected by mutating the first result"
+                Expect.equal (LuDecomposition.solve d vecB) second "equal arrays"
+            }
+
+            test "shapes" {
+                Expect.throwsT<ArgumentException> (fun () -> Matrix.lu (Matrix.zero 2 3) |> ignore) "lu non-square"
+                Expect.throwsT<ArgumentException> (fun () -> Matrix.solve matA [| 1.0; 2.0 |] |> ignore) "solve length"
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> LuDecomposition.solve (Matrix.lu matA |> expectOk "lu") [| 1.0; 2.0 |] |> ignore)
+                    "decomposition solve length"
+
+                let empty = Matrix.lu (Matrix.zero 0 0) |> expectOk "0 x 0"
+                Expect.equal (LuDecomposition.determinant empty) 1.0 "0 x 0 determinant"
+                Expect.equal (LuDecomposition.solve empty [||]) [||] "0 x 0 solve"
+            }
+
+            test "a NaN or infinite entry gives NaN results" {
+                let withEntry i j v =
+                    Matrix.init 3 3 (fun r c -> if r = i && c = j then v else Matrix.get matA r c)
+
+                let nanLu = Matrix.lu (withEntry 0 0 nan) |> expectOk "lu with NaN"
+                let x = LuDecomposition.solve nanLu vecB
+                Expect.equal x.Length 3 "length"
+                Expect.isTrue (Array.forall Double.IsNaN x) "solve is all NaN"
+                Expect.isTrue (Double.IsNaN(LuDecomposition.determinant nanLu)) "determinant is NaN"
+
+                let nanCholesky = Matrix.cholesky (withEntry 1 0 nan) |> expectOk "cholesky with NaN"
+                Expect.isTrue (Array.forall Double.IsNaN (CholeskyDecomposition.solve nanCholesky vecB)) "cholesky NaN"
+
+                let infLu = Matrix.lu (withEntry 0 0 infinity) |> expectOk "lu with infinity"
+                Expect.isTrue (Double.IsNaN(LuDecomposition.determinant infLu)) "infinite entry, determinant"
+                Expect.isTrue (Double.IsNaN(Matrix.determinant (withEntry 0 0 infinity))) "Matrix.determinant"
+
+                let inv = Matrix.inverse (withEntry 0 0 nan) |> expectOk "inverse with NaN"
+                Expect.isTrue (Array.forall Double.IsNaN (Matrix.toRows inv |> Array.concat)) "inverse is all NaN"
+            }
+
+            test "Cholesky solves a positive definite system" {
+                let d = Matrix.cholesky matA |> expectOk "cholesky"
+                let x = CholeskyDecomposition.solve d vecB
+                let expected = [| 1.0; -2.0; 3.0 |]
+
+                for i in 0 .. 2 do
+                    expectClose 0.0 1e-14 expected[i] x[i] (sprintf "component %d" i)
+
+                Matrix.cholesky (Matrix.scale 1e-150 matA) |> expectOk "scaled" |> ignore
+            }
+
+            test "Cholesky rejects what it cannot factor" {
+                Matrix.cholesky m22a |> expectError "not symmetric" "asymmetric"
+                Matrix.cholesky (Matrix.ofRows [| [| 1.0; 2.0 |]; [| 2.0; 1.0 |] |]) |> expectError "not positive definite" "indefinite"
+                Matrix.cholesky (Matrix.ofRows [| [| 1.0; 1.0 |]; [| 1.0; 1.0 |] |]) |> expectError "not positive definite" "semidefinite"
+                Expect.throwsT<ArgumentException> (fun () -> Matrix.cholesky (Matrix.zero 2 3) |> ignore) "non-square"
             }
         ]

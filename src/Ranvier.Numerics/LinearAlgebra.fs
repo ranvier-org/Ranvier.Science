@@ -69,6 +69,128 @@ type Matrix =
           ColumnCount: int
           Data: float[] }
 
+/// The LU factorisation P·A = L·U of a square matrix by partial pivoting, made by `Matrix.lu`. Immutable. A
+/// decomposition of a matrix holding a NaN or infinite entry reads NaN everywhere.
+type LuDecomposition =
+    internal
+        { Order: int
+          /// L below the diagonal (unit diagonal implied) and U on and above it, by rows.
+          Factors: float[]
+          /// Row i of P·A is row Permutation[i] of A.
+          Permutation: int[]
+          Sign: float
+          NonFinite: bool }
+
+/// Solving and the determinant from an `LuDecomposition`. Raises `ArgumentException` naming both lengths for a
+/// right-hand side of the wrong length.
+module LuDecomposition =
+    /// The x with A·x = b, by forward and back substitution with every sum in increasing index order. Returns a fresh
+    /// array on every call, so one decomposition serves many right-hand sides; an order-0 decomposition gives an empty
+    /// array. A decomposition of a matrix with a non-finite entry gives a fresh array of NaN. Raises
+    /// `ArgumentException` unless the right-hand side's length equals the matrix order. Cost O(n²). Uses only + − × ÷.
+    let solve (decomposition: LuDecomposition) (b: float[]) : float[] =
+        let n = decomposition.Order
+
+        if b.Length <> n then
+            raise (
+                ArgumentException(
+                    sprintf
+                        "solve needs a right-hand side as long as the matrix order; the order is %d and the vector has length %d."
+                        n
+                        b.Length
+                )
+            )
+
+        if decomposition.NonFinite then
+            Array.create n nan
+        else
+            let f = decomposition.Factors
+            let x: float[] = Array.zeroCreate n
+
+            for i in 0 .. n - 1 do
+                let mutable sum = b[decomposition.Permutation[i]]
+
+                for j in 0 .. i - 1 do
+                    sum <- sum - f[i * n + j] * x[j]
+
+                x[i] <- sum
+
+            for i in n - 1 .. -1 .. 0 do
+                let mutable sum = x[i]
+
+                for j in i + 1 .. n - 1 do
+                    sum <- sum - f[i * n + j] * x[j]
+
+                x[i] <- sum / f[i * n + i]
+
+            x
+
+    /// The determinant: the product of U's diagonal in index order, times the permutation's sign; 1 for order 0. NaN
+    /// for a decomposition of a matrix with a non-finite entry. The product can overflow or underflow. Cost O(n).
+    let determinant (decomposition: LuDecomposition) : float =
+        if decomposition.NonFinite then
+            nan
+        else
+            let n = decomposition.Order
+            let mutable product = decomposition.Sign
+
+            for i in 0 .. n - 1 do
+                product <- product * decomposition.Factors[i * n + i]
+
+            product
+
+/// The Cholesky factorisation A = L·Lᵀ of a symmetric positive definite matrix, made by `Matrix.cholesky`. Immutable.
+/// A decomposition of a matrix holding a NaN or infinite entry reads NaN everywhere.
+type CholeskyDecomposition =
+    internal
+        { Order: int
+          /// L by rows; entries above the diagonal are 0.
+          Lower: float[]
+          NonFinite: bool }
+
+/// Solving from a `CholeskyDecomposition`.
+module CholeskyDecomposition =
+    /// The x with A·x = b, by two triangular substitutions with every sum in increasing index order. Returns a fresh
+    /// array on every call; an order-0 decomposition gives an empty array. A decomposition of a matrix with a
+    /// non-finite entry gives a fresh array of NaN. Raises `ArgumentException` naming both lengths unless the
+    /// right-hand side's length equals the matrix order. Cost O(n²). Uses only + − × ÷.
+    let solve (decomposition: CholeskyDecomposition) (b: float[]) : float[] =
+        let n = decomposition.Order
+
+        if b.Length <> n then
+            raise (
+                ArgumentException(
+                    sprintf
+                        "solve needs a right-hand side as long as the matrix order; the order is %d and the vector has length %d."
+                        n
+                        b.Length
+                )
+            )
+
+        if decomposition.NonFinite then
+            Array.create n nan
+        else
+            let l = decomposition.Lower
+            let x: float[] = Array.zeroCreate n
+
+            for i in 0 .. n - 1 do
+                let mutable sum = b[i]
+
+                for j in 0 .. i - 1 do
+                    sum <- sum - l[i * n + j] * x[j]
+
+                x[i] <- sum / l[i * n + i]
+
+            for i in n - 1 .. -1 .. 0 do
+                let mutable sum = x[i]
+
+                for j in i + 1 .. n - 1 do
+                    sum <- sum - l[j * n + i] * x[j]
+
+                x[i] <- sum / l[i * n + i]
+
+            x
+
 /// Dense matrices. A negative size raises `ArgumentOutOfRangeException`, an index outside the matrix raises
 /// `ArgumentOutOfRangeException`, and a shape or length mismatch raises `ArgumentException` naming both shapes or
 /// lengths. Every function returns a fresh matrix or array and leaves its inputs unchanged.
@@ -270,3 +392,227 @@ module Matrix =
                 sum <- sum + m.Data[i * m.ColumnCount + j] * v[j]
 
             sum)
+
+    let private checkSquare (name: string) (m: Matrix) : unit =
+        if m.RowCount <> m.ColumnCount then
+            raise (
+                ArgumentException(
+                    sprintf "%s needs a square matrix; the shape is %d x %d." name m.RowCount m.ColumnCount
+                )
+            )
+
+    /// ε = 2⁻⁵², the spacing of doubles at 1.
+    let private epsilon = 2.220446049250313e-16
+
+    /// The largest |entry|, and whether any entry is NaN or infinite.
+    let private scan (m: Matrix) : struct (float * bool) =
+        let mutable largest = 0.0
+        let mutable nonFinite = false
+
+        for x in m.Data do
+            if Double.IsNaN x || Double.IsInfinity x then nonFinite <- true
+            elif abs x > largest then largest <- abs x
+
+        struct (largest, nonFinite)
+
+    /// The LU factorisation P·A = L·U by Gaussian elimination with partial pivoting (the pivot is the first entry of
+    /// largest magnitude in the column), every update in a fixed order using only + − × ÷ and comparisons. Returns
+    /// `Error "singular …"` when a pivot satisfies |uₖₖ| ≤ n·ε·max|aᵢⱼ|, with ε = 2⁻⁵², a threshold relative to the
+    /// scale of the matrix, so multiplying the matrix by a constant does not change the verdict. A 0 × 0 matrix gives
+    /// `Ok`. A matrix holding a NaN or infinite entry gives `Ok` with no singularity check, and every number read
+    /// through the result is NaN. Raises `ArgumentException` for a non-square matrix. Cost O(n³).
+    let lu (a: Matrix) : Result<LuDecomposition, string> =
+        checkSquare "lu" a
+        let n = a.RowCount
+        let struct (largest, nonFinite) = scan a
+
+        if nonFinite then
+            Ok(
+                { Order = n
+                  Factors = Array.zeroCreate (n * n)
+                  Permutation = Array.init n id
+                  Sign = 1.0
+                  NonFinite = true }
+                : LuDecomposition
+            )
+        else
+            let f = Array.copy a.Data
+            let permutation = Array.init n id
+            let threshold = float n * epsilon * largest
+            let mutable sign = 1.0
+            let mutable singularAt = -1
+            let mutable k = 0
+
+            while singularAt < 0 && k < n do
+                let mutable p = k
+                let mutable best = abs f[k * n + k]
+
+                for i in k + 1 .. n - 1 do
+                    let v = abs f[i * n + k]
+
+                    if v > best then
+                        best <- v
+                        p <- i
+
+                if best <= threshold then
+                    singularAt <- k
+                else
+                    if p <> k then
+                        for j in 0 .. n - 1 do
+                            let t = f[k * n + j]
+                            f[k * n + j] <- f[p * n + j]
+                            f[p * n + j] <- t
+
+                        let t = permutation[k]
+                        permutation[k] <- permutation[p]
+                        permutation[p] <- t
+                        sign <- -sign
+
+                    for i in k + 1 .. n - 1 do
+                        let factor = f[i * n + k] / f[k * n + k]
+                        f[i * n + k] <- factor
+
+                        for j in k + 1 .. n - 1 do
+                            f[i * n + j] <- f[i * n + j] - factor * f[k * n + j]
+
+                    k <- k + 1
+
+            if singularAt >= 0 then
+                Error(
+                    sprintf
+                        "lu: the matrix is singular to working precision; the pivot in column %d is at most %g, the threshold n·ε·max|aᵢⱼ|."
+                        singularAt
+                        threshold
+                )
+            else
+                Ok(
+                    { Order = n
+                      Factors = f
+                      Permutation = permutation
+                      Sign = sign
+                      NonFinite = false }
+                    : LuDecomposition
+                )
+
+    /// The x with A·x = b through `lu`; `Error "singular …"` as `lu` gives it, and NaN throughout for a non-finite
+    /// entry. Raises `ArgumentException` for a non-square matrix, or for a vector whose length differs from the
+    /// matrix order (checked before the factorisation). Cost O(n³).
+    let solve (a: Matrix) (b: float[]) : Result<float[], string> =
+        checkSquare "solve" a
+
+        if b.Length <> a.RowCount then
+            raise (
+                ArgumentException(
+                    sprintf
+                        "solve needs a right-hand side as long as the matrix order; the order is %d and the vector has length %d."
+                        a.RowCount
+                        b.Length
+                )
+            )
+
+        lu a |> Result.map (fun d -> LuDecomposition.solve d b)
+
+    /// The inverse through `lu`, one solve per column of the identity: `Error "singular …"` as `lu` gives it, and a
+    /// matrix of NaN for a non-finite entry. Raises `ArgumentException` for a non-square matrix. Cost O(n³).
+    let inverse (a: Matrix) : Result<Matrix, string> =
+        checkSquare "inverse" a
+        let n = a.RowCount
+
+        lu a
+        |> Result.map (fun d ->
+            let data: float[] = Array.zeroCreate (n * n)
+
+            for j in 0 .. n - 1 do
+                let e = Array.init n (fun i -> if i = j then 1.0 else 0.0)
+                let x = LuDecomposition.solve d e
+
+                for i in 0 .. n - 1 do
+                    data[i * n + j] <- x[i]
+
+            { RowCount = n
+              ColumnCount = n
+              Data = data })
+
+    /// The determinant through `lu`: 0 when `lu` gives `Error` (a pivot within n·ε·max|aᵢⱼ| of 0), NaN for a
+    /// non-finite entry, and 1 for a 0 × 0 matrix. Raises `ArgumentException` for a non-square matrix. Cost O(n³).
+    let determinant (a: Matrix) : float =
+        match lu a with
+        | Ok d -> LuDecomposition.determinant d
+        | Error _ -> 0.0
+
+    /// The Cholesky factorisation A = L·Lᵀ, reading the lower triangle, every sum in increasing index order using only
+    /// + − × ÷ and `sqrt`. Returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤ 1e-12·max|aᵢⱼ| for every pair, and
+    /// `Error "not positive definite …"` when a pivot dₖ ≤ n·ε·max|aᵢᵢ|, with ε = 2⁻⁵². Both thresholds are relative
+    /// to the scale of the matrix. A 0 × 0 matrix gives `Ok`. A matrix holding a NaN or infinite entry gives `Ok` with
+    /// no symmetry or definiteness check, and every number read through the result is NaN. Raises `ArgumentException`
+    /// for a non-square matrix. Cost O(n³).
+    let cholesky (a: Matrix) : Result<CholeskyDecomposition, string> =
+        checkSquare "cholesky" a
+        let n = a.RowCount
+        let struct (largest, nonFinite) = scan a
+
+        if nonFinite then
+            Ok(
+                { Order = n
+                  Lower = Array.zeroCreate (n * n)
+                  NonFinite = true }
+                : CholeskyDecomposition
+            )
+        else
+            let mutable asymmetric = false
+
+            for i in 0 .. n - 1 do
+                for j in 0 .. i - 1 do
+                    if abs (a.Data[i * n + j] - a.Data[j * n + i]) > 1e-12 * largest then
+                        asymmetric <- true
+
+            if asymmetric then
+                Error "cholesky: the matrix is not symmetric; some |aᵢⱼ − aⱼᵢ| exceeds 1e-12·max|aᵢⱼ|."
+            else
+                let mutable largestDiagonal = 0.0
+
+                for i in 0 .. n - 1 do
+                    if abs a.Data[i * n + i] > largestDiagonal then
+                        largestDiagonal <- abs a.Data[i * n + i]
+
+                let threshold = float n * epsilon * largestDiagonal
+                let l: float[] = Array.zeroCreate (n * n)
+                let mutable failedAt = -1
+                let mutable j = 0
+
+                while failedAt < 0 && j < n do
+                    let mutable d = a.Data[j * n + j]
+
+                    for k in 0 .. j - 1 do
+                        d <- d - l[j * n + k] * l[j * n + k]
+
+                    if d <= threshold then
+                        failedAt <- j
+                    else
+                        let diagonal = sqrt d
+                        l[j * n + j] <- diagonal
+
+                        for i in j + 1 .. n - 1 do
+                            let mutable sum = a.Data[i * n + j]
+
+                            for k in 0 .. j - 1 do
+                                sum <- sum - l[i * n + k] * l[j * n + k]
+
+                            l[i * n + j] <- sum / diagonal
+
+                        j <- j + 1
+
+                if failedAt >= 0 then
+                    Error(
+                        sprintf
+                            "cholesky: the matrix is not positive definite; the pivot in column %d is at most %g, the threshold n·ε·max|aᵢᵢ|."
+                            failedAt
+                            threshold
+                    )
+                else
+                    Ok(
+                        { Order = n
+                          Lower = l
+                          NonFinite = false }
+                        : CholeskyDecomposition
+                    )
