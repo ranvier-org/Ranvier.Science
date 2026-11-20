@@ -3,7 +3,7 @@ namespace Ranvier.Numerics
 open System
 
 /// How an `Interpolant` joins its knots.
-type InterpolationKind =
+type internal InterpolationKind =
     | Linear
     | NaturalCubic
     | MonotoneCubic
