@@ -191,6 +191,112 @@ module CholeskyDecomposition =
 
             x
 
+/// The Householder QR factorisation A = Q·R of a matrix with at least as many rows as columns, made by `Matrix.qr`.
+/// Immutable. A decomposition of a matrix holding a NaN or infinite entry reads NaN everywhere.
+type QrDecomposition =
+    internal
+        { Rows: int
+          Columns: int
+          /// R on and above the diagonal; below it the Householder vectors, each with an implied leading 1, by rows.
+          Factors: float[]
+          /// The scalar τₖ of each reflection Hₖ = I − τₖ·vₖ·vₖᵀ; 0 where the column needed none.
+          Taus: float[]
+          /// |Rₖₖ| at or below this value marks a rank-deficient design.
+          RankThreshold: float
+          NonFinite: bool }
+
+/// Least squares and the triangular factor from a `QrDecomposition`.
+module QrDecomposition =
+    /// The x minimising ‖A·x − y‖₂: Qᵀy by the stored reflections, then back substitution through R with every sum in
+    /// increasing index order. Returns `Error "rank-deficient …"` when some |Rₖₖ| ≤ max(m, n)·ε·(the largest column
+    /// norm of A), with ε = 2⁻⁵², a threshold relative to the scale of the matrix. A decomposition of a matrix with a
+    /// non-finite entry gives `Ok` with a fresh array of NaN, and no rank check runs. Raises `ArgumentException`
+    /// naming both lengths unless the length of y equals the row count (checked first). Returns a fresh array on every
+    /// call. Cost O(mn). Uses only + − × ÷.
+    let leastSquares (decomposition: QrDecomposition) (y: float[]) : Result<float[], string> =
+        let m = decomposition.Rows
+        let n = decomposition.Columns
+
+        if y.Length <> m then
+            raise (
+                ArgumentException(
+                    sprintf
+                        "leastSquares needs a right-hand side as long as the row count; the matrix has %d rows and the vector has length %d."
+                        m
+                        y.Length
+                )
+            )
+
+        if decomposition.NonFinite then
+            Ok(Array.create n nan)
+        else
+            let f = decomposition.Factors
+            let mutable deficientAt = -1
+
+            for k in n - 1 .. -1 .. 0 do
+                if abs f[k * n + k] <= decomposition.RankThreshold then
+                    deficientAt <- k
+
+            if deficientAt >= 0 then
+                Error(
+                    sprintf
+                        "leastSquares: the design is rank-deficient; |R| in column %d is at most %g, the threshold max(m, n)·ε·(largest column norm)."
+                        deficientAt
+                        decomposition.RankThreshold
+                )
+            else
+                let c = Array.copy y
+
+                for k in 0 .. n - 1 do
+                    let tau = decomposition.Taus[k]
+
+                    if tau <> 0.0 then
+                        let mutable w = c[k]
+
+                        for i in k + 1 .. m - 1 do
+                            w <- w + f[i * n + k] * c[i]
+
+                        w <- tau * w
+                        c[k] <- c[k] - w
+
+                        for i in k + 1 .. m - 1 do
+                            c[i] <- c[i] - w * f[i * n + k]
+
+                let x: float[] = Array.zeroCreate n
+
+                for i in n - 1 .. -1 .. 0 do
+                    let mutable sum = c[i]
+
+                    for j in i + 1 .. n - 1 do
+                        sum <- sum - f[i * n + j] * x[j]
+
+                    x[i] <- sum / f[i * n + i]
+
+                Ok x
+
+    /// The upper-triangular factor R as a columns × columns matrix, a fresh matrix on every call; the diagonal can hold
+    /// negative entries, and RᵀR equals AᵀA to rounding. A matrix of NaN for a decomposition of a matrix with a
+    /// non-finite entry. Cost O(n²).
+    let r (decomposition: QrDecomposition) : Matrix =
+        let n = decomposition.Columns
+        let data: float[] = Array.zeroCreate (n * n)
+
+        for i in 0 .. n - 1 do
+            for j in 0 .. n - 1 do
+                data[i * n + j] <-
+                    if decomposition.NonFinite then nan
+                    elif j >= i then decomposition.Factors[i * n + j]
+                    else 0.0
+
+        { RowCount = n
+          ColumnCount = n
+          Data = data }
+
+/// The eigenvalues and eigenvectors of a symmetric matrix, made by `Matrix.symmetricEigen`. Values ascend, and column
+/// k of Vectors is the unit eigenvector of Values[k], its component of largest magnitude positive (the lowest index on
+/// an exact tie).
+type SymmetricEigen = { Values: float[]; Vectors: Matrix }
+
 /// Dense matrices. A negative size raises `ArgumentOutOfRangeException`, an index outside the matrix raises
 /// `ArgumentOutOfRangeException`, and a shape or length mismatch raises `ArgumentException` naming both shapes or
 /// lengths. Every function returns a fresh matrix or array and leaves its inputs unchanged.
@@ -415,6 +521,18 @@ module Matrix =
 
         struct (largest, nonFinite)
 
+    /// Whether |aᵢⱼ − aⱼᵢ| ≤ 1e-12·largest for every pair, largest being max|aᵢⱼ|.
+    let private isSymmetric (m: Matrix) (largest: float) : bool =
+        let n = m.RowCount
+        let mutable symmetric = true
+
+        for i in 0 .. n - 1 do
+            for j in 0 .. i - 1 do
+                if abs (m.Data[i * n + j] - m.Data[j * n + i]) > 1e-12 * largest then
+                    symmetric <- false
+
+        symmetric
+
     /// The LU factorisation P·A = L·U by Gaussian elimination with partial pivoting (the pivot is the first entry of
     /// largest magnitude in the column), every update in a fixed order using only + − × ÷ and comparisons. Returns
     /// `Error "singular …"` when a pivot satisfies |uₖₖ| ≤ n·ε·max|aᵢⱼ|, with ε = 2⁻⁵², a threshold relative to the
@@ -559,14 +677,7 @@ module Matrix =
                 : CholeskyDecomposition
             )
         else
-            let mutable asymmetric = false
-
-            for i in 0 .. n - 1 do
-                for j in 0 .. i - 1 do
-                    if abs (a.Data[i * n + j] - a.Data[j * n + i]) > 1e-12 * largest then
-                        asymmetric <- true
-
-            if asymmetric then
+            if not (isSymmetric a largest) then
                 Error "cholesky: the matrix is not symmetric; some |aᵢⱼ − aⱼᵢ| exceeds 1e-12·max|aᵢⱼ|."
             else
                 let mutable largestDiagonal = 0.0
@@ -616,3 +727,203 @@ module Matrix =
                           NonFinite = false }
                         : CholeskyDecomposition
                     )
+
+    /// The Householder QR factorisation A = Q·R, one reflection per column in a fixed order, using `Vector.norm` and
+    /// otherwise only + − × ÷, `sqrt`, `abs` and comparisons. A matrix holding a NaN or infinite entry gives a
+    /// decomposition that reads NaN everywhere. A matrix with no columns is accepted. Raises `ArgumentException` unless
+    /// the matrix has at least as many rows as columns. Cost O(mn²).
+    let qr (a: Matrix) : QrDecomposition =
+        let m = a.RowCount
+        let n = a.ColumnCount
+
+        if m < n then
+            raise (
+                ArgumentException(
+                    sprintf "qr needs at least as many rows as columns; the shape is %d x %d." m n
+                )
+            )
+
+        let struct (_, nonFinite) = scan a
+
+        if nonFinite then
+            { Rows = m
+              Columns = n
+              Factors = Array.zeroCreate (m * n)
+              Taus = Array.zeroCreate n
+              RankThreshold = 0.0
+              NonFinite = true }
+        else
+            let f = Array.copy a.Data
+            let taus: float[] = Array.zeroCreate n
+            let mutable largestColumn = 0.0
+
+            for j in 0 .. n - 1 do
+                let norm = Vector.norm (Array.init m (fun i -> f[i * n + j]))
+
+                if norm > largestColumn then
+                    largestColumn <- norm
+
+            for k in 0 .. n - 1 do
+                let mutable tailIsZero = true
+
+                for i in k + 1 .. m - 1 do
+                    if f[i * n + k] <> 0.0 then
+                        tailIsZero <- false
+
+                if not tailIsZero then
+                    let x0 = f[k * n + k]
+                    let norm = Vector.norm (Array.init (m - k) (fun i -> f[(k + i) * n + k]))
+                    let beta = if x0 >= 0.0 then -norm else norm
+                    let tau = (beta - x0) / beta
+                    let divisor = x0 - beta
+
+                    for i in k + 1 .. m - 1 do
+                        f[i * n + k] <- f[i * n + k] / divisor
+
+                    f[k * n + k] <- beta
+                    taus[k] <- tau
+
+                    for j in k + 1 .. n - 1 do
+                        let mutable w = f[k * n + j]
+
+                        for i in k + 1 .. m - 1 do
+                            w <- w + f[i * n + k] * f[i * n + j]
+
+                        w <- tau * w
+                        f[k * n + j] <- f[k * n + j] - w
+
+                        for i in k + 1 .. m - 1 do
+                            f[i * n + j] <- f[i * n + j] - w * f[i * n + k]
+
+            { Rows = m
+              Columns = n
+              Factors = f
+              Taus = taus
+              RankThreshold = float (max m n) * epsilon * largestColumn
+              NonFinite = false }
+
+    /// The eigenvalues in ascending order and the unit eigenvectors, by cyclic Jacobi rotations on a copy of the matrix
+    /// (each rotation chosen so that the entry it targets becomes 0, using `sqrt` and otherwise only + − × ÷ and
+    /// comparisons). A sweep rotates every off-diagonal pair once; sweeping stops when the Euclidean norm of the
+    /// off-diagonal entries is at most ε·‖A‖_F, with ε = 2⁻⁵² and both norms taken through `Vector.norm`, so the test
+    /// holds at any scale where the norms are representable. Returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤
+    /// 1e-12·max|aᵢⱼ| for every pair, and `Error "did not converge …"` when 100 sweeps leave the off-diagonal norm
+    /// above the threshold. Each eigenvector's component of largest magnitude is positive, the lowest index on an
+    /// exact tie; equal eigenvalues keep the order of their diagonal positions. A 0 × 0 matrix gives `Ok` with empty
+    /// results. A matrix holding a NaN or infinite entry gives `Ok` with NaN values and NaN vectors, and no symmetry
+    /// check runs. Raises `ArgumentException` for a non-square matrix. Cost O(n³) per sweep.
+    let symmetricEigen (a: Matrix) : Result<SymmetricEigen, string> =
+        checkSquare "symmetricEigen" a
+        let n = a.RowCount
+        let struct (largest, nonFinite) = scan a
+
+        if nonFinite then
+            Ok
+                { Values = Array.create n nan
+                  Vectors =
+                    { RowCount = n
+                      ColumnCount = n
+                      Data = Array.create (n * n) nan } }
+        elif not (isSymmetric a largest) then
+            Error "symmetricEigen: the matrix is not symmetric; some |aᵢⱼ − aⱼᵢ| exceeds 1e-12·max|aᵢⱼ|."
+        else
+            let d = Array.copy a.Data
+            let v = Array.init (n * n) (fun k -> if k / n = k % n then 1.0 else 0.0)
+            let threshold = epsilon * Vector.norm d
+
+            let offDiagonal () =
+                let entries: float[] = Array.zeroCreate (n * n - n)
+                let mutable k = 0
+
+                for i in 0 .. n - 1 do
+                    for j in 0 .. n - 1 do
+                        if i <> j then
+                            entries[k] <- d[i * n + j]
+                            k <- k + 1
+
+                Vector.norm entries
+
+            let mutable sweeps = 0
+
+            while sweeps < 100 && offDiagonal () > threshold do
+                for p in 0 .. n - 2 do
+                    for q in p + 1 .. n - 1 do
+                        let apq = d[p * n + q]
+
+                        if apq <> 0.0 then
+                            let tau = (d[q * n + q] - d[p * n + p]) / (2.0 * apq)
+
+                            let t =
+                                if abs tau > 1e150 then
+                                    1.0 / (2.0 * tau)
+                                else
+                                    let magnitude = 1.0 / (abs tau + sqrt (1.0 + tau * tau))
+                                    if tau >= 0.0 then magnitude else -magnitude
+
+                            let c = 1.0 / sqrt (1.0 + t * t)
+                            let s = t * c
+
+                            for k in 0 .. n - 1 do
+                                let kp = d[k * n + p]
+                                let kq = d[k * n + q]
+                                d[k * n + p] <- c * kp - s * kq
+                                d[k * n + q] <- s * kp + c * kq
+
+                            for k in 0 .. n - 1 do
+                                let pk = d[p * n + k]
+                                let qk = d[q * n + k]
+                                d[p * n + k] <- c * pk - s * qk
+                                d[q * n + k] <- s * pk + c * qk
+
+                            d[p * n + q] <- 0.0
+                            d[q * n + p] <- 0.0
+
+                            for k in 0 .. n - 1 do
+                                let kp = v[k * n + p]
+                                let kq = v[k * n + q]
+                                v[k * n + p] <- c * kp - s * kq
+                                v[k * n + q] <- s * kp + c * kq
+
+                sweeps <- sweeps + 1
+
+            if offDiagonal () > threshold then
+                Error(
+                    sprintf
+                        "symmetricEigen: did not converge; the off-diagonal norm is above ε·‖A‖_F after %d sweeps."
+                        sweeps
+                )
+            else
+                let order = Array.init n id
+
+                for i in 1 .. n - 1 do
+                    let mutable j = i
+
+                    while j > 0 && d[order[j - 1] * n + order[j - 1]] > d[order[j] * n + order[j]] do
+                        let t = order[j]
+                        order[j] <- order[j - 1]
+                        order[j - 1] <- t
+                        j <- j - 1
+
+                let vectors: float[] = Array.zeroCreate (n * n)
+
+                for col in 0 .. n - 1 do
+                    let source = order[col]
+                    let column = Array.init n (fun i -> v[i * n + source])
+                    let norm = Vector.norm column
+                    let mutable big = 0
+
+                    for i in 1 .. n - 1 do
+                        if abs column[i] > abs column[big] then
+                            big <- i
+
+                    let sign = if column[big] < 0.0 then -1.0 else 1.0
+
+                    for i in 0 .. n - 1 do
+                        vectors[i * n + col] <- sign * column[i] / norm
+
+                Ok
+                    { Values = Array.init n (fun i -> d[order[i] * n + order[i]])
+                      Vectors =
+                        { RowCount = n
+                          ColumnCount = n
+                          Data = vectors } }

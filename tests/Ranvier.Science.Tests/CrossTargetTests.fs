@@ -56,6 +56,16 @@ let tests =
                 Expect.equal x.[3] (2.417916497770572) "x3"
             }
 
+            // Literals: QrDecomposition.leastSquares printed with ToString("R") on .NET; JavaScript must match.
+            test "QR least squares gives the same bits on both targets" {
+                let ts = [| 0.0; 0.5; 1.5; 2.0; 3.25 |]
+                let design = Matrix.init 5 3 (fun i j -> if j = 0 then 1.0 elif j = 1 then ts.[i] else ts.[i] * ts.[i])
+                let x = QrDecomposition.leastSquares (Matrix.qr design) [| 0.3; 1.1; 0.2; -0.8; 2.4 |] |> Result.defaultWith failwith
+                Expect.equal x.[0] (0.9078601748721112) "x0"
+                Expect.equal x.[1] (-1.6866415121721134) "x1"
+                Expect.equal x.[2] (0.6381743641838691) "x2"
+            }
+
 #if !FABLE_COMPILER
             // The stream was recorded on Windows. `log` and `cos` come from the platform's math
             // library, so another platform may differ in the last places.

@@ -10,6 +10,11 @@ let private m22a = Matrix.ofRows [| [| 1.0; 2.0 |]; [| 3.0; 4.0 |] |]
 let private m22b = Matrix.ofRows [| [| 5.0; 6.0 |]; [| 7.0; 8.0 |] |]
 let private matA = Matrix.ofRows [| [| 4.0; -2.0; 1.0 |]; [| -2.0; 4.0; -2.0 |]; [| 1.0; -2.0; 4.0 |] |]
 let private vecB = [| 11.0; -16.0; 17.0 |]
+let private lineDesign = Matrix.init 4 2 (fun i j -> if j = 0 then 1.0 else float i)
+let private lineY = [| 1.0; 3.0; 4.0; 4.0 |]
+
+let private secondDifference (n: int) =
+    Matrix.init n n (fun i j -> if i = j then 2.0 elif abs (i - j) = 1 then -1.0 else 0.0)
 
 [<Tests>]
 let tests =
@@ -309,5 +314,151 @@ let tests =
                 Matrix.cholesky (Matrix.ofRows [| [| 1.0; 2.0 |]; [| 2.0; 1.0 |] |]) |> expectError "not positive definite" "indefinite"
                 Matrix.cholesky (Matrix.ofRows [| [| 1.0; 1.0 |]; [| 1.0; 1.0 |] |]) |> expectError "not positive definite" "semidefinite"
                 Expect.throwsT<ArgumentException> (fun () -> Matrix.cholesky (Matrix.zero 2 3) |> ignore) "non-square"
+            }
+
+            test "QR fits a line" {
+                // Normal equations: n = 4, Σt = 6, Σy = 12, Σt² = 14, Σty = 23, slope 1, intercept 1.5.
+                let x = QrDecomposition.leastSquares (Matrix.qr lineDesign) lineY |> expectOk "fit"
+                expectClose 0.0 1e-14 1.5 x[0] "intercept"
+                expectClose 0.0 1e-14 1.0 x[1] "slope"
+            }
+
+            test "QR recovers a consistent solution" {
+                let m = Matrix.init 6 3 (fun i j -> float ((i + 1) * (j + 2) % 7) - 3.0)
+                let truth = [| 2.0; -1.0; 0.5 |]
+                let b = Matrix.multiplyVector m truth
+                let x = QrDecomposition.leastSquares (Matrix.qr m) b |> expectOk "fit"
+
+                for i in 0 .. 2 do
+                    expectClose 0.0 1e-13 truth[i] x[i] (sprintf "component %d" i)
+            }
+
+            test "a rank-deficient design gives Error" {
+                let m = Matrix.ofRows [| [| 1.0; 2.0 |]; [| 1.0; 2.0 |]; [| 1.0; 2.0 |] |]
+
+                QrDecomposition.leastSquares (Matrix.qr m) [| 1.0; 2.0; 3.0 |]
+                |> expectError "rank-deficient" "dependent columns"
+            }
+
+            test "scale does not decide rank" {
+                for factor in [ 1e-150; 1e150 ] do
+                    let d = Matrix.qr (Matrix.scale factor lineDesign)
+                    let x = QrDecomposition.leastSquares d (Vector.scale factor lineY) |> expectOk "scaled"
+                    expectClose 0.0 1e-14 1.5 x[0] (sprintf "factor %g intercept" factor)
+                    expectClose 0.0 1e-14 1.0 x[1] (sprintf "factor %g slope" factor)
+            }
+
+            test "QR shapes" {
+                Expect.throwsT<ArgumentException>
+                    (fun () -> Matrix.qr (Matrix.zero 2 3) |> ignore)
+                    "qr with fewer rows than columns"
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> QrDecomposition.leastSquares (Matrix.qr lineDesign) [| 1.0; 2.0 |] |> ignore)
+                    "leastSquares length"
+            }
+
+            test "R reproduces the Gram matrix" {
+                let r = QrDecomposition.r (Matrix.qr lineDesign)
+                Expect.equal (Matrix.rowCount r) 2 "rows"
+                Expect.equal (Matrix.columnCount r) 2 "columns"
+                Expect.equal (Matrix.get r 1 0) 0.0 "zero below the diagonal"
+                let gram = Matrix.multiply (Matrix.transpose r) r
+                let expected = [| [| 4.0; 6.0 |]; [| 6.0; 14.0 |] |]
+
+                for i in 0 .. 1 do
+                    for j in 0 .. 1 do
+                        expectClose 0.0 1e-13 (expected[i][j]) (Matrix.get gram i j) (sprintf "gram %d %d" i j)
+            }
+
+            test "QR of a non-finite design gives NaN" {
+                let withEntry v =
+                    Matrix.init 4 2 (fun i j -> if i = 1 && j = 1 then v else Matrix.get lineDesign i j)
+
+                for v in [ infinity; nan ] do
+                    let d = Matrix.qr (withEntry v)
+                    let x = QrDecomposition.leastSquares d lineY |> expectOk "leastSquares"
+                    Expect.equal x.Length 2 "length"
+                    Expect.isTrue (Array.forall Double.IsNaN x) (sprintf "coefficients with %g" v)
+                    let r = QrDecomposition.r d
+                    Expect.equal (Matrix.rowCount r, Matrix.columnCount r) (2, 2) "R shape"
+                    Expect.isTrue (Array.forall Double.IsNaN (Matrix.toRows r |> Array.concat)) (sprintf "R with %g" v)
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> QrDecomposition.leastSquares (Matrix.qr (withEntry infinity)) [| 1.0 |] |> ignore)
+                    "the length is checked first"
+            }
+
+            test "eigen of a 2 x 2" {
+                let e = Matrix.symmetricEigen (Matrix.ofRows [| [| 2.0; 1.0 |]; [| 1.0; 2.0 |] |]) |> expectOk "eigen"
+                expectClose 0.0 1e-15 1.0 e.Values[0] "value 0"
+                expectClose 0.0 1e-15 3.0 e.Values[1] "value 1"
+                let s = 1.0 / sqrt 2.0
+                let v0 = Matrix.column e.Vectors 0
+                let v1 = Matrix.column e.Vectors 1
+                expectClose 0.0 1e-15 1.0 (abs (Vector.dot v0 [| s; -s |])) "column 0"
+                expectClose 0.0 1e-15 1.0 (abs (Vector.dot v1 [| s; s |])) "column 1"
+                Expect.isTrue (v0[0] > 0.0 && v1[0] > 0.0) "the first component is the largest and positive"
+            }
+
+            test "eigen of the second-difference matrix" {
+                let n = 10
+                let a = secondDifference n
+                let e = Matrix.symmetricEigen a |> expectOk "eigen"
+
+                for k in 1 .. n do
+                    let lambda = 2.0 - 2.0 * cos (float k * Math.PI / 11.0)
+                    expectClose 0.0 1e-14 lambda e.Values[k - 1] (sprintf "value %d" k)
+                    let v = Matrix.column e.Vectors (k - 1)
+                    let residual = Vector.subtract (Matrix.multiplyVector a v) (Vector.scale e.Values[k - 1] v)
+                    Expect.isTrue (Array.max (Array.map abs residual) <= 1e-13) (sprintf "residual %d" k)
+
+                let gram = Matrix.multiply (Matrix.transpose e.Vectors) e.Vectors
+
+                for i in 0 .. n - 1 do
+                    for j in 0 .. n - 1 do
+                        expectClose 0.0 1e-14 (if i = j then 1.0 else 0.0) (Matrix.get gram i j) (sprintf "gram %d %d" i j)
+            }
+
+            test "eigen of the second-difference matrix at extreme scales" {
+                let n = 10
+
+                for factor in [ 1e-160; 1e160 ] do
+                    let e = Matrix.symmetricEigen (Matrix.scale factor (secondDifference n)) |> expectOk "eigen"
+
+                    for k in 1 .. n do
+                        let lambda = factor * (2.0 - 2.0 * cos (float k * Math.PI / 11.0))
+                        expectClose 1e-13 0.0 lambda e.Values[k - 1] (sprintf "factor %g value %d" factor k)
+            }
+
+            test "eigen edge cases" {
+                let d = Matrix.symmetricEigen (Matrix.diagonal [| 3.0; 1.0; 2.0 |]) |> expectOk "diagonal"
+                Expect.equal d.Values [| 1.0; 2.0; 3.0 |] "diagonal values"
+
+                Expect.equal
+                    d.Vectors
+                    (Matrix.ofRows [| [| 0.0; 0.0; 1.0 |]; [| 1.0; 0.0; 0.0 |]; [| 0.0; 1.0; 0.0 |] |])
+                    "diagonal vectors"
+
+                let one = Matrix.symmetricEigen (Matrix.ofRows [| [| 5.0 |] |]) |> expectOk "1 x 1"
+                Expect.equal one.Values [| 5.0 |] "1 x 1 value"
+                Expect.equal one.Vectors (Matrix.ofRows [| [| 1.0 |] |]) "1 x 1 vector"
+
+                let empty = Matrix.symmetricEigen (Matrix.zero 0 0) |> expectOk "0 x 0"
+                Expect.equal empty.Values [||] "empty values"
+                Matrix.symmetricEigen m22a |> expectError "not symmetric" "asymmetric"
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> Matrix.symmetricEigen (Matrix.zero 2 3) |> ignore)
+                    "non-square"
+
+                for v in [ nan; infinity ] do
+                    let bad = Matrix.ofRows [| [| 1.0; 2.0 |]; [| 3.0; v |] |]
+                    let e = Matrix.symmetricEigen bad |> expectOk "non-finite"
+                    Expect.isTrue (Array.forall Double.IsNaN e.Values) (sprintf "values with %g" v)
+
+                    Expect.isTrue
+                        (Array.forall Double.IsNaN (Matrix.toRows e.Vectors |> Array.concat))
+                        (sprintf "vectors with %g" v)
             }
         ]
