@@ -38,6 +38,7 @@ jobs:
     outputs:
       run: ${{ steps.find.outputs.run }}
       publish: ${{ steps.find.outputs.publish }}
+      new: ${{ steps.list.outputs.new }}
     steps:
       - name: Find the CI run
         id: find
@@ -80,23 +81,39 @@ jobs:
           path: packages
           run-id: ${{ steps.find.outputs.run }}
           github-token: ${{ github.token }}
+      # A version already on nuget.org is not new. When no package is new (a push that changes only docs or tests), the
+      # publish job does not run, so it does not ask nuget.org for a token.
       - name: List the packages
+        id: list
         run: |
           set -euo pipefail
           shopt -s nullglob
           ls -l packages
+          new=false
           for id in Ranvier.Numerics Ranvier.Quantities Ranvier.Statistics; do
             files=(packages/"$id".[0-9]*.nupkg)
             if [ "${#files[@]}" -ne 1 ]; then
               echo "::error::Expected one $id package, found ${#files[@]}"
               exit 1
             fi
+            version=${files[0]#packages/"$id".}
+            version=${version%.nupkg}
+            lower=$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]')
+            lowerVersion=$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://api.nuget.org/v3-flatcontainer/$lower/$lowerVersion/$lower.nuspec" || true)
+            if [ "$code" = 200 ]; then
+              echo "$id $version is already on nuget.org"
+            else
+              echo "$id $version is new (nuget.org answered $code)"
+              new=true
+            fi
           done
+          echo "new=$new" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish to nuget.org
     needs: resolve
-    if: needs.resolve.outputs.publish == 'true'
+    if: needs.resolve.outputs.publish == 'true' && needs.resolve.outputs.new == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
