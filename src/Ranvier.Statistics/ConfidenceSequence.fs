@@ -39,13 +39,15 @@ module private Arguments =
 /// interval has zero width at the observation), so a monitor reads the sequence through <c>interval</c>, which
 /// applies a burn-in.
 /// Coverage, outside the theorem, on 2,000 standard normal streams of 10,000 observations, ρ = <c>rhoTightestAt</c>
-/// α 1000, burn-in 30 (<c>standardBurnIn</c>), *measured here* on 2026-11-20 by the coverage tests "the sequence
+/// α 1000, burn-in 30 (<c>standardBurnIn</c>), measured here on 2026-11-20 by the coverage tests "the sequence
 /// covers under continuous monitoring and the fixed-sample interval does not" and "the sequence covers at the
 /// page's setting" (<c>dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter "ConfidenceSequence"</c>
 /// and <c>npx mocha dist/tests/Main.fs.js --grep "ConfidenceSequence"</c> after <c>dotnet fickl</c>; the two
 /// targets printed the same figures):
 /// at α = 0.05, 0.0415 of the streams excluded the mean at some count from 30 on; at α = 0.0125 (0.05 over four
-/// channels), 0.009 did.
+/// channels), 0.009 did. The coverage tests read from t ≥ 30. Read from t = 1, the miss fraction at α = 0.05 was 1.0
+/// on the same 2,000 streams (measured here on 2026-11-19, .NET only, by a scratch script that runs the coverage
+/// test's loop with the first checked t as a parameter; docs/PROBES.md, "Coverage").
 /// </remarks>
 module ConfidenceSequence =
     /// <summary>
