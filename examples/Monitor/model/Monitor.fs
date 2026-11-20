@@ -451,7 +451,7 @@ module Monitor =
                         | _ -> Moments.zero)
                 (fun () -> rows.Keys |> Array.map rows.Get :> Row seq)
 
-        let policy = FloatPolicy.standard |> FloatPolicy.withRefoldFloor 64
+        let policy = FloatPolicy.standard
 
         let monitor =
             {

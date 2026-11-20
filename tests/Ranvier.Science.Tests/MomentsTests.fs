@@ -24,6 +24,37 @@ let tests =
                 Expect.equal (Moments.variance m) 83333.25 "variance"
             }
 
+            test "the sample variance divides by n − 1" {
+                // Closed form: Σ(k − 499.5)² = n(n² − 1)/12 = 83 333 250 for n = 1000; over n it is 83 333.25.
+                let m = ofArray true (Array.init 1000 float)
+                let expected = 83333250.0 / 999.0
+                Expect.isTrue (rel (Moments.sampleVariance m) expected <= 1e-15) "sample variance within relative 1e-15"
+
+                Expect.isTrue
+                    (rel (Moments.sampleStandardDeviation m) (sqrt expected) <= 1e-15)
+                    "sample standard deviation within relative 1e-15"
+
+                Expect.equal (Moments.standardDeviation m) (sqrt 83333.25) "standard deviation"
+            }
+
+            test "two observations" {
+                // The fold's mean is 2 and its M2 is 2, both exact.
+                let m = ofArray true [| 1.0; 3.0 |]
+                Expect.equal (Moments.standardDeviation m) 1.0 "standard deviation"
+                Expect.equal (Moments.sampleVariance m) 2.0 "sample variance"
+                Expect.equal (Moments.sampleStandardDeviation m) (sqrt 2.0) "sample standard deviation"
+            }
+
+            test "fewer than two observations" {
+                Expect.isTrue (Double.IsNaN (Moments.sampleVariance Moments.zero)) "zero: sample variance"
+                Expect.isTrue (Double.IsNaN (Moments.standardDeviation Moments.zero)) "zero: standard deviation"
+                Expect.isTrue (Double.IsNaN (Moments.sampleStandardDeviation Moments.zero)) "zero: sample standard deviation"
+                let one = ofArray true [| 3.5 |]
+                Expect.isTrue (Double.IsNaN (Moments.sampleVariance one)) "one: sample variance"
+                Expect.isTrue (Double.IsNaN (Moments.sampleStandardDeviation one)) "one: sample standard deviation"
+                Expect.equal (Moments.standardDeviation one) 0.0 "one: standard deviation"
+            }
+
             test "1e9 + k keeps the variance" {
                 let m = ofArray true (Array.init 1000 (fun k -> 1e9 + float k))
                 Expect.isTrue (rel (Moments.variance m) 83333.25 <= 1e-9) "variance"

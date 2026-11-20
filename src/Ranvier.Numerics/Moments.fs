@@ -107,5 +107,19 @@ module Moments =
             let v = Sum.value m.M2 / m.N
             if v < 0.0 then 0.0 else v
 
+    /// The sample variance, Σ(x − mean)² / (n − 1), never negative; NaN when the count is below 2.
+    let sampleVariance (m: Moments) : float =
+        if m.N < 2.0 then
+            nan
+        else
+            let v = Sum.value m.M2 / (m.N - 1.0)
+            if v < 0.0 then 0.0 else v
+
+    /// sqrt (variance); NaN when the count is zero.
+    let standardDeviation (m: Moments) : float = sqrt (variance m)
+
+    /// sqrt (sampleVariance); NaN when the count is below 2.
+    let sampleStandardDeviation (m: Moments) : float = sqrt (sampleVariance m)
+
     /// sqrt (variance / count).
     let standardError (m: Moments) : float = sqrt (variance m / m.N)

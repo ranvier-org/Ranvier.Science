@@ -88,10 +88,10 @@ let tests =
                 Expect.equal (sum.Refolds ()) 0 "re-folds")
         }
 
-        test "standard re-folds after as many removals as rows" {
+        test "with no floor, re-folds after as many removals as rows" {
             withGraph (fun () ->
                 let rows = rowsOf (Array.init 10 float)
-                let sum = rows.Rows |> Aggregate.sumBy FloatPolicy.standard valueOf
+                let sum = rows.Rows |> Aggregate.sumBy (FloatPolicy.standard |> FloatPolicy.withRefoldFloor 0) valueOf
                 sum.Value.Value |> ignore
 
                 for i in 1..9 do
@@ -102,6 +102,26 @@ let tests =
                 rows.AddOrUpdate (struct (0, 110.0))
                 sum.Value.Value |> ignore
                 Expect.equal (sum.Refolds ()) 1 "after the 10th edit")
+        }
+
+        test "standard carries a floor of 64" {
+            Expect.equal FloatPolicy.standard.RefoldFloor 64 "RefoldFloor"
+        }
+
+        test "standard waits for 64 removals on a small aggregate" {
+            withGraph (fun () ->
+                let rows = rowsOf (Array.init 10 float)
+                let sum = rows.Rows |> Aggregate.sumBy FloatPolicy.standard valueOf
+                sum.Value.Value |> ignore
+
+                for i in 1..63 do
+                    rows.AddOrUpdate (struct (i % 10, float (100 + i)))
+                    sum.Value.Value |> ignore
+
+                Expect.equal (sum.Refolds ()) 0 "after 63 edits"
+                rows.AddOrUpdate (struct (64 % 10, float (100 + 64)))
+                sum.Value.Value |> ignore
+                Expect.equal (sum.Refolds ()) 1 "after the 64th edit")
         }
 
         test "fast never re-folds on finite values" {
@@ -181,6 +201,39 @@ let tests =
                     (sum.Refolds ()))
         }
 
+        test "between re-folds under the standard floor a small sum stays within 2 ulp of the from-scratch fold" {
+            withGraph (fun () ->
+#if FABLE_COMPILER
+                let edits = 100_000
+#else
+                let edits = 1_000_000
+#endif
+                let valueAt (i: int) = 1.0 + (float i * 3.14159) % 999_999.0
+                let values = Array.init 8 valueAt
+                let rows = rowsOf values
+                let sum = rows.Rows |> Aggregate.sumBy FloatPolicy.standard valueOf
+                sum.Value.Value |> ignore
+                let mutable largest = 0.0
+
+                for e in 1..edits do
+                    let k = e % 8
+                    values[k] <- valueAt (8 + e)
+                    rows.AddOrUpdate (struct (k, values[k]))
+                    let distance = ulps sum.Value.Value (plainFold true values)
+                    largest <- max largest distance
+
+                    if not (distance <= 2.0) then
+                        failtestf "edit %d: %g ulp from the from-scratch fold" e distance
+
+                printfn
+                    "Re-fold floor drift: largest distance %g ulp over %d edits of 8 rows, %d re-folds"
+                    largest
+                    edits
+                    (sum.Refolds ())
+
+                Expect.equal (sum.Refolds ()) (edits / 64) "one re-fold per 64 removals")
+        }
+
         test "maintained moments follow from-scratch moments" {
             withGraph (fun () ->
                 let rows = rowsOf (Array.init 100 (momentsOf true))
@@ -215,7 +268,7 @@ let tests =
             withGraph (fun () ->
                 let instances = Array.init 4 (momentsOf true)
                 let rows = rowsOf instances
-                let maintained = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard valueOf
+                let maintained = rows.Rows |> Aggregate.momentsBy (FloatPolicy.standard |> FloatPolicy.withRefoldFloor 0) valueOf
                 let first = maintained.Value.Value
 
                 for e in 1..8 do
@@ -366,7 +419,8 @@ let tests =
                 result
 
             Expect.equal (refoldsUnder (FloatPolicy.standard |> FloatPolicy.withRefoldFloor 64)) 4 "floor 64"
-            Expect.equal (refoldsUnder FloatPolicy.standard) 64 "no floor"
+            Expect.equal (refoldsUnder (FloatPolicy.standard |> FloatPolicy.withRefoldFloor 0)) 64 "no floor"
+            Expect.equal (refoldsUnder FloatPolicy.standard) 4 "standard"
         }
 
         test "a floored aggregate equals the from-scratch one after each re-fold" {
