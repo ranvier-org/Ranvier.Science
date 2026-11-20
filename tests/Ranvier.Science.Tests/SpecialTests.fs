@@ -558,8 +558,10 @@ let tests =
                         let at = sprintf "a = %g, p = %.17g, x = %.17g" a p x
                         expectClose 1e-12 0.0 p (Special.gammaLowerRegularized a x) at
 
-                // Deep in the lower tail, where the starting point's Wilson–Hilferty cube is negative, and the worst
-                // case of a dense seeded scan of 3,156 pairs on .NET and JavaScript.
+                // Deep in the lower tail, where the starting point's Wilson–Hilferty cube is negative, the worst case of
+                // a dense seeded scan of 3,156 pairs on .NET and JavaScript, and the smallest margin of a 123,041-point
+                // grid over a in [100, 1000] and p in [1e-300, 1e-290] (561.1, 0.55 of the bound before the stopping
+                // rule of the beta inverse).
                 for a, p in
                     [
                         2.5, 1e-300
@@ -567,6 +569,7 @@ let tests =
                         100.0, 1e-300
                         100.0, 1e-200
                         717.0392350199576, 2.6218221520418342e-295
+                        561.1, 5.62341325190349e-299
                     ] do
                     let x = Special.gammaLowerRegularizedInverse a p
                     let at = sprintf "a = %.17g, p = %.17g, x = %.17g" a p x
@@ -583,6 +586,32 @@ let tests =
                 Expect.isGreaterThan (Special.gammaLowerRegularized 0.01 5e-324) 1e-10 "P(0.01, 5e-324)"
                 let belowAll = Special.gammaLowerRegularizedInverse 0.01 1e-10
                 Expect.equal belowAll 0.0 "a root below the least positive double"
+            }
+
+            test "the inverse at a tiny shape gives 0 only where P at the least positive double exceeds p" {
+                // At these shapes P(a, 5e-324) rounds to p itself, so 5e-324 meets the round trip and 0 does not. The
+                // pairs come from a seeded scan of shapes from 5e-324 to 1e-6, where the start of NR3 §6.2.1 for
+                // a ≤ 1 underflowed to 0.
+                for a, p in
+                    [
+                        5.64262131697727e-19, 0.9999999999999996
+                        1.5956838512269158e-18, 0.9999999999999988
+                        1.0422327767201472e-19, 0.9999999999999999
+                    ] do
+                    let x = Special.gammaLowerRegularizedInverse a p
+                    let at = sprintf "a = %.17g, p = %.17g, x = %.17g" a p x
+                    Expect.isFalse (Special.gammaLowerRegularized a 5e-324 > p) ("P(a, 5e-324) is at most p, " + at)
+                    Expect.isGreaterThan x 0.0 ("a positive result, " + at)
+                    expectClose 1e-12 0.0 p (Special.gammaLowerRegularized a x) at
+            }
+
+            test "the inverse below 1e-300 at a large shape" {
+                // The largest NaN p of a grid over a in [1, 1000] and p in [5e-324, 1e-290], on .NET and JavaScript,
+                // below the floor of the bound; at 1e-300 the round trip holds.
+                let a = 546.386549881854
+                Expect.isTrue (Double.IsNaN(Special.gammaLowerRegularizedInverse a 1.9054607179631273e-301)) "p = 1.9e-301"
+                let x = Special.gammaLowerRegularizedInverse a 1e-300
+                expectClose 1e-12 0.0 1e-300 (Special.gammaLowerRegularized a x) (sprintf "p = 1e-300, x = %.17g" x)
             }
 
             test "domain and NaN" {

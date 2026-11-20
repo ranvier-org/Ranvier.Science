@@ -628,35 +628,45 @@ module Special =
             let struct (_, q) = regularizedGamma a x
             q
 
-    /// The starting point of Numerical Recipes, 3rd edition, §6.2.1 (`invgammp`, from documentation). For a > 1, the
-    /// Wilson–Hilferty form a(1 − 1/(9a) + z/(3√a))³, with z the normal quantile of p by the rational form of
-    /// Abramowitz and Stegun 26.2.22, raised to at least (pΓ(a + 1))^(1/a). That floor replaces the book's 1e-3:
-    /// P(a, x) ≤ xᵃ/Γ(a + 1), so the root is never below it, and it is close to the root deep in the lower tail, where
-    /// the cube goes negative. For a ≤ 1, with t = 1 − a(0.253 + 0.12a): (p/t)^(1/a) when p < t, and
-    /// 1 − ln(1 − (p − t)/(1 − t)) otherwise.
+    /// The starting point of `invgammp`, Numerical Recipes, 3rd edition, §6.2.1, as ported in the Haskell
+    /// math-functions package (`invIncompleteGamma` in Numeric/SpecFunctions/Internal.hs, from documentation). For
+    /// a > 1, the Wilson–Hilferty form a(1 − 1/(9a) + z/(3√a))³, with z the normal quantile of p by the rational form
+    /// of Abramowitz and Stegun, Handbook of Mathematical Functions (NBS Applied Mathematics Series 55, 1964), 26.2.22
+    /// (general knowledge; the constants are the port's), held to at least (pΓ(a + 1))^(1/a), a lower bound of the
+    /// root that replaces the book's 1e-3. For a ≤ 1, with c = a(0.253 + 0.12a): e^((ln p − ln(1 − c))/a) when
+    /// 1 − p > c, and 1 − ln((1 − p)/c) otherwise, which are the port's (p/t)^(1/a) and 1 − ln(1 − (p − t)/(1 − t)) for
+    /// t = 1 − c, formed without t. The starting point is at least 5e-324.
     let private inverseGuess (a: float) (p: float) : float =
-        if a > 1.0 then
-            let t = Math.Sqrt (-2.0 * Math.Log (if p < 0.5 then p else 1.0 - p))
-            let upper = t - (2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481))
-            let z = if p < 0.5 then -upper else upper
-            let c = 1.0 - 1.0 / (9.0 * a) + z / (3.0 * Math.Sqrt a)
-            max (Math.Exp ((Math.Log p + gammaLn (a + 1.0)) / a)) (a * (c * c * c))
-        else
-            let t = 1.0 - a * (0.253 + a * 0.12)
-
-            if p < t then
-                Math.Pow (p / t, 1.0 / a)
+        let x =
+            if a > 1.0 then
+                let t = Math.Sqrt (-2.0 * Math.Log (if p < 0.5 then p else 1.0 - p))
+                let upper = t - (2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481))
+                let z = if p < 0.5 then -upper else upper
+                let c = 1.0 - 1.0 / (9.0 * a) + z / (3.0 * Math.Sqrt a)
+                max (Math.Exp ((Math.Log p + gammaLn (a + 1.0)) / a)) (a * (c * c * c))
             else
-                1.0 - Math.Log (1.0 - (p - t) / (1.0 - t))
+                let c = a * (0.253 + a * 0.12)
+
+                if 1.0 - p > c then
+                    Math.Exp ((Math.Log p - log1p (-c)) / a)
+                else
+                    1.0 - Math.Log ((1.0 - p) / c)
+
+        if x >= 5e-324 then x else 5e-324
 
     /// The x ≥ 0 with P(a, x) = p, for a > 0 finite and 0 ≤ p ≤ 1: 0 at p = 0, +∞ at p = 1, NaN when a or p is NaN.
     /// Raises `ArgumentOutOfRangeException` when a ≤ 0, a = +∞, p < 0 or p > 1, even with the other argument NaN. From
-    /// the starting point of Numerical Recipes, 3rd edition, §6.2.1 (`invgammp`, from documentation), with its floor
-    /// raised to a lower bound of the root, it takes Halley steps on P(a, x) − p, halving x where a step would leave it
-    /// at 0 or below, until a step is below 1e-15 of x or after 100 steps; 0 where the starting point underflows, which
-    /// happens only for a ≤ 1 with the root below the least positive double. P(a, x) at the result is within relative
-    /// 1e-12 of p over 0 < a ≤ 1000 where the result is a normal double, pinned by the `Special` tests (measured here).
-    /// Cost: at most 100 evaluations of `gammaLowerRegularized`.
+    /// the starting point of `invgammp` (Numerical Recipes, 3rd edition, §6.2.1, as ported in the Haskell
+    /// math-functions package; from documentation), held to a lower bound of the root and to at least 5e-324, it takes
+    /// Halley steps on P(a, x) − p, and halves x where a step would leave it at 0 or below. It stops when a step is
+    /// below 1e-15 of x or below 1e-323, when a step below 1e-9 of x is no smaller than the one before, when P(a, x) is
+    /// within 1e-14 p of p (keeping that last step only inside (0, ∞)), or after 100 steps. It gives 0 only where
+    /// P(a, x) exceeds p at the least positive double. P(a, x) at the result is within relative 1e-12 of p over
+    /// 0 < a ≤ 1000 where the root is a normal double and the doubles beside it resolve p, pinned by the `Special`
+    /// tests (measured here). Below that floor of 1e-300, at large a, the result is NaN where P(a, x) and xᵃe⁻ˣ/Γ(a)
+    /// both underflow at the starting point; the largest such p measured here is 1.9e-301, at a = 546.39 (the
+    /// `Special` test "the inverse below 1e-300 at a large shape"). Cost: at most 100 evaluations of
+    /// `gammaLowerRegularized`.
     let gammaLowerRegularizedInverse (a: float) (p: float) : float =
         checkShape a
 
@@ -672,18 +682,34 @@ module Special =
         else
             let mutable x = inverseGuess a p
             let mutable steps = 0
-            let mutable finished = x = 0.0
+            let mutable previous = infinity
+            let mutable finished = false
 
             while not finished && steps < 100 do
-                steps <- steps + 1
-                let struct (pAtX, _) = regularizedGamma a x
-                // With P′(a, x) = xᵃ⁻¹e⁻ˣ/Γ(a) and P″/P′ = (a − 1)/x − 1, the Halley step u/(1 − ½u((a − 1)/x − 1))
-                // for u = (P − p)/P′, written as r = u/x so that a subnormal x is never a divisor.
-                let r = (pAtX - p) / gammaPrefactor a x
-                let step = r * x / (1.0 - 0.5 * min 1.0 (r * (a - 1.0 - x)))
-                let next = x - step
-                x <- if next <= 0.0 then 0.5 * x else next
-                finished <- abs step < 1e-15 * x || Double.IsNaN x
+                if x = 0.0 || Double.IsNaN x then
+                    finished <- true
+                else
+                    steps <- steps + 1
+                    let struct (pAtX, _) = regularizedGamma a x
+                    let error = pAtX - p
+                    // With P′(a, x) = xᵃ⁻¹e⁻ˣ/Γ(a) and P″/P′ = (a − 1)/x − 1, the Halley step
+                    // u/(1 − ½u((a − 1)/x − 1)) for u = (P − p)/P′, written with r = u/x, where x is only a factor.
+                    // Where xᵃe⁻ˣ/Γ(a) underflows with P above p, r is +∞ and the step goes down to a halving.
+                    let r = error / gammaPrefactor a x
+                    let step = r * x / (1.0 - 0.5 * min 1.0 (r * (a - 1.0 - x)))
+                    let next = if Double.IsNaN step && r > 0.0 then -infinity else x - step
+                    let size = abs step
+
+                    if abs error <= 1e-14 * p then
+                        // Within the noise of P: the last step stands only where it stays inside (0, ∞).
+                        if next > 0.0 && next < infinity then
+                            x <- next
+
+                        finished <- true
+                    else
+                        x <- if next <= 0.0 then 0.5 * x else next
+                        finished <- size < max (1e-15 * x) 1e-323 || (size < 1e-9 * x && size >= previous)
+                        previous <- size
 
             x
 
