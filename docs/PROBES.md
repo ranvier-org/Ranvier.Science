@@ -427,7 +427,7 @@ Recorded as found (the controller's ruling R-AA); the code is unchanged. The row
 (`examples/Monitor/model/Monitor.fs`, `band` in `create`) reads the stream fold's state through
 `observations.TryValue`, a `Folded` that holds the moments and the history together, where the plan's node table
 gives the history as what it reads (`Ranvier/docs/superpowers/plans/2026-11-19-science-slice-2-monitor.md`, Task 5,
-the row `Band`). Every item makes a new `Folded` (`Folded.add` in `examples/Monitor/model/History.fs`), so the block
+the row `Band`; the plans are not yet published: they are committed only on a local branch of the core checkout). Every item makes a new `Folded` (`Folded.add` in `examples/Monitor/model/History.fs`), so the block
 recomputes on every publication of the fold, including one that adds no history sample, and returns its previous value
 when every array of the new band is held to the previous one (`holdBand` in `Monitor.fs`) (*from documentation*: those
 two files). The cost of these recomputations was not measured.

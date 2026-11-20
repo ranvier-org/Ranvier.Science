@@ -2,7 +2,8 @@
 
 This file holds four runs of the script `frames` on each target, all **measured here** on 2026-11-19, at three commits
 that time the same work. The tasks named are those of the plan that built the page
-(`Ranvier/docs/superpowers/plans/2026-11-19-science-slice-2-monitor.md`).
+(`Ranvier/docs/superpowers/plans/2026-11-19-science-slice-2-monitor.md`). The plans are not yet published: they are committed only on a local branch of the core
+checkout.
 
 | Run | Commit | Which run |
 |---|---|---|

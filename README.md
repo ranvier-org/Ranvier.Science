@@ -22,7 +22,8 @@ dotnet add package Ranvier.Quantities --version 0.1.0
 dotnet add package Ranvier.Statistics --version 0.1.0
 ```
 
-Each package depends on `Ranvier` 0.2.0 and carries its F# sources under `fable/`, so a Fable project compiles it to
+`Ranvier.Numerics` depends on `Ranvier` 0.2.0; `Ranvier.Quantities` and `Ranvier.Statistics` depend on
+`Ranvier.Numerics` 0.1.0. Each package carries its F# sources under `fable/`, which the Fickl compiler builds to
 JavaScript.
 
 The interfaces are a first slice and will change before 1.0. Section 3 of
@@ -102,14 +103,14 @@ The scripts, each ending with the line `script done 0` on success (1 when a chec
 
 Records of the page:
 
-- [`docs/measurements/monitor.md`](docs/measurements/monitor.md): the `frames` figures on both targets, and the `table`
+- [`docs/measurements/monitor.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/monitor.md): the `frames` figures on both targets, and the `table`
   and `counts` outputs.
-- [`docs/pictures/monitor-native.png`](docs/pictures/monitor-native.png): the page in the native window, written by
+- [`docs/pictures/monitor-native.png`](https://github.com/ranvier-org/Ranvier.Science/raw/main/docs/pictures/monitor-native.png): the page in the native window, written by
   `dotnet run -c Release --project examples/Monitor/native -- --script picture` and copied from
   `examples/Monitor/out/monitor.png`, at commit `709b5dd`.
-- [`docs/pictures/monitor-browser.png`](docs/pictures/monitor-browser.png): the page in headless Chrome, written by
+- [`docs/pictures/monitor-browser.png`](https://github.com/ranvier-org/Ranvier.Science/raw/main/docs/pictures/monitor-browser.png): the page in headless Chrome, written by
   `node examples/Monitor/web/run.mjs picture --picture docs/pictures/monitor-browser.png`, at commit `709b5dd`.
-- [`docs/PROBES.md`](docs/PROBES.md): section B (the heads, packages and build), the workarounds the page needed, and
+- [`docs/PROBES.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/PROBES.md): section B (the heads, packages and build), the workarounds the page needed, and
   hot reload.
 
 Both pictures show the page in the state the `table` script leaves, two channels on the recorded stream, and not the
@@ -136,9 +137,9 @@ the `dev` host has been made in this slice.
 
 Records:
 
-- [`examples/AstroTracked/COPY.md`](examples/AstroTracked/COPY.md): where the copy came from, its hashes, its package
+- [`examples/AstroTracked/COPY.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/examples/AstroTracked/COPY.md): where the copy came from, its hashes, its package
   versions and the warning baseline.
-- [`docs/measurements/tracked-pages.md`](docs/measurements/tracked-pages.md): on one machine, in separate runs, the
+- [`docs/measurements/tracked-pages.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/tracked-pages.md): on one machine, in separate runs, the
   counts, the state comparison and the control-change medians of four `--tracked` runs, the frame means of one `--bench`
   run, and the picture comparison of three `--shots` runs.
 
@@ -159,11 +160,11 @@ Run from the repository root, in Release.
 
 ## Records
 
-- [`docs/FINDINGS.md`](docs/FINDINGS.md): the findings of the slice: the answers to its five questions, the core
+- [`docs/FINDINGS.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md): the findings of the slice: the answers to its five questions, the core
   proposals, the interfaces to change before widening, and what to widen first.
-- [`docs/PROBES.md`](docs/PROBES.md): what each probe ran and what it showed.
-- [`docs/measurements/node-cost.md`](docs/measurements/node-cost.md): the node-cost measurements.
-- [`docs/measurements/aggregates.md`](docs/measurements/aggregates.md): the aggregate and key-scaling measurements.
+- [`docs/PROBES.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/PROBES.md): what each probe ran and what it showed.
+- [`docs/measurements/node-cost.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/node-cost.md): the node-cost measurements.
+- [`docs/measurements/aggregates.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/aggregates.md): the aggregate and key-scaling measurements.
 
 Figures in those files carry a label (measured here, from documentation, or general knowledge), and a statement about
 the app that the slice has not checked is labelled an assumption; read the label before comparing two figures.

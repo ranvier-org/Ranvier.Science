@@ -4,7 +4,7 @@ The slice built, in this repository, a library of units, quantities, a float pol
 `Run`; a sequential monitor page for a native window and a browser (`examples/Monitor`); and two AstroShowcase pages
 ported onto tracked quantities in a versioned copy of the app (`examples/AstroTracked`). It was built to answer five
 questions, Q1 to Q5, of its design (`Ranvier/docs/superpowers/specs/2026-11-19-science-vertical-slice-design.md`, §1).
-This report gives the answers and what follows from them, as the design's §10 asks.
+This report gives the answers and what follows from them, as the design's §10 asks. The design documents, and the plans cited below, are not yet published: they are committed only on a local branch of the core checkout.
 
 How to read it:
 
@@ -419,8 +419,9 @@ that file reads them.
 3. **Whether the ports move into `AstroShowcase`.** The ports live in a third copy of the sources because
    `AstroShowcase` has no version control (the design, §4). The copy takes no fixes from the others, and `COPY.sha256`
    records each copied file's hash, which shows any drift (`examples/AstroTracked/COPY.md`).
-4. **Whether `Ranvier.Science` becomes an organisation repository**, and its name (the design, §5). It is a local
-   repository with no remote.
+4. **Whether `Ranvier.Science` becomes an organisation repository**, and its name (the design, §5). At release it is the
+   repository `ranvier-org/Ranvier.Science` on GitHub, created private on 2026-11-20 for the 0.1.0 release; making it
+   public is the owner's decision, because `examples/AstroTracked` is a full copy of the unpublished AstroShowcase app.
 5. **R-T: the table's header reads "confidence sequence"** where the design's sketch has "95% sequence" (*from
    documentation*: the design, §7.1): the level follows α, and α is split across channels, so a fixed percentage would
    be wrong or misread.
