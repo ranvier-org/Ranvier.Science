@@ -745,5 +745,64 @@ let tests =
                     "momentsBy")
         }
 
+        test "quantileBy raises the exception its projection raises" {
+            withGraph (fun () ->
+                let rows = rowsOf [| 1.0; 2.0; 3.0; 4.0; 50.0 |]
+                let boom (row: struct (int * float)) = if valueOf row = 50.0 then failwith "boom" else valueOf row
+
+                for p in [ 0.5; 1.0 ] do
+                    let q = rows.Rows |> Aggregate.quantileBy p boom
+
+                    let message =
+                        try
+                            q.Value |> ignore
+                            "no exception"
+                        with e ->
+                            e.Message
+
+                    Expect.equal message "boom" (sprintf "the message at p = %g" p))
+        }
+
+        test "removing a dominant row leaves an error within the stated bound" {
+            withGraph (fun () ->
+                let rows = rowsOf [| 1e16; 1.0; 2.0; 3.0 |]
+                let project row = Moments.add true Moments.zero (valueOf row)
+                let m = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard project
+                m.Value.Value |> ignore
+                rows.Remove 0 |> ignore
+                let bound = 4.0 * 2.220446049250313e-16 * 1e16
+                Expect.isLessThanOrEqual (abs (Moments.mean m.Value.Value - 2.0)) bound "the mean is within n * epsilon * the largest magnitude")
+        }
+
+        test "removing a dominant row matches the fold once the floor-0 re-fold has run" {
+            withGraph (fun () ->
+                let rows = rowsOf [| 1e16; 1.0; 2.0; 3.0 |]
+                let policy = FloatPolicy.standard |> FloatPolicy.withRefoldFloor 0
+                let project row = Moments.add true Moments.zero (valueOf row)
+                let m = rows.Rows |> Aggregate.momentsBy policy project
+                m.Value.Value |> ignore
+                rows.Remove 0 |> ignore
+                m.Value.Value |> ignore
+                rows.AddOrUpdate (struct (1, 4.0))
+                m.Value.Value |> ignore
+                rows.AddOrUpdate (struct (2, 5.0))
+                let expected = [ 4.0; 5.0; 3.0 ] |> List.fold (Moments.add true) Moments.zero
+                expectClose 1e-12 0.0 (Moments.mean expected) (Moments.mean m.Value.Value) "mean"
+                expectClose 1e-12 0.0 (Moments.variance expected) (Moments.variance m.Value.Value) "variance"
+                Expect.isTrue (m.Refolds () >= 1) "re-folded")
+        }
+
+        test "a removal that leaves a finite state non-finite re-folds under the fast policy" {
+            withGraph (fun () ->
+                let rows = rowsOf [| (1.0, 1e20); (2.0, 1.0); (4.0, 1.0) |]
+                let project row = let x, w = valueOf row in WeightedMoments.add false WeightedMoments.zero x w
+                let m = rows.Rows |> Aggregate.weightedMomentsBy FloatPolicy.fast project
+                m.Value.Value |> ignore
+                rows.Remove 0 |> ignore
+                rows.AddOrUpdate (struct (3, (6.0, 1.0)))
+                let expected = [ (2.0, 1.0); (4.0, 1.0); (6.0, 1.0) ] |> List.fold (fun s (x, w) -> WeightedMoments.add false s x w) WeightedMoments.zero
+                expectClose 1e-12 0.0 (WeightedMoments.mean expected) (WeightedMoments.mean m.Value.Value) "mean after the insert")
+        }
+
     ]
     @ moreThreadTests)

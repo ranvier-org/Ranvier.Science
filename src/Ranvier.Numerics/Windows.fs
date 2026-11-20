@@ -4,8 +4,9 @@ open System
 
 /// <summary>Exponentially decayed count, mean and variance of timed observations. Immutable.</summary>
 /// <remarks>
-/// An observation's weight halves every half-life. It is a struct of floats with structural equality, which under the
-/// core's default equality policy is not a cut-off: a reader of one publishes on every recomputation.
+/// An observation's weight halves every half-life. It is a struct: on .NET the core's default policy compares it by
+/// value, so an equal result cuts off; under Fable it compares by reference, so every recomputation publishes. A
+/// caller must not rely on a cut-off.
 /// </remarks>
 [<Struct; NoComparison>]
 type DecayedMoments =
