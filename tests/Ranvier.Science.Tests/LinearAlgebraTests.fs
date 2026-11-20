@@ -254,6 +254,26 @@ let tests =
                         expectClose 0.0 1e-14 expected[i] x[i] (sprintf "factor %g component %d" factor i)
             }
 
+            test "entries near the top of the doubles solve and invert" {
+                // Closed form: [[s, 1.5s], [s, -1.5s]]·[1/2; 1/3] = [s; 0], the inverse is [[1/(2s), 1/(2s)],
+                // [1/(3s), -1/(3s)]] and the determinant -3s², beyond the doubles.
+                for s in [ 8e307; 9e307; 1e308 ] do
+                    let a = Matrix.ofRows [| [| s; 1.5 * s |]; [| s; -1.5 * s |] |]
+                    let x = Matrix.solve a [| s; 0.0 |] |> expectOk "solve"
+                    expectClose 1e-15 0.0 0.5 x[0] (sprintf "scale %g, x0" s)
+                    expectClose 1e-15 0.0 (1.0 / 3.0) x[1] (sprintf "scale %g, x1" s)
+                    Expect.equal (Matrix.determinant a) -infinity (sprintf "scale %g, determinant" s)
+
+                let s = 1e308
+                let inv = Matrix.inverse (Matrix.ofRows [| [| s; 1.5 * s |]; [| s; -1.5 * s |] |]) |> expectOk "inverse"
+                // The entries are subnormal, so the bound allows two spacings of the subnormal grid (2 · 2^-1074).
+                let spacing = 2.0 * 4.9406564584124654e-324
+                expectClose 1e-15 spacing (0.5 / s) (Matrix.get inv 0 0) "inverse 0 0"
+                expectClose 1e-15 spacing (0.5 / s) (Matrix.get inv 0 1) "inverse 0 1"
+                expectClose 1e-15 spacing (1.0 / 3.0 / s) (Matrix.get inv 1 0) "inverse 1 0"
+                expectClose 1e-15 spacing (-1.0 / 3.0 / s) (Matrix.get inv 1 1) "inverse 1 1"
+            }
+
             test "a decomposition is reusable" {
                 let d = Matrix.lu matA |> expectOk "lu"
                 let first = LuDecomposition.solve d vecB
@@ -348,6 +368,28 @@ let tests =
                     expectClose 0.0 1e-14 1.0 x[1] (sprintf "factor %g slope" factor)
             }
 
+            test "QR of designs with entries near the top of the doubles" {
+                // Closed form: [[s, s], [s, -s]]·[1/2; 1/2] = [s; 0], with |R₀₀| = |R₁₁| = √2·s. The 4 x 2 design has
+                // orthogonal columns and y = s·(1, 1, 1, 1) is its first column, so x = [1; 0]. The 3 x 2 design of
+                // equal columns is rank-deficient at any scale.
+                let s = 1e308
+                let square = Matrix.qr (Matrix.ofRows [| [| s; s |]; [| s; -s |] |])
+                let x = QrDecomposition.leastSquares square [| s; 0.0 |] |> expectOk "2 x 2"
+                expectClose 1e-15 0.0 0.5 x[0] "2 x 2, x0"
+                expectClose 1e-15 0.0 0.5 x[1] "2 x 2, x1"
+                let r = QrDecomposition.r square
+                expectClose 1e-15 0.0 (sqrt 2.0 * s) (abs (Matrix.get r 0 0)) "2 x 2, R 0 0"
+                expectClose 1e-15 0.0 (sqrt 2.0 * s) (abs (Matrix.get r 1 1)) "2 x 2, R 1 1"
+
+                let tall = Matrix.ofRows [| [| s; 1e307 |]; [| s; -1e307 |]; [| s; 1e307 |]; [| s; -1e307 |] |]
+                let x4 = QrDecomposition.leastSquares (Matrix.qr tall) [| s; s; s; s |] |> expectOk "4 x 2"
+                expectClose 1e-15 0.0 1.0 x4[0] "4 x 2, x0"
+                expectClose 0.0 1e-15 0.0 x4[1] "4 x 2, x1"
+
+                let equal = Matrix.ofRows [| [| s; s |]; [| s; s |]; [| s; s |] |]
+                QrDecomposition.leastSquares (Matrix.qr equal) [| s; s; s |] |> expectError "rank-deficient" "equal columns"
+            }
+
             test "QR shapes" {
                 Expect.throwsT<ArgumentException>
                     (fun () -> Matrix.qr (Matrix.zero 2 3) |> ignore)
@@ -429,6 +471,14 @@ let tests =
                     for k in 1 .. n do
                         let lambda = factor * (2.0 - 2.0 * cos (float k * Math.PI / 11.0))
                         expectClose 1e-13 0.0 lambda e.Values[k - 1] (sprintf "factor %g value %d" factor k)
+            }
+
+            test "eigen near the top of the doubles" {
+                // Closed form: [[s, s], [s, -s]] has the eigenvalues ±√2·s.
+                let s = 1e308
+                let e = Matrix.symmetricEigen (Matrix.ofRows [| [| s; s |]; [| s; -s |] |]) |> expectOk "eigen"
+                expectClose 1e-15 0.0 (-(sqrt 2.0 * s)) e.Values[0] "value 0"
+                expectClose 1e-15 0.0 (sqrt 2.0 * s) e.Values[1] "value 1"
             }
 
             test "eigen edge cases" {

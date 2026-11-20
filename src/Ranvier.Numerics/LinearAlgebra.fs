@@ -74,11 +74,15 @@ type Matrix =
 type LuDecomposition =
     internal
         { Order: int
-          /// L below the diagonal (unit diagonal implied) and U on and above it, by rows.
+          /// L below the diagonal (unit diagonal implied) and U on and above it, by rows, of the matrix times Shrink.
           Factors: float[]
           /// Row i of P·A is row Permutation[i] of A.
           Permutation: int[]
           Sign: float
+          /// The exact power of two 2^-k by which the matrix was multiplied before factoring; 1 below 2^1000.
+          Shrink: float
+          /// 2^k, the reciprocal of Shrink.
+          Grow: float
           NonFinite: bool }
 
 /// Solving and the determinant from an `LuDecomposition`. Raises `ArgumentException` naming both lengths for a
@@ -108,7 +112,7 @@ module LuDecomposition =
             let x: float[] = Array.zeroCreate n
 
             for i in 0 .. n - 1 do
-                let mutable sum = b[decomposition.Permutation[i]]
+                let mutable sum = b[decomposition.Permutation[i]] * decomposition.Shrink
 
                 for j in 0 .. i - 1 do
                     sum <- sum - f[i * n + j] * x[j]
@@ -125,8 +129,9 @@ module LuDecomposition =
 
             x
 
-    /// The determinant: the product of U's diagonal in index order, times the permutation's sign; 1 for order 0. NaN
-    /// for a decomposition of a matrix with a non-finite entry. The product can overflow or underflow. Cost O(n).
+    /// The determinant: the product of U's diagonal in index order, times the permutation's sign, times 2^(kn) for a
+    /// matrix that `Matrix.lu` scaled by 2^-k; 1 for order 0. NaN for a decomposition of a matrix with a non-finite
+    /// entry. The product can overflow to ±∞ or underflow. Cost O(n).
     let determinant (decomposition: LuDecomposition) : float =
         if decomposition.NonFinite then
             nan
@@ -136,6 +141,10 @@ module LuDecomposition =
 
             for i in 0 .. n - 1 do
                 product <- product * decomposition.Factors[i * n + i]
+
+            if decomposition.Grow <> 1.0 then
+                for _ in 1..n do
+                    product <- product * decomposition.Grow
 
             product
 
@@ -197,12 +206,17 @@ type QrDecomposition =
     internal
         { Rows: int
           Columns: int
-          /// R on and above the diagonal; below it the Householder vectors, each with an implied leading 1, by rows.
+          /// R of the matrix times Shrink on and above the diagonal; below it the Householder vectors, each with an
+          /// implied leading 1, by rows.
           Factors: float[]
           /// The scalar τₖ of each reflection Hₖ = I − τₖ·vₖ·vₖᵀ; 0 where the column needed none.
           Taus: float[]
-          /// |Rₖₖ| at or below this value marks a rank-deficient design.
+          /// |Rₖₖ| of Factors at or below this value marks a rank-deficient design.
           RankThreshold: float
+          /// The exact power of two 2^-k by which the matrix was multiplied before factoring; 1 below 2^1000.
+          Shrink: float
+          /// 2^k, the reciprocal of Shrink.
+          Grow: float
           NonFinite: bool }
 
 /// Least squares and the triangular factor from a `QrDecomposition`.
@@ -242,10 +256,10 @@ module QrDecomposition =
                     sprintf
                         "leastSquares: the design is rank-deficient; |R| in column %d is at most %g, the threshold max(m, n)·ε·(largest column norm)."
                         deficientAt
-                        decomposition.RankThreshold
+                        (decomposition.RankThreshold * decomposition.Grow)
                 )
             else
-                let c = Array.copy y
+                let c = Array.map (fun v -> v * decomposition.Shrink) y
 
                 for k in 0 .. n - 1 do
                     let tau = decomposition.Taus[k]
@@ -275,8 +289,8 @@ module QrDecomposition =
                 Ok x
 
     /// The upper-triangular factor R as a columns × columns matrix, a fresh matrix on every call; the diagonal can hold
-    /// negative entries, and RᵀR equals AᵀA to rounding. A matrix of NaN for a decomposition of a matrix with a
-    /// non-finite entry. Cost O(n²).
+    /// negative entries, and RᵀR equals AᵀA to rounding. An entry beyond the doubles reads ±∞. A matrix of NaN for a
+    /// decomposition of a matrix with a non-finite entry. Cost O(n²).
     let r (decomposition: QrDecomposition) : Matrix =
         let n = decomposition.Columns
         let data: float[] = Array.zeroCreate (n * n)
@@ -285,7 +299,7 @@ module QrDecomposition =
             for j in 0 .. n - 1 do
                 data[i * n + j] <-
                     if decomposition.NonFinite then nan
-                    elif j >= i then decomposition.Factors[i * n + j]
+                    elif j >= i then decomposition.Factors[i * n + j] * decomposition.Grow
                     else 0.0
 
         { RowCount = n
@@ -521,6 +535,20 @@ module Matrix =
 
         struct (largest, nonFinite)
 
+    /// 2^1000: `lu`, `qr` and `symmetricEigen` scale a matrix whose largest |entry| reaches it.
+    let private scaleFrom = 1.0715086071862673e301
+
+    /// 2^-k and 2^k for the least whole k that takes the largest |entry| below 2^1000; 1 and 1 below it.
+    let private scaleFor (largest: float) : struct (float * float) =
+        let mutable shrink = 1.0
+        let mutable grow = 1.0
+
+        while largest * shrink >= scaleFrom do
+            shrink <- shrink * 0.5
+            grow <- grow * 2.0
+
+        struct (shrink, grow)
+
     /// Whether |aᵢⱼ − aⱼᵢ| ≤ 1e-12·largest for every pair, largest being max|aᵢⱼ|.
     let private isSymmetric (m: Matrix) (largest: float) : bool =
         let n = m.RowCount
@@ -536,9 +564,13 @@ module Matrix =
     /// The LU factorisation P·A = L·U by Gaussian elimination with partial pivoting (the pivot is the first entry of
     /// largest magnitude in the column), every update in a fixed order using only + − × ÷ and comparisons. Returns
     /// `Error "singular …"` when a pivot satisfies |uₖₖ| ≤ n·ε·max|aᵢⱼ|, with ε = 2⁻⁵², a threshold relative to the
-    /// scale of the matrix, so multiplying the matrix by a constant does not change the verdict. A 0 × 0 matrix gives
-    /// `Ok`. A matrix holding a NaN or infinite entry gives `Ok` with no singularity check, and every number read
-    /// through the result is NaN. Raises `ArgumentException` for a non-square matrix. Cost O(n³).
+    /// scale of the matrix, so multiplying the matrix by a constant does not change the verdict. A matrix whose
+    /// largest |entry| is at least 2^1000 is factored multiplied by the exact power of two 2^-k (k ≤ 24) that takes it
+    /// below 2^1000, so the elimination does not overflow; the solves, the inverse and the determinant undo the scale.
+    /// The scaling of the matrix and of a right-hand side is exact except for an entry it takes below the normal
+    /// doubles (an entry below 2^-998), which loses up to k bits. A 0 × 0 matrix gives `Ok`. A matrix holding a NaN or
+    /// infinite entry gives `Ok` with no singularity check, and every number read through the result is NaN. Raises
+    /// `ArgumentException` for a non-square matrix. Cost O(n³).
     let lu (a: Matrix) : Result<LuDecomposition, string> =
         checkSquare "lu" a
         let n = a.RowCount
@@ -550,13 +582,16 @@ module Matrix =
                   Factors = Array.zeroCreate (n * n)
                   Permutation = Array.init n id
                   Sign = 1.0
+                  Shrink = 1.0
+                  Grow = 1.0
                   NonFinite = true }
                 : LuDecomposition
             )
         else
-            let f = Array.copy a.Data
+            let struct (shrink, grow) = scaleFor largest
+            let f = Array.map (fun x -> x * shrink) a.Data
             let permutation = Array.init n id
-            let threshold = float n * epsilon * largest
+            let threshold = float n * epsilon * (largest * shrink)
             let mutable sign = 1.0
             let mutable singularAt = -1
             let mutable k = 0
@@ -600,7 +635,7 @@ module Matrix =
                     sprintf
                         "lu: the matrix is singular to working precision; the pivot in column %d is at most %g, the threshold n·ε·max|aᵢⱼ|."
                         singularAt
-                        threshold
+                        (threshold * grow)
                 )
             else
                 Ok(
@@ -608,6 +643,8 @@ module Matrix =
                       Factors = f
                       Permutation = permutation
                       Sign = sign
+                      Shrink = shrink
+                      Grow = grow
                       NonFinite = false }
                     : LuDecomposition
                 )
@@ -729,9 +766,12 @@ module Matrix =
                     )
 
     /// The Householder QR factorisation A = Q·R, one reflection per column in a fixed order, using `Vector.norm` and
-    /// otherwise only + − × ÷, `sqrt`, `abs` and comparisons. A matrix holding a NaN or infinite entry gives a
-    /// decomposition that reads NaN everywhere. A matrix with no columns is accepted. Raises `ArgumentException` unless
-    /// the matrix has at least as many rows as columns. Cost O(mn²).
+    /// otherwise only + − × ÷, `sqrt`, `abs` and comparisons. A matrix whose largest |entry| is at least 2^1000 is
+    /// factored multiplied by the exact power of two 2^-k that takes it below 2^1000, as `lu` does, so the reflections
+    /// and the column norms of the rank threshold do not overflow; `QrDecomposition.leastSquares` and
+    /// `QrDecomposition.r` undo the scale. A matrix holding a NaN or infinite entry gives a decomposition that reads
+    /// NaN everywhere. A matrix with no columns is accepted. Raises `ArgumentException` unless the matrix has at least
+    /// as many rows as columns. Cost O(mn²).
     let qr (a: Matrix) : QrDecomposition =
         let m = a.RowCount
         let n = a.ColumnCount
@@ -743,7 +783,7 @@ module Matrix =
                 )
             )
 
-        let struct (_, nonFinite) = scan a
+        let struct (largest, nonFinite) = scan a
 
         if nonFinite then
             { Rows = m
@@ -751,9 +791,12 @@ module Matrix =
               Factors = Array.zeroCreate (m * n)
               Taus = Array.zeroCreate n
               RankThreshold = 0.0
+              Shrink = 1.0
+              Grow = 1.0
               NonFinite = true }
         else
-            let f = Array.copy a.Data
+            let struct (shrink, grow) = scaleFor largest
+            let f = Array.map (fun x -> x * shrink) a.Data
             let taus: float[] = Array.zeroCreate n
             let mutable largestColumn = 0.0
 
@@ -800,13 +843,17 @@ module Matrix =
               Factors = f
               Taus = taus
               RankThreshold = float (max m n) * epsilon * largestColumn
+              Shrink = shrink
+              Grow = grow
               NonFinite = false }
 
     /// The eigenvalues in ascending order and the unit eigenvectors, by cyclic Jacobi rotations on a copy of the matrix
     /// (each rotation chosen so that the entry it targets becomes 0, using `sqrt` and otherwise only + − × ÷ and
     /// comparisons). A sweep rotates every off-diagonal pair once; sweeping stops when the Euclidean norm of the
-    /// off-diagonal entries is at most ε·‖A‖_F, with ε = 2⁻⁵² and both norms taken through `Vector.norm`, so the test
-    /// holds at any scale where the norms are representable. Returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤
+    /// off-diagonal entries is at most ε·‖A‖_F, with ε = 2⁻⁵² and both norms taken through `Vector.norm`. A matrix whose
+    /// largest |entry| is at least 2^1000 is rotated multiplied by the exact power of two 2^-k that takes it below
+    /// 2^1000, as `lu` does, and its values are multiplied back by 2^k, so the norms and the rotations do not overflow
+    /// and a value beyond the doubles reads ±∞. Returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤
     /// 1e-12·max|aᵢⱼ| for every pair, and `Error "did not converge …"` when 100 sweeps leave the off-diagonal norm
     /// above the threshold. Each eigenvector's component of largest magnitude is positive, the lowest index on an
     /// exact tie; equal eigenvalues keep the order of their diagonal positions. A 0 × 0 matrix gives `Ok` with empty
@@ -827,7 +874,8 @@ module Matrix =
         elif not (isSymmetric a largest) then
             Error "symmetricEigen: the matrix is not symmetric; some |aᵢⱼ − aⱼᵢ| exceeds 1e-12·max|aᵢⱼ|."
         else
-            let d = Array.copy a.Data
+            let struct (shrink, grow) = scaleFor largest
+            let d = Array.map (fun x -> x * shrink) a.Data
             let v = Array.init (n * n) (fun k -> if k / n = k % n then 1.0 else 0.0)
             let threshold = epsilon * Vector.norm d
 
@@ -851,7 +899,7 @@ module Matrix =
                         let apq = d[p * n + q]
 
                         if apq <> 0.0 then
-                            let tau = (d[q * n + q] - d[p * n + p]) / (2.0 * apq)
+                            let tau = (d[q * n + q] / 2.0 - d[p * n + p] / 2.0) / apq
 
                             let t =
                                 if abs tau > 1e150 then
@@ -922,7 +970,7 @@ module Matrix =
                         vectors[i * n + col] <- sign * column[i] / norm
 
                 Ok
-                    { Values = Array.init n (fun i -> d[order[i] * n + order[i]])
+                    { Values = Array.init n (fun i -> d[order[i] * n + order[i]] * grow)
                       Vectors =
                         { RowCount = n
                           ColumnCount = n
