@@ -12,6 +12,11 @@ let private sourcesOf (u: Uncertain) : int[] =
 
 let private relative (actual: float) (expected: float) = abs (actual - expected) / abs expected
 
+let private declared (result: Result<Entry, string>) : Entry =
+    match result with
+    | Result.Ok e -> e
+    | Result.Error message -> failtestf "expected an entry, got: %s" message
+
 [<Tests>]
 let tests =
     testList
@@ -269,7 +274,7 @@ let tests =
                     Expect.isTrue (model.TryFind "series").IsNone "a block has no entry")
             }
 
-            test "an input carries a source of uncertainty 0" {
+            test "an input of uncertainty 0 is exact" {
                 withGraph (fun () ->
                     let model = Model.create "m"
                     let a = Quantity.input model "a" "A" Units.metre 2.0<m>
@@ -277,8 +282,33 @@ let tests =
                     Expect.equal (a.Entry.Uncertainty ()) 0.0 "Uncertainty"
                     Expect.equal (Uncertain.value measured) 2.0 "the measured value"
                     Expect.equal (Uncertain.standardUncertainty measured) 0.0 "the measured standard uncertainty"
-                    Expect.equal (sourcesOf measured).Length 1 "one contribution"
+                    Expect.isEmpty (sourcesOf measured) "no contribution"
                     Expect.equal a.Entry.Formula "" "Formula")
+            }
+
+            test "an exact entry gives uncertainty 0 where a derivative is infinite" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let x = Quantity.input model "x" "X" Units.one 0.0
+                    Quantity.constant model "k" "K" Units.one 1.0 "a reference" |> ignore
+                    Quantity.measuredConstant model "q" "Q" Units.one 1.0 0.0 "a reference" |> ignore
+                    // d√x/dx = 1/(2√x) is +∞ at x = 0, and d(asin x)/dx = 1/√(1 − x²) is +∞ at x = 1.
+                    let root = declared (Quantity.formula model "root" "Root" "sqrt(x)")
+                    Expect.equal (root.Read ()) 0.0 "√0"
+                    Expect.equal (root.Uncertainty ()) 0.0 "the root of an exact 0"
+
+                    for id in [ "k"; "q" ] do
+                        let arc = declared (Quantity.formula model ("asin_" + id) "Arc" ("asin(" + id + ")"))
+                        Expect.equal (arc.Uncertainty ()) 0.0 ("asin of the exact 1, " + id)
+
+                    x.SetUncertainty 0.1
+                    let ids = sourcesOf (x.Entry.Measured ())
+                    Expect.equal ids.Length 1 "x holds its source once its uncertainty is 0.1"
+                    Expect.equal (sourcesOf (root.Measured ())) ids "the root carries one contribution, on x's id"
+                    x.SetUncertainty 0.0
+                    Expect.isEmpty (sourcesOf (x.Entry.Measured ())) "x is exact again at 0"
+                    x.SetUncertainty 0.2
+                    Expect.equal (sourcesOf (x.Entry.Measured ())) ids "x's id stays allocated")
             }
 
             test "inputWithUncertainty and SetUncertainty" {
@@ -345,6 +375,7 @@ let tests =
                         0.0
                         "an exact constant's measured standard uncertainty"
 
+                    Expect.isEmpty (sourcesOf (c.Entry.Measured ())) "an exact constant holds no contribution"
                     let g = Quantity.measuredConstant model "g" "G" Units.one 9.8 0.1 "a source"
                     Expect.equal g.Entry.Kind QuantityKind.Constant "Kind"
                     Expect.equal g.Entry.Source "a source" "Source"
