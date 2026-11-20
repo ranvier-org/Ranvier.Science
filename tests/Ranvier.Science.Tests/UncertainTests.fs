@@ -23,6 +23,13 @@ let private contributionOf (u: Uncertain) : float =
     let struct (_, c) = single u
     c
 
+// Fable 5.27 miscompiles an array pattern over struct tuples, so the tests project the entries instead.
+let private sourcesOf (u: Uncertain) : int[] =
+    Uncertain.contributions u |> Array.map (fun struct (id, _) -> id)
+
+let private amountsOf (u: Uncertain) : float[] =
+    Uncertain.contributions u |> Array.map (fun struct (_, c) -> c)
+
 #if !FABLE_COMPILER
 let private dotNetTests =
     [
@@ -111,11 +118,40 @@ let tests =
                 within 1e-15 (Uncertain.correlation (a + b) (a - b)) (-7.0 / 25.0) "correlation"
             }
 
+            test "a source held by both operands merges into one entry" {
+                let a = Uncertain.source 3.0 10.0
+                let b = Uncertain.source 4.0 20.0
+                let c = Uncertain.source 5.0 30.0
+                let idA, idB, idC = idOf a, idOf b, idOf c
+                // ∂/∂a = 2 and ∂/∂b = 1: 2 · 3 = 6 and 4.
+                Expect.equal (Uncertain.contributions ((a + b) + a)) [| struct (idA, 6.0); struct (idB, 4.0) |] "(a + b) + a"
+
+                // ∂/∂a = 1 − 1 = 0 and ∂/∂b = 1 + 1 = 2: 0 and 2 · 4 = 8.
+                Expect.equal
+                    (Uncertain.contributions ((a + b) - (a - b)))
+                    [| struct (idA, 0.0); struct (idB, 8.0) |]
+                    "(a + b) - (a - b)"
+
+                // ∂/∂a = 1, ∂/∂b = 1 and ∂/∂c = 2: 3, 4 and 2 · 5 = 10, in id order.
+                Expect.equal
+                    (Uncertain.contributions ((a + c) + (b + c)))
+                    [| struct (idA, 3.0); struct (idB, 4.0); struct (idC, 10.0) |]
+                    "(a + c) + (b + c)"
+
+                // Both sides are a + b + c: value 60, contributions 3, 4 and 5 in id order.
+                Expect.equal ((c + a) + b) (a + (b + c)) "(c + a) + b = a + (b + c)"
+            }
+
             test "products and quotients" {
                 let x = Uncertain.source 0.1 3.0
                 let y = Uncertain.source 0.2 4.0
                 // ∂(xy)/∂x = y, ∂(xy)/∂y = x; ∂(x/y)/∂x = 1/y, ∂(x/y)/∂y = −x/y².
                 Expect.equal (Uncertain.value (x * y)) 12.0 "x * y value"
+                // y · 0.1 = 0.4 and x · 0.2 = 0.6.
+                Expect.equal (sourcesOf (x * y)) [| idOf x; idOf y |] "x * y sources"
+                let product = amountsOf (x * y)
+                within 1e-15 product[0] 0.4 "x * y: x's contribution"
+                within 1e-15 product[1] 0.6 "x * y: y's contribution"
 
                 Expect.isTrue
                     (rel (Uncertain.standardUncertainty (x * y)) (sqrt ((0.1 * 4.0) ** 2.0 + (0.2 * 3.0) ** 2.0))
@@ -123,6 +159,11 @@ let tests =
                     "x * y standard uncertainty within relative 1e-15"
 
                 Expect.equal (Uncertain.value (x / y)) 0.75 "x / y value"
+                // 0.1 / y = 0.025 and −(x / y²) · 0.2 = −(3 / 16) · 0.2 = −0.0375.
+                Expect.equal (sourcesOf (x / y)) [| idOf x; idOf y |] "x / y sources"
+                let quotient = amountsOf (x / y)
+                within 1e-15 quotient[0] 0.025 "x / y: x's contribution"
+                within 1e-15 quotient[1] -0.0375 "x / y: y's contribution"
 
                 within
                     1e-15
@@ -134,6 +175,9 @@ let tests =
             test "floats on either side" {
                 let x = Uncertain.source 0.1 3.0
                 Expect.equal (2.0 * x) (x * 2.0) "2.0 * x = x * 2.0"
+                // 2 · 3 = 6 and 2 · 0.1 = 0.2.
+                Expect.equal (Uncertain.value (2.0 * x)) 6.0 "2.0 * x value"
+                Expect.equal (contributionOf (2.0 * x)) 0.2 "2.0 * x contribution"
                 Expect.equal (Uncertain.value (x + 1.0)) 4.0 "x + 1.0 value"
                 Expect.equal (Uncertain.contributions (x + 1.0)) (Uncertain.contributions x) "x + 1.0 keeps x's contribution"
                 Expect.equal (Uncertain.value (1.0 + x)) 4.0 "1.0 + x value"
@@ -198,10 +242,8 @@ let tests =
                 within 1e-14 (contributionOf (p ** 3.0)) (3.0 * 2.0 ** 2.0 * 0.1) "p ** 3.0 contribution"
                 let pq = p ** q
                 Expect.equal (Uncertain.value pq) 8.0 "p ** q value"
-                // Fable 5.27 miscompiles an array pattern over struct tuples, so the entries are projected instead.
-                let entries = Uncertain.contributions pq
-                Expect.equal (entries |> Array.map (fun struct (id, _) -> id)) [| idOf p; idOf q |] "p's source, then q's"
-                let c = entries |> Array.map (fun struct (_, c) -> c)
+                Expect.equal (sourcesOf pq) [| idOf p; idOf q |] "p's source, then q's"
+                let c = amountsOf pq
                 within 1e-14 c[0] (3.0 * 2.0 ** 2.0 * 0.1) "p's contribution"
                 within 1e-14 c[1] (8.0 * log 2.0 * 0.2) "q's contribution"
             }

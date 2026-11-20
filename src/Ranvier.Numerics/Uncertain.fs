@@ -205,14 +205,30 @@ type Uncertain =
         Uncertain.Combine(v, y * x ** (y - 1.0), a, v * log x, b)
 
 module Uncertain =
+#if FABLE_COMPILER
     let private lastSource = ref 0
+#else
+    // 64-bit so that calls after exhaustion never wrap the counter back to issuable ids.
+    let private lastSource = ref 0L
+#endif
+
+    let private exhausted () : 'a =
+        raise (InvalidOperationException "The source counter is exhausted: every id up to 2^31 - 2 has been issued.")
 
     let private nextSource () : int =
 #if FABLE_COMPILER
+        if lastSource.Value >= Int32.MaxValue - 1 then
+            exhausted ()
+
         lastSource.Value <- lastSource.Value + 1
         lastSource.Value
 #else
-        Threading.Interlocked.Increment &lastSource.contents
+        let id = Threading.Interlocked.Increment &lastSource.contents
+
+        if id >= int64 Int32.MaxValue then
+            exhausted ()
+
+        int id
 #endif
 
     /// A value with standard uncertainty 0 and an empty list of contributions.
@@ -224,9 +240,10 @@ module Uncertain =
         }
 
     /// The value with a new source, independent of every other, whose one contribution is the standard uncertainty.
-    /// Source ids ascend from 1 in the order of creation; on .NET, calls from several threads get distinct ids. Ids
-    /// are 32-bit and repeat after 2³² sources.
+    /// Source ids ascend from 1 in the order of creation; on .NET, calls from several threads get distinct ids.
     /// Raises `ArgumentOutOfRangeException` for a negative standard uncertainty. NaN and +∞ are accepted and propagate.
+    /// Ids run from 1 to 2³¹ − 2 per process: every call after the last of them raises `InvalidOperationException`
+    /// (the source counter is exhausted).
     let source (standardUncertainty: float) (value: float) : Uncertain =
         if standardUncertainty < 0.0 then
             raise (
