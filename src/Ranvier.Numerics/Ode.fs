@@ -346,8 +346,12 @@ module Ode =
                             scale[i] <- options.AbsoluteTolerance + options.RelativeTolerance * max (abs y[i]) (abs yNew[i])
 
                         let err = rms estimate scale
+                        let mutable finiteState = true
 
-                        if not (isFinite err) then
+                        for i in 0 .. n - 1 do
+                            if not (isFinite yNew[i]) then finiteState <- false
+
+                        if not finiteState || not (isFinite err) then
                             h <- step / 5.0
                             rejected <- rejected + 1
                             afterRejection <- true
@@ -418,12 +422,13 @@ module Ode =
     /// Ordinary Differential Equations I, 2nd edition, Table II.5.2; from documentation) with the first stage reused
     /// from the last. The step is accepted when the options' error norm is at most 1; the next step is
     /// h · min(5, max(0.2, 0.9 · err^(−1/5))), not above h straight after a rejection, and a non-finite norm rejects
-    /// with h/5. The last step is shortened to end at t1 exactly. An `InitialStep` of 0 uses the starting-step rule of
+    /// with h/5, as does a new state with a non-finite component. The last step is shortened to end at t1 exactly. An
+    /// `InitialStep` of 0 uses the starting-step rule of
     /// ibid. §II.4, and 1e-6 · (t1 − t0) when that is not a positive finite number.
     ///
     /// Returns `Error` with "step size underflow at t = …" when a step is not above 4ε|t| (ε = 2⁻⁵²) or below the
     /// smallest normal double, and with "MaximumSteps (n) reached at t = …" when the accepted plus rejected steps reach
-    /// `MaximumSteps`. A right-hand side that blows up or returns NaN ends in one of the two. Raises
+    /// `MaximumSteps`. A right-hand side that blows up, returns NaN or drives the state past the largest double ends in one of the two. Raises
     /// `ArgumentOutOfRangeException` for t1 below t0 (NaN included) and for options with a negative or NaN tolerance, both
     /// tolerances 0, a `MaximumStep` not above 0, a negative or NaN `InitialStep` or `MaximumSteps` below 1. t1 = t0
     /// gives the one time t0 and a copy of y0 without calling f.

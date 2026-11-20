@@ -135,6 +135,42 @@ let tests =
                 | Ok _ -> failtest "a NaN right-hand side"
             }
 
+            test "a state that overflows with a finite right-hand side gives Error" {
+                let overflow (y0: float) =
+                    match Ode.solve OdeOptions.standard (fun _ _ -> [| 1e308 |]) 0.0 [| y0 |] 10.0 with
+                    | Error _ -> ()
+                    | Ok s -> failtestf "from %g: Ok with last state %g" y0 s.States.[s.States.Length - 1].[0]
+
+                overflow 1e308
+                overflow 0.0
+            }
+
+            test "solveAt reads the states of the accepted steps at their ends" {
+                let s = Ode.solve tight oscillator 0.0 [| 1.0; 0.0 |] 3.0 |> expectOk "solve"
+                let states = Ode.solveAt tight oscillator 0.0 [| 1.0; 0.0 |] s.Times |> expectOk "solveAt"
+                Expect.equal states s.States "the state at each accepted step's end"
+            }
+
+            test "solveAt with MaximumStep and many times stays within its bound" {
+                let options = { tight with MaximumStep = 0.05 }
+                let times = Array.init 40 (fun k -> 0.15 * float (k + 1))
+                let states = Ode.solveAt options oscillator 0.0 [| 1.0; 0.0 |] times |> expectOk "oscillator"
+
+                for i in 0 .. times.Length - 1 do
+                    let t = times.[i]
+                    Expect.isTrue (abs (states.[i].[0] - cos t) <= 10.0 * (1e-10 + 1e-10 * abs (cos t))) (sprintf "cos at t = %g" t)
+                    Expect.isTrue (abs (states.[i].[1] + sin t) <= 10.0 * (1e-10 + 1e-10 * abs (sin t))) (sprintf "-sin at t = %g" t)
+            }
+
+            test "solveAt gives Error and raises like solve" {
+                Ode.solveAt { OdeOptions.standard with MaximumSteps = 10 } oscillator 0.0 [| 1.0; 0.0 |] [| 1.0; 1000.0 |]
+                |> expectError "MaximumSteps" "the step budget"
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> Ode.solveAt OdeOptions.standard (fun _ _ -> [| 0.0; 0.0 |]) 0.0 [| 1.0 |] [| 1.0 |] |> ignore)
+                    "a result of length 2 for a state of length 1"
+            }
+
             test "a raising or misshapen right-hand side" {
                 Expect.throwsC
                     (fun () -> Ode.solve OdeOptions.standard (fun _ _ -> failwith "boom") 0.0 [| 1.0 |] 1.0 |> ignore)
