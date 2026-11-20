@@ -6,6 +6,8 @@ Sections:
     gamma   ln|Gamma|, Gamma, psi, B and ln B (with pairs where |ln B| >= 256), ln n!, ln C(n, k), ln(1 + x) and
             e^x - 1 at negative x; the constants and series coefficients of Special.fs
     erf     erf and erfc; the constants 2 / sqrt(pi) and 1 / sqrt(pi) of Special.fs
+    incgamma
+            the regularised incomplete gamma functions P(a, x) and Q(a, x), printed as 0.0 below 1e-300
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -37,6 +39,17 @@ Methods:
                 summed at the context precision plus ceil(x^2 / ln 10) plus GUARD digits.
     erfc        1 - erf(x), summed at the context precision plus ceil(2 x^2 / ln 10) plus GUARD digits: erfc(x) falls
                 like e^(-x^2), and the subtraction cancels another x^2 / ln 10 digits.
+    P(a, x)     gamma_p: x^a e^-x / Gamma(a + 1) times the sum over n >= 0 of x^n / ((a + 1) ... (a + n)). The exponent
+                a ln x - x - ln Gamma(a + 1) is formed at the context precision plus GUARD plus the digits of its largest
+                term, so it keeps that precision in absolute terms. The sum runs until a term leaves it unchanged and
+                2x < a + n + 1; from there each term is below half the one before, so the remainder is below the last
+                term. ln Gamma(a + 1) comes from ln_gamma_precise: ln Gamma's method with K = max(30, 50 ceil(d / 200))
+                terms for d = the precision plus GUARD, and the shift raised until the first omitted term is below
+                10^-d (asserted), so it holds at the raised precision Q needs.
+    Q(a, x)     gamma_q: 1 - P(a, x), at the context precision plus ceil(x / ln 10) + 20 digits, since the subtraction
+                cancels the leading -log10 Q(a, x) digits. Where that leaves fewer digits than the context's (Q falls
+                like a for small a), it is computed again with 20 more digits than it cancelled, or twice the extra
+                digits where the difference is 0.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -311,6 +324,91 @@ def erfc_value(x) -> Decimal:
     return +result
 
 
+@lru_cache(maxsize=None)
+def bernoulli_table(n_max: int) -> tuple[Fraction, ...]:
+    """B(0) to B(n_max), computed once for each n_max."""
+    return tuple(bernoulli(n_max))
+
+
+def ln_gamma_precise(z) -> Decimal:
+    """ln Gamma(z) for z > 0 at any context precision p: computed with absolute error below 10^-(p + GUARD), then
+    rounded to p digits. Stirling's series after a shift, as in ln_gamma, with the number of terms and the shift raised
+    with p."""
+    z = Decimal(z)
+    with localcontext() as ctx:
+        digits = ctx.prec + GUARD
+        terms = max(TERMS, 50 * math.ceil(digits / 200))
+        numbers = bernoulli_table(2 * terms + 2)
+        coefficient = numbers[2 * terms + 2] / ((2 * terms + 2) * (2 * terms + 1))
+        # The least w >= SHIFT_TO whose first omitted term, coefficient / w^(2 terms + 1), is below 10^-digits.
+        log_w = (math.log10(abs(coefficient.numerator)) - math.log10(coefficient.denominator) + digits) / (
+            2 * terms + 1
+        )
+        n = max(0, math.ceil(max(SHIFT_TO, 10**log_w + 1) - float(z)))
+        w = z + n
+        # ln Gamma(w) and ln(z (z + 1) ... (z + n - 1)) reach w ln w, and the product rounds n times.
+        ctx.prec = digits + len(str(math.ceil(float(w) * math.log(float(w))))) + len(str(n)) + 2
+        product = Decimal(1)
+        for k in range(n):
+            product *= z + k
+        series = Decimal(0)
+        power = w
+        w2 = w * w
+        for k in range(1, terms + 1):
+            series += dec(numbers[2 * k] / (2 * k * (2 * k - 1))) / power
+            power *= w2
+        omitted = dec(coefficient) / power
+        assert abs(omitted) < Decimal(10) ** -digits, (z, omitted)
+        result = (w - Decimal("0.5")) * w.ln() - w + (2 * pi()).ln() / 2 + series - product.ln()
+    return +result
+
+
+def incomplete_gamma_sum(a: Decimal, x: Decimal) -> Decimal:
+    """The sum over n >= 0 of x^n / ((a + 1) ... (a + n)), at the precision of the current context, for a > 0, x > 0."""
+    term = Decimal(1)
+    total = term
+    n = 0
+    while True:
+        n += 1
+        term = term * x / (a + n)
+        # Once 2x < a + n + 1, each later term is below half the one before, so the remainder is below this term.
+        if total + term == total and 2 * x < a + n + 1:
+            return total
+        total += term
+
+
+def gamma_p(a, x) -> Decimal:
+    """P(a, x), the regularised lower incomplete gamma function, for a > 0 and x >= 0."""
+    a, x = Decimal(a), Decimal(x)
+    if x == 0:
+        return Decimal(0)
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        # The exponent's terms reach x, |a ln x| and ln Gamma(a + 1) <= (a + 1) ln(a + 1); it needs absolute precision.
+        magnitude = max(x, abs(a * x.ln()), (a + 1) * (a + 1).ln(), Decimal(1))
+        ctx.prec += magnitude.adjusted() + 1
+        exponent = a * x.ln() - x - ln_gamma_precise(a + 1)
+        result = exponent.exp() * incomplete_gamma_sum(a, x)
+    return +result
+
+
+def gamma_q(a, x) -> Decimal:
+    """Q(a, x) = 1 - P(a, x), the regularised upper incomplete gamma function, for a > 0 and x >= 0."""
+    extra = math.ceil(float(x) / math.log(10)) + 20
+    while True:
+        with localcontext() as ctx:
+            ctx.prec += extra
+            result = 1 - gamma_p(a, x)
+        # The subtraction leaves extra + result.adjusted() digits more than the context's; for small a, Q falls like a
+        # and cancels more than x / ln 10 digits.
+        if result == 0:
+            extra *= 2
+        elif extra + result.adjusted() < 0:
+            extra = 20 - result.adjusted()
+        else:
+            return +result
+
+
 def two_over_sqrt_pi() -> Decimal:
     return 2 / pi().sqrt()
 
@@ -463,7 +561,39 @@ def section_erf() -> None:
     print_cases("erfcCases", "(float * float)[]", [(x, value(erfc_value, x)) for x in erfc_xs])
 
 
-SECTIONS = {"gamma": section_gamma, "erf": section_erf}
+def floored(v: float) -> float:
+    """v, or 0.0 when v is below 1e-300."""
+    return 0.0 if v < 1e-300 else v
+
+
+def section_incgamma() -> None:
+    print("// python -I tests/reference/special.py incgamma")
+    print()
+
+    incgamma_axs = [
+        (0.5, 0.01), (0.5, 0.1), (0.5, 2.0), (1.0, 1e-5), (1.0, 1.0), (1.0, 690.0), (2.5, 3.0), (3.0, 0.5),
+        (10.0, 10.0), (10.0, 30.0), (10.0, 100.0), (30.0, 10.0), (100.0, 90.0), (100.0, 110.0), (1000.0, 1000.0),
+        (1000.0, 900.0), (0.01, 0.001), (0.001, 5.0),
+        # The worst points of a dense seeded scan of 7,932 points on .NET and JavaScript: the lower tail from a = 8 on,
+        # the upper tail near 1e-300, and Q below a + 1 for a < 1.
+        (951.0231977761456, 272.1197103557075), (183.62946971865998, 3.2110236532743675),
+        (720.8248999971448, 169.1963751588507), (999.9999999999999, 2665.0), (709.2095670657058, 1809.3012846853007),
+        (1e-200, 0.5615), (0.2398004852923794, 1.2191387010096424),
+        # Where the method as first written missed the bound: (x - a) / a loses x when x is far below a, and 1 - P
+        # cancels below a + 1 for small a.
+        (18.09467398327835, 2.9282007020591715e-15), (112.97305207532186, 0.21468962230833327),
+        (1.691588477341068e-10, 0.8505543045792839),
+        # The ends of the double range: a subnormal x, a subnormal a, and x0 / x overflowing.
+        (0.5, 5e-324), (5e-324, 0.5), (1e-12, 5e-324),
+    ]
+    print_cases(
+        "incompleteGammaCases",
+        "(float * float * float * float)[]",
+        [(a, x, floored(value(gamma_p, a, x)), floored(value(gamma_q, a, x))) for a, x in incgamma_axs],
+    )
+
+
+SECTIONS = {"gamma": section_gamma, "erf": section_erf, "incgamma": section_incgamma}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in SECTIONS:

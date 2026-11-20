@@ -1,6 +1,7 @@
 // Reference values: the case tables below, printed by
 //   python -I tests/reference/special.py gamma
 //   python -I tests/reference/special.py erf
+//   python -I tests/reference/special.py incgamma
 // and the identities and series written in each test.
 module Ranvier.Science.Tests.SpecialTests
 
@@ -229,6 +230,42 @@ let private erfcCases: (float * float)[] =
         1.9952152428717123, 0.004777573082879369
     |]
 
+// python -I tests/reference/special.py incgamma
+let private incompleteGammaCases: (float * float * float * float)[] =
+    [|
+        0.5, 0.01, 0.1124629160182849, 0.8875370839817152
+        0.5, 0.1, 0.345279153981423, 0.654720846018577
+        0.5, 2.0, 0.9544997361036416, 0.04550026389635842
+        1.0, 1e-05, 9.999950000166666e-06, 0.9999900000499998
+        1.0, 1.0, 0.6321205588285577, 0.36787944117144233
+        1.0, 690.0, 1.0, 2.171738281389827e-300
+        2.5, 3.0, 0.6937810815867216, 0.3062189184132784
+        3.0, 0.5, 0.014387677966970687, 0.9856123220330293
+        10.0, 10.0, 0.5420702855281478, 0.4579297144718522
+        10.0, 30.0, 0.9999928782491372, 7.121750862815577e-06
+        10.0, 100.0, 1.0, 1.1253473960842733e-31
+        30.0, 10.0, 2.5099512015279076e-07, 0.9999997490048799
+        100.0, 90.0, 0.15822098918643016, 0.8417790108135699
+        100.0, 110.0, 0.8417213299399129, 0.15827867006008708
+        1000.0, 1000.0, 0.5042052441802155, 0.4957947558197845
+        1000.0, 900.0, 0.0005499022657117829, 0.9994500977342882
+        0.01, 0.001, 0.938570652526129, 0.061429347473871014
+        0.001, 5.0, 0.9999988490186603, 1.150981339730861e-06
+        951.0231977761456, 272.1197103557075, 1.9335245240493914e-224, 1.0
+        183.62946971865998, 3.2110236532743675, 1.377956710571754e-246, 1.0
+        720.8248999971448, 169.1963751588507, 1.3867721104066327e-216, 1.0
+        999.9999999999999, 2665.0, 1.0, 2.991878023048829e-300
+        709.2095670657058, 1809.3012846853007, 1.0, 4.804928779504767e-192
+        1e-200, 0.5615, 1.0, 4.914931248869244e-201
+        0.2398004852923794, 1.2191387010096424, 0.953063746869373, 0.046936253130626965
+        18.09467398327835, 2.9282007020591715e-15, 1.2487086434146043e-279, 1.0
+        112.97305207532186, 0.21468962230833327, 1.3399078295016432e-260, 1.0
+        1.691588477341068e-10, 0.8505543045792839, 0.9999999999520027, 4.799725146888966e-11
+        0.5, 5e-324, 2.508114666398235e-162, 1.0
+        5e-324, 0.5, 1.0, 0.0
+        1e-12, 5e-324, 0.9999999992561371, 7.438628559798145e-10
+    |]
+
 let private raises (name: string) (f: unit -> float) : unit =
     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> f () |> ignore) name
 
@@ -428,5 +465,106 @@ let tests =
                 raises "logFactorial -1" (fun () -> Special.logFactorial -1)
                 raises "logChoose 5 6" (fun () -> Special.logChoose 5 6)
                 raises "logChoose 5 -1" (fun () -> Special.logChoose 5 (-1))
+            }
+
+            test "incomplete gamma matches the reference" {
+                for a, x, expectedP, expectedQ in incompleteGammaCases do
+                    let at = sprintf "at a = %.17g, x = %.17g" a x
+
+                    if expectedP >= 1e-300 then
+                        expectClose 1e-12 0.0 expectedP (Special.gammaLowerRegularized a x) ("P " + at)
+
+                    if expectedQ >= 1e-300 then
+                        expectClose 1e-12 0.0 expectedQ (Special.gammaUpperRegularized a x) ("Q " + at)
+            }
+
+            test "P of one half is erf of the root" {
+                // P(½, x) = erf √x.
+                for x in [ 0.01; 0.5; 2.0; 10.0 ] do
+                    let expected = Special.erf (sqrt x)
+                    expectClose 1e-12 0.0 expected (Special.gammaLowerRegularized 0.5 x) (sprintf "x = %g" x)
+            }
+
+            test "Q of an integer shape is a Poisson sum" {
+                // Q(n, x) = e⁻ˣ Σₖ₌₀ⁿ⁻¹ xᵏ/k!.
+                let expected = exp -0.5 * (1.0 + 0.5 + 0.125)
+                expectClose 1e-12 0.0 expected (Special.gammaUpperRegularized 3.0 0.5) "Q(3, 0.5)"
+
+                for x in [ 5.0; 50.0; 500.0 ] do
+                    expectClose 1e-12 0.0 (exp (-x)) (Special.gammaUpperRegularized 1.0 x) (sprintf "Q(1, %g)" x)
+            }
+
+            test "P and Q sum to one" {
+                for a, x, _, _ in incompleteGammaCases do
+                    let sum = Special.gammaLowerRegularized a x + Special.gammaUpperRegularized a x
+                    expectClose 0.0 4e-16 1.0 sum (sprintf "a = %.17g, x = %.17g" a x)
+            }
+
+            test "incomplete gamma limits" {
+                for a in [ 0.5; 3.0; 100.0 ] do
+                    Expect.equal (Special.gammaLowerRegularized a 0.0) 0.0 (sprintf "P(%g, 0)" a)
+                    Expect.equal (Special.gammaUpperRegularized a 0.0) 1.0 (sprintf "Q(%g, 0)" a)
+                    Expect.equal (Special.gammaLowerRegularized a infinity) 1.0 (sprintf "P(%g, infinity)" a)
+                    Expect.equal (Special.gammaUpperRegularized a infinity) 0.0 (sprintf "Q(%g, infinity)" a)
+            }
+
+            test "the inverse round-trips" {
+                for a in [ 0.1; 0.5; 1.0; 2.5; 10.0; 100.0; 1000.0 ] do
+                    for p in [ 1e-10; 1e-3; 0.05; 0.5; 0.95; 0.999; 1.0 - 1e-10 ] do
+                        let x = Special.gammaLowerRegularizedInverse a p
+                        let at = sprintf "a = %g, p = %.17g, x = %.17g" a p x
+                        expectClose 1e-12 0.0 p (Special.gammaLowerRegularized a x) at
+
+                // Deep in the lower tail, where the starting point's Wilson–Hilferty cube is negative, and the worst
+                // case of a dense seeded scan of 3,156 pairs on .NET and JavaScript.
+                for a, p in
+                    [
+                        2.5, 1e-300
+                        3.922067060095062, 1.3028626123441362e-276
+                        100.0, 1e-300
+                        100.0, 1e-200
+                        717.0392350199576, 2.6218221520418342e-295
+                    ] do
+                    let x = Special.gammaLowerRegularizedInverse a p
+                    let at = sprintf "a = %.17g, p = %.17g, x = %.17g" a p x
+                    expectClose 1e-12 0.0 p (Special.gammaLowerRegularized a x) at
+            }
+
+            test "the inverse at 0 and 1" {
+                for a in [ 0.5; 10.0 ] do
+                    Expect.equal (Special.gammaLowerRegularizedInverse a 0.0) 0.0 (sprintf "a = %g, p = 0" a)
+                    Expect.equal (Special.gammaLowerRegularizedInverse a 1.0) infinity (sprintf "a = %g, p = 1" a)
+
+                // P(0.01, x) exceeds 1e-10 at every positive double x, so the root of P(0.01, x) = 1e-10 is below
+                // them all.
+                Expect.isGreaterThan (Special.gammaLowerRegularized 0.01 5e-324) 1e-10 "P(0.01, 5e-324)"
+                let belowAll = Special.gammaLowerRegularizedInverse 0.01 1e-10
+                Expect.equal belowAll 0.0 "a root below the least positive double"
+            }
+
+            test "domain and NaN" {
+                for a in [ 0.0; -1.0; infinity ] do
+                    raises (sprintf "P with a = %g" a) (fun () -> Special.gammaLowerRegularized a 1.0)
+                    raises (sprintf "Q with a = %g" a) (fun () -> Special.gammaUpperRegularized a 1.0)
+                    raises (sprintf "inverse with a = %g" a) (fun () -> Special.gammaLowerRegularizedInverse a 0.5)
+
+                raises "P with x = -1" (fun () -> Special.gammaLowerRegularized 1.0 -1.0)
+                raises "Q with x = -1" (fun () -> Special.gammaUpperRegularized 1.0 -1.0)
+                raises "inverse with p = -0.1" (fun () -> Special.gammaLowerRegularizedInverse 1.0 -0.1)
+                raises "inverse with p = 1.1" (fun () -> Special.gammaLowerRegularizedInverse 1.0 1.1)
+                // An argument outside the domain raises even beside a NaN.
+                raises "P with a = NaN and x = -1" (fun () -> Special.gammaLowerRegularized nan -1.0)
+                raises "inverse with a = -1 and p = NaN" (fun () -> Special.gammaLowerRegularizedInverse -1.0 nan)
+
+                for name, value in
+                    [
+                        "P(NaN, 1)", Special.gammaLowerRegularized nan 1.0
+                        "P(1, NaN)", Special.gammaLowerRegularized 1.0 nan
+                        "Q(NaN, 1)", Special.gammaUpperRegularized nan 1.0
+                        "Q(1, NaN)", Special.gammaUpperRegularized 1.0 nan
+                        "inverse(NaN, 0.5)", Special.gammaLowerRegularizedInverse nan 0.5
+                        "inverse(1, NaN)", Special.gammaLowerRegularizedInverse 1.0 nan
+                    ] do
+                    Expect.isTrue (Double.IsNaN value) name
             }
         ]

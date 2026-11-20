@@ -457,3 +457,232 @@ module Special =
         if Double.IsNaN x then nan
         elif x < 0.0 then 2.0 - erfcPositive (-x)
         else erfcPositive x
+
+    /// The most series terms or continued-fraction steps the incomplete gamma functions take before giving NaN.
+    let private incompleteGammaCap = 10000
+
+    /// Raises unless a > 0 and finite; a NaN passes.
+    let private checkShape (a: float) : unit =
+        if not (Double.IsNaN a) && not (a > 0.0 && a < infinity) then
+            raise (
+                ArgumentOutOfRangeException(
+                    nameof a,
+                    sprintf "The regularised incomplete gamma needs a > 0 and finite; a = %g." a
+                )
+            )
+
+    /// Raises unless a > 0 and finite and x ≥ 0; a NaN passes.
+    let private checkIncompleteGammaArguments (a: float) (x: float) : unit =
+        checkShape a
+
+        if x < 0.0 then
+            raise (
+                ArgumentOutOfRangeException(
+                    nameof x,
+                    sprintf "The regularised incomplete gamma needs x >= 0; x = %g." x
+                )
+            )
+
+    /// xᵃe⁻ˣ/Γ(a) for a > 0 and 0 < x < ∞. From a = 8 on it is exp(a(ln(1 + t) − t) − R(a)) √(a/2π), with
+    /// t = (x − a)/a and R the remainder `stirlingRemainder`, so that no large ln Γ(a) is subtracted. a(ln(1 + t) − t)
+    /// is `a * log1pmx t` for |t| < ½ and a ln(x/a) + (a − x) otherwise, because forming t loses x's precision when x
+    /// is far below a. Below 8 it is exp(a ln x − x − ln Γ(a)).
+    let private gammaPrefactor (a: float) (x: float) : float =
+        if a >= 8.0 then
+            let t = (x - a) / a
+            let exponent = if abs t < 0.5 then a * log1pmx t else a * Math.Log (x / a) + (a - x)
+            Math.Exp (exponent - stirlingRemainder a) * Math.Sqrt (a / (2.0 * Math.PI))
+        else
+            Math.Exp (a * Math.Log x - x - gammaLn a)
+
+    /// P(a, x) for 0 < x < a + 1: xᵃe⁻ˣ/Γ(a + 1) · Σₙ xⁿ/((a + 1)…(a + n)), summed until a term leaves the sum
+    /// unchanged. Below a = 8 the factor is exp(a ln x − x − ln Γ(a + 1)), so a subnormal a never divides an
+    /// underflowed xᵃe⁻ˣ/Γ(a). NaN when a term still changes the sum after `incompleteGammaCap` terms.
+    let private lowerSeries (a: float) (x: float) : float =
+        let mutable term = 1.0
+        let mutable sum = 1.0
+        let mutable n = 0
+        let mutable converged = false
+
+        while not converged && n < incompleteGammaCap do
+            n <- n + 1
+            term <- term * x / (a + float n)
+            let next = sum + term
+            converged <- next = sum
+            sum <- next
+
+        if not converged then nan
+        elif a >= 8.0 then gammaPrefactor a x * sum / a
+        else Math.Exp (a * Math.Log x - x - gammaLn (a + 1.0)) * sum
+
+    /// Q(a, x) for x > 0, fastest from x = a + 1 on: xᵃe⁻ˣ/Γ(a) · 1/(x + 1 − a − 1(1 − a)/(x + 3 − a − 2(2 − a)/(x + 5
+    /// − a − …))), Legendre's continued fraction by the modified Lentz method. NaN when it has not converged after
+    /// `incompleteGammaCap` steps.
+    let private upperContinuedFraction (a: float) (x: float) : float =
+        let tiny = 1e-300
+        let mutable b = x + 1.0 - a
+        let mutable c = 1.0 / tiny
+        let mutable d = 1.0 / b
+        let mutable h = d
+        let mutable n = 0
+        let mutable converged = false
+
+        while not converged && n < incompleteGammaCap do
+            n <- n + 1
+            let an = -(float n) * (float n - a)
+            b <- b + 2.0
+            d <- an * d + b
+
+            if abs d < tiny then
+                d <- tiny
+
+            c <- b + an / c
+
+            if abs c < tiny then
+                c <- tiny
+
+            d <- 1.0 / d
+            let delta = d * c
+            h <- h * delta
+            converged <- abs (delta - 1.0) <= 2.220446049250313e-16 // 2⁻⁵²
+
+        if converged then gammaPrefactor a x * h else nan
+
+    /// Q(a, x) for a < 1 and 0 < x < a + 1, where 1 − P(a, x) would cancel: Q(a, x₀) + (1/Γ(a)) ∫ₓ^x₀ tᵃ⁻¹e⁻ᵗ dt with
+    /// x₀ = a + 1. Q(a, x₀) comes from the continued fraction, and the integral is Σₙ (−1)ⁿ (x₀ᵃ⁺ⁿ − xᵃ⁺ⁿ)/(n!(a + n)),
+    /// summed until a term leaves the sum unchanged, its n = 0 term xᵃ(e^(a ln(x₀/x)) − 1)/a by `expm1`. Q(a, x₀) and
+    /// the integral are both positive, so their sum does not cancel. NaN when a term still changes the sum after
+    /// `incompleteGammaCap` terms.
+    let private upperSmallShape (a: float) (x: float) : float =
+        let x0 = a + 1.0
+        let xa = Math.Exp (a * Math.Log x)
+        let ratio = x0 / x
+        let logRatio = if ratio < infinity then Math.Log ratio else Math.Log x0 - Math.Log x
+        let mutable sum = xa * expm1 (a * logRatio) / a
+        let mutable coefficient = 1.0
+        let mutable powerX0 = Math.Exp (a * Math.Log x0)
+        let mutable powerX = xa
+        let mutable n = 0
+        let mutable converged = false
+
+        while not converged && n < incompleteGammaCap do
+            n <- n + 1
+            coefficient <- -coefficient / float n
+            powerX0 <- powerX0 * x0
+            powerX <- powerX * x
+            let next = sum + coefficient * (powerX0 - powerX) / (a + float n)
+            converged <- next = sum
+            sum <- next
+
+        if converged then
+            upperContinuedFraction a x0 + sum * a * Math.Exp (-(gammaLn (a + 1.0)))
+        else
+            nan
+
+    /// struct (P(a, x), Q(a, x)) for a > 0 finite and x ≥ 0, neither NaN. Below x = a + 1, P by its series; above, Q by
+    /// the continued fraction; the other as 1 minus. Below a + 1 with a < 1 and P > ½, Q by `upperSmallShape` and P as
+    /// 1 − Q instead.
+    let private regularizedGamma (a: float) (x: float) : struct (float * float) =
+        if x = 0.0 then
+            struct (0.0, 1.0)
+        elif x = infinity then
+            struct (1.0, 0.0)
+        elif x < a + 1.0 then
+            let p = lowerSeries a x
+
+            if a < 1.0 && p > 0.5 then
+                let q = upperSmallShape a x
+                struct (1.0 - q, q)
+            else
+                struct (p, 1.0 - p)
+        else
+            let q = upperContinuedFraction a x
+            struct (1.0 - q, q)
+
+    /// P(a, x) = (1/Γ(a)) ∫₀ˣ tᵃ⁻¹e⁻ᵗ dt, the regularised lower incomplete gamma function, for a > 0 finite and
+    /// x ≥ 0: 0 at x = 0, 1 at x = +∞, NaN when a or x is NaN. Raises `ArgumentOutOfRangeException` when a ≤ 0,
+    /// a = +∞ or x < 0, even with the other argument NaN. Relative error at most 1e-12 over 0 < a ≤ 1000 where
+    /// P(a, x) ≥ 1e-300, pinned by the `Special` tests against `tests/reference/special.py` (measured here). Cost: a
+    /// series or continued fraction of at most 10 000 terms, NaN past them; a dense scan of a ≤ 1000 took at most 270
+    /// series terms and 95 continued-fraction steps (measured here).
+    let gammaLowerRegularized (a: float) (x: float) : float =
+        checkIncompleteGammaArguments a x
+
+        if Double.IsNaN a || Double.IsNaN x then
+            nan
+        else
+            let struct (p, _) = regularizedGamma a x
+            p
+
+    /// Q(a, x) = 1 − P(a, x) = (1/Γ(a)) ∫ₓ^∞ tᵃ⁻¹e⁻ᵗ dt, the regularised upper incomplete gamma function, for a > 0
+    /// finite and x ≥ 0, accurate where P(a, x) is near 1: 1 at x = 0, 0 at x = +∞, NaN when a or x is NaN. Raises
+    /// `ArgumentOutOfRangeException` when a ≤ 0, a = +∞ or x < 0, even with the other argument NaN. Relative error at
+    /// most 1e-12 over 0 < a ≤ 1000 where Q(a, x) ≥ 1e-300, pinned by the `Special` tests against
+    /// `tests/reference/special.py` (measured here). Cost: as `gammaLowerRegularized`.
+    let gammaUpperRegularized (a: float) (x: float) : float =
+        checkIncompleteGammaArguments a x
+
+        if Double.IsNaN a || Double.IsNaN x then
+            nan
+        else
+            let struct (_, q) = regularizedGamma a x
+            q
+
+    /// The starting point of Numerical Recipes, 3rd edition, §6.2.1 (`invgammp`, from documentation). For a > 1, the
+    /// Wilson–Hilferty form a(1 − 1/(9a) + z/(3√a))³, with z the normal quantile of p by the rational form of
+    /// Abramowitz and Stegun 26.2.22, raised to at least (pΓ(a + 1))^(1/a). That floor replaces the book's 1e-3:
+    /// P(a, x) ≤ xᵃ/Γ(a + 1), so the root is never below it, and it is close to the root deep in the lower tail, where
+    /// the cube goes negative. For a ≤ 1, with t = 1 − a(0.253 + 0.12a): (p/t)^(1/a) when p < t, and
+    /// 1 − ln(1 − (p − t)/(1 − t)) otherwise.
+    let private inverseGuess (a: float) (p: float) : float =
+        if a > 1.0 then
+            let t = Math.Sqrt (-2.0 * Math.Log (if p < 0.5 then p else 1.0 - p))
+            let upper = t - (2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481))
+            let z = if p < 0.5 then -upper else upper
+            let c = 1.0 - 1.0 / (9.0 * a) + z / (3.0 * Math.Sqrt a)
+            max (Math.Exp ((Math.Log p + gammaLn (a + 1.0)) / a)) (a * (c * c * c))
+        else
+            let t = 1.0 - a * (0.253 + a * 0.12)
+
+            if p < t then
+                Math.Pow (p / t, 1.0 / a)
+            else
+                1.0 - Math.Log (1.0 - (p - t) / (1.0 - t))
+
+    /// The x ≥ 0 with P(a, x) = p, for a > 0 finite and 0 ≤ p ≤ 1: 0 at p = 0, +∞ at p = 1, NaN when a or p is NaN.
+    /// Raises `ArgumentOutOfRangeException` when a ≤ 0, a = +∞, p < 0 or p > 1, even with the other argument NaN. From
+    /// the starting point of Numerical Recipes, 3rd edition, §6.2.1 (`invgammp`, from documentation), with its floor
+    /// raised to a lower bound of the root, it takes Halley steps on P(a, x) − p, halving x where a step would leave it
+    /// at 0 or below, until a step is below 1e-15 of x or after 100 steps; 0 where the starting point underflows, which
+    /// happens only for a ≤ 1 with the root below the least positive double. P(a, x) at the result is within relative
+    /// 1e-12 of p over 0 < a ≤ 1000 where the result is a normal double, pinned by the `Special` tests (measured here).
+    /// Cost: at most 100 evaluations of `gammaLowerRegularized`.
+    let gammaLowerRegularizedInverse (a: float) (p: float) : float =
+        checkShape a
+
+        if p < 0.0 || p > 1.0 then
+            raise (ArgumentOutOfRangeException(nameof p, sprintf "The inverse of P(a, x) needs 0 <= p <= 1; p = %g." p))
+
+        if Double.IsNaN a || Double.IsNaN p then
+            nan
+        elif p = 0.0 then
+            0.0
+        elif p = 1.0 then
+            infinity
+        else
+            let mutable x = inverseGuess a p
+            let mutable steps = 0
+            let mutable finished = x = 0.0
+
+            while not finished && steps < 100 do
+                steps <- steps + 1
+                let struct (pAtX, _) = regularizedGamma a x
+                // With P′(a, x) = xᵃ⁻¹e⁻ˣ/Γ(a) and P″/P′ = (a − 1)/x − 1, the Halley step u/(1 − ½u((a − 1)/x − 1))
+                // for u = (P − p)/P′, written as r = u/x so that a subnormal x is never a divisor.
+                let r = (pAtX - p) / gammaPrefactor a x
+                let step = r * x / (1.0 - 0.5 * min 1.0 (r * (a - 1.0 - x)))
+                let next = x - step
+                x <- if next <= 0.0 then 0.5 * x else next
+                finished <- abs step < 1e-15 * x || Double.IsNaN x
+
+            x
