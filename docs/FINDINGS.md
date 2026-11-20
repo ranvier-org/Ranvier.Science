@@ -6,7 +6,7 @@ ported onto tracked quantities in a versioned copy of the app (`examples/AstroTr
 questions, Q1 to Q5, of its design (`Ranvier/docs/superpowers/specs/2026-11-19-science-vertical-slice-design.md`, §1).
 This report gives the answers and what follows from them, as the design's §10 asks. The design documents, and the plans cited below, are not yet published: they are committed only on a local branch of the core checkout.
 
-The AstroTracked sources were removed from the repository on 2026-11-20 at the owner's request; they are in the history up to commit 236eaf7, where every citation of `examples/AstroTracked` in this file points.
+The AstroTracked sources were removed on 2026-11-20 at the owner's request, and the repository's history was rewritten without them before it was made public. Every citation of `examples/AstroTracked` in this file, and every commit id it cites after `3659fd8`, refers to the history before that rewrite, which the owner keeps in a private archive.
 
 How to read it:
 
@@ -422,10 +422,10 @@ that file reads them.
    `AstroShowcase` has no version control (the design, §4). The copy takes no fixes from the others, and `COPY.sha256`
    records each copied file's hash, which shows any drift (`examples/AstroTracked/COPY.md`).
 4. **Whether `Ranvier.Science` becomes an organisation repository**, and its name (the design, §5). At release it is the
-   repository `ranvier-org/Ranvier.Science` on GitHub, created private on 2026-11-20 for the 0.1.0 release; making it
-   public is the owner's decision, because `examples/AstroTracked` is a full copy of the unpublished AstroShowcase app.
-   The copy was removed from `main` on 2026-11-20 and remains in the history up to 236eaf7, so making the repository
-   public still publishes it unless the history is rewritten; the owner decides.
+   repository `ranvier-org/Ranvier.Science` on GitHub, created private on 2026-11-20 for the 0.1.0 release. On the
+   owner's decision, `examples/AstroTracked`, a full copy of the unpublished AstroShowcase app, was removed and the
+   history rewritten without it before the repository was made public on 2026-11-20; the history before the rewrite is
+   kept in a private archive.
 5. **R-T: the table's header reads "confidence sequence"** where the design's sketch has "95% sequence" (*from
    documentation*: the design, §7.1): the level follows α, and α is split across channels, so a fixed percentage would
    be wrong or misread.

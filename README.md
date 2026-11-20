@@ -120,8 +120,8 @@ default page of four channels.
 
 `examples/AstroTracked` was a versioned copy of the AstroShowcase demo app with two pages ported onto tracked
 quantities, Atmospheric Drag Decay and Attitude Dynamics, counted and compared against their originals. It was removed
-from the repository on 2026-11-20 at the owner's request. Its sources, and the `--tracked` scripted mode, are at commit
-`236eaf7`: [`examples/AstroTracked`](https://github.com/ranvier-org/Ranvier.Science/tree/236eaf7/examples/AstroTracked).
+from the repository on 2026-11-20 at the owner's request, and the history was rewritten without it before the repository
+was made public. Its sources and the `--tracked` scripted mode are kept in the owner's private archive.
 The measurements stay in [`docs/measurements/tracked-pages.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/tracked-pages.md)
 and the findings report, [`docs/FINDINGS.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md).
 

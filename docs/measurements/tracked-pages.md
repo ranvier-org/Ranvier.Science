@@ -1,6 +1,6 @@
 # Counts, state comparison and frame times of the tracked pages
 
-The AstroTracked sources were removed from the repository on 2026-11-20 at the owner's request; they are in the history up to commit 236eaf7, where every citation of `examples/AstroTracked` in this file points.
+The AstroTracked sources were removed on 2026-11-20 at the owner's request, and the repository's history was rewritten without them before it was made public. Every citation of `examples/AstroTracked` in this file, and every commit id it cites after `3659fd8`, refers to the history before that rewrite, which the owner keeps in a private archive.
 
 The two pages of `examples/AstroTracked` that run on tracked quantities, Atmospheric Drag Decay and Attitude Dynamics,
 against the original pages they were ported from, in one copy of the app. Every figure below is **measured here** on
