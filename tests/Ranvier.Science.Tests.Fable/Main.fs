@@ -46,6 +46,7 @@ let all =
             testList "DiscreteTests.fs" [ Ranvier.Science.Tests.DiscreteTests.tests ]
             testList "DescribeTests.fs" [ Ranvier.Science.Tests.DescribeTests.tests ]
             testList "IntervalTests.fs" [ Ranvier.Science.Tests.IntervalTests.tests ]
+            testList "HypothesisTests.fs" [ Ranvier.Science.Tests.HypothesisTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]

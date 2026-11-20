@@ -1868,6 +1868,89 @@ def section_intervals() -> None:
     emit("welchIntervalCases", [(0.05,) + bound_pair(welch_interval, 0.05, SLEEP_A, SLEEP_B)])
     emit("pooledIntervalCases", [(0.05,) + bound_pair(pooled_interval, 0.05, SLEEP_A, SLEEP_B)])
 
+def tails(less, greater) -> tuple[Decimal, Decimal, Decimal]:
+    """(Less, Greater, TwoSided) p-values from the cdf and the survival at the statistic: two-sided is
+    min(1, 2 min(cdf, survival))."""
+    return less, greater, min(Decimal(1), 2 * min(less, greater))
+
+
+def t_tails(nu, t) -> tuple[Decimal, Decimal, Decimal]:
+    return tails(student_t_cdf(nu, t), student_t_sf(nu, t))
+
+
+def one_sample_t(mu0, xs) -> tuple:
+    n, mean, variance = exact_mean_variance(xs)
+    t = (mean - Decimal(mu0)) / (variance / n).sqrt()
+    return (t, Decimal(n - 1)) + t_tails(n - 1, t)
+
+
+def one_sample_z(mu0, sigma, xs) -> tuple:
+    n, mean, _ = exact_mean_variance(xs)
+    z = (mean - Decimal(mu0)) / (Decimal(sigma) / Decimal(n).sqrt())
+    return (z,) + tails(normal_cdf(z), normal_sf(z))
+
+
+def welch_test(xs, ys) -> tuple:
+    na, ma, va = exact_mean_variance(xs)
+    nb, mb, vb = exact_mean_variance(ys)
+    qa, qb = va / na, vb / nb
+    s = qa + qb
+    nu = s * s / (qa * qa / (na - 1) + qb * qb / (nb - 1))
+    t = (ma - mb) / s.sqrt()
+    return (t, nu) + t_tails(nu, t)
+
+
+def pooled_test(xs, ys) -> tuple:
+    na, ma, va = exact_mean_variance(xs)
+    nb, mb, vb = exact_mean_variance(ys)
+    nu = na + nb - 2
+    pooled_variance = ((na - 1) * va + (nb - 1) * vb) / nu
+    t = (ma - mb) / (pooled_variance * (Decimal(1) / na + Decimal(1) / nb)).sqrt()
+    return (t, Decimal(nu)) + t_tails(nu, t)
+
+
+def variance_ratio_test(xs, ys) -> tuple:
+    na, _, va = exact_mean_variance(xs)
+    nb, _, vb = exact_mean_variance(ys)
+    f = va / vb
+    return (f, Decimal(na - 1), Decimal(nb - 1)) + tails(fisher_f_cdf(na - 1, nb - 1, f), fisher_f_sf(na - 1, nb - 1, f))
+
+
+def one_way_anova(groups) -> tuple:
+    """The F statistic exactly as a fraction, with the F tails at (k - 1, N - k) degrees of freedom."""
+    values = [[Fraction(x) for x in g] for g in groups]
+    k = len(values)
+    total = sum(len(g) for g in values)
+    grand = sum(sum(g) for g in values) / total
+    means = [sum(g) / len(g) for g in values]
+    ssb = sum(len(g) * (m - grand) ** 2 for g, m in zip(values, means))
+    ssw = sum(sum((x - m) ** 2 for x in g) for g, m in zip(values, means))
+    f = dec((ssb / (k - 1)) / (ssw / (total - k)))
+    return (f, Decimal(k - 1), Decimal(total - k)) + tails(fisher_f_cdf(k - 1, total - k, f), fisher_f_sf(k - 1, total - k, f))
+
+
+def row_values(f, *args) -> tuple[float, ...]:
+    """Each field of f(*args) rounded to a double and checked at two precisions by value."""
+    width = len(f(*args))
+    return tuple(value(lambda *a, i=i: f(*a)[i], *args) for i in range(width))
+
+
+SLEEP_DIFFERENCES = [-1.2, -2.4, -1.3, -1.3, 0.0, -1.0, -1.8, -0.8, -4.6, -1.4]
+ANOVA_GROUPS = [[6, 8, 4, 5, 3, 4], [8, 12, 9, 11, 6, 8], [13, 9, 11, 8, 7, 12]]
+
+
+def section_parametric() -> None:
+    print("// python -I tests/reference/special.py parametric")
+    print("// statistic, degrees of freedom (two for the F), then the Less, Greater and TwoSided p-values")
+    print()
+    check_distribution_helpers()
+    emit("oneSampleTCases", [row_values(one_sample_t, 0.0, xs) for xs in (SLEEP_A, SLEEP_DIFFERENCES)])
+    emit("oneSampleZCases", [row_values(one_sample_z, 5.0, 3.0, [float(i) for i in range(1, 11)])])
+    emit("welchCases", [row_values(welch_test, SLEEP_A, SLEEP_B)])
+    emit("pooledCases", [row_values(pooled_test, SLEEP_A, SLEEP_B)])
+    emit("varianceRatioCases", [row_values(variance_ratio_test, SLEEP_A, SLEEP_B)])
+    emit("anovaCases", [row_values(one_way_anova, ANOVA_GROUPS)])
+
 
 SECTIONS = {
     "gamma": section_gamma,
@@ -1887,6 +1970,7 @@ SECTIONS = {
     "dist-edges": section_dist_edges,
     "discrete": section_discrete,
     "intervals": section_intervals,
+    "parametric": section_parametric,
 }
 
 if __name__ == "__main__":

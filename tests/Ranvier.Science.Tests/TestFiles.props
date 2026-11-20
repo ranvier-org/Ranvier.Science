@@ -43,6 +43,7 @@
         <Compile Include="$(MSBuildThisFileDirectory)DiscreteTests.fs" Link="DiscreteTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)DescribeTests.fs" Link="DescribeTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)IntervalTests.fs" Link="IntervalTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)HypothesisTests.fs" Link="HypothesisTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />
