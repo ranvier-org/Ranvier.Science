@@ -29,6 +29,9 @@ Sections:
             the confidence-interval bounds of IntervalTests.fs: the Student and known-sigma intervals for a mean, the
             chi-squared interval for a variance, the Wilson, Clopper-Pearson, Agresti-Coull and Jeffreys intervals for
             a proportion, and the Welch and pooled intervals for a difference of means
+    counts  the exact binomial test, the chi-squared goodness-of-fit and independence tests and Fisher's exact test of
+            HypothesisTests.fs: p-values as exact fractions (the two-sided rule sums every mass at most the observed
+            mass times 1 + 1e-7), chi-squared statistics as exact fractions, chi-squared tails in decimal arithmetic
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -1952,6 +1955,78 @@ def section_parametric() -> None:
     emit("anovaCases", [row_values(one_way_anova, ANOVA_GROUPS)])
 
 
+SLACK = Fraction(1) + Fraction(1, 10**7)
+
+
+def two_sided_exact(masses: dict[int, Fraction], x: int) -> Fraction:
+    """The sum of every mass at most the observed mass times 1 + 1e-7, capped at 1."""
+    limit = masses[x] * SLACK
+    return min(Fraction(1), sum((m for m in masses.values() if m <= limit), Fraction(0)))
+
+
+def exact_test_row(masses: dict[int, Fraction], x: int) -> tuple[float, float, float]:
+    """(Less, Greater, TwoSided) p-values at x, from exact masses."""
+    less = sum((m for k, m in masses.items() if k <= x), Fraction(0))
+    greater = sum((m for k, m in masses.items() if k >= x), Fraction(0))
+    return float(less), float(greater), float(two_sided_exact(masses, x))
+
+
+def chi_squared_statistic(observed, expected) -> Fraction:
+    return sum((Fraction(o) - Fraction(e)) ** 2 / Fraction(e) for o, e in zip(observed, expected))
+
+
+def chi_squared_survival(dof: int, statistic: Fraction) -> Decimal:
+    """Q(dof/2, statistic/2): by poisson_head for an even dof, by the incomplete gamma function otherwise."""
+    if dof % 2 == 0:
+        return chi_squared_whole_sf(dof, dec(statistic))
+    return gamma_sf(Decimal(dof) / 2, 2, dec(statistic))
+
+
+def goodness_of_fit_row(observed, ratios) -> tuple[float, float]:
+    total = sum(observed)
+    expected = [Fraction(total * r, sum(ratios)) for r in ratios]
+    statistic = chi_squared_statistic(observed, expected)
+    return float(statistic), value(chi_squared_survival, len(observed) - 1, statistic)
+
+
+def independence_row(table) -> tuple[float, float]:
+    rows = [sum(r) for r in table]
+    columns = [sum(c) for c in zip(*table)]
+    total = sum(rows)
+    statistic = sum(
+        (Fraction(o) - Fraction(r * c, total)) ** 2 / Fraction(r * c, total)
+        for row, r in zip(table, rows)
+        for o, c in zip(row, columns)
+    )
+    return float(statistic), value(chi_squared_survival, (len(table) - 1) * (len(table[0]) - 1), statistic)
+
+
+def section_counts() -> None:
+    print("// python -I tests/reference/special.py counts")
+    print("// binomial: successes, trials, p0, then the Less, Greater and TwoSided p-values")
+    print("// Fisher: a, b, c, d, then the Less, Greater and TwoSided p-values")
+    print("// goodness of fit and independence: the statistic, then the chi-squared survival at it")
+    print()
+    binomial_points = [(7, 20, 0.5), (3, 20, 0.3), (0, 10, 0.2), (10, 10, 0.2)]
+    emit_typed(
+        "binomialTestCases",
+        ("int", "int", "float", "float", "float", "float"),
+        [(x, n, p) + exact_test_row(binomial_masses(n, p), x) for x, n, p in binomial_points],
+    )
+    # Mendel (1866), F2 seed counts against 9 : 3 : 3 : 1; the statistic is exactly 196/417.
+    mendel = goodness_of_fit_row([315, 108, 101, 32], [9, 3, 3, 1])
+    assert Fraction(mendel[0]) == Fraction(float(Fraction(196, 417)))
+    emit("mendelCase", [mendel])
+    tables = [[[20, 30, 50], [30, 30, 40]], [[10, 20, 30], [20, 20, 20], [30, 20, 10]]]
+    emit("independenceCases", [independence_row(t) for t in tables])
+    a, b, c, d = 10, 2, 3, 15
+    masses = hypergeometric_masses(a + b + c + d, a + b, a + c)
+    emit_typed(
+        "fisherCases",
+        ("int", "int", "int", "int", "float", "float", "float"),
+        [(a, b, c, d) + exact_test_row(masses, a)],
+    )
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -1971,6 +2046,7 @@ SECTIONS = {
     "discrete": section_discrete,
     "intervals": section_intervals,
     "parametric": section_parametric,
+    "counts": section_counts,
 }
 
 if __name__ == "__main__":

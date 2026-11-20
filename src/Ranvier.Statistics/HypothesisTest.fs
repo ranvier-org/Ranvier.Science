@@ -254,3 +254,230 @@ module HypothesisTest =
                 DenominatorDegreesOfFreedom = total - k
                 PValue = PValue.fisher Greater (k - 1.0) (total - k) f
             }
+
+    // The relative slack of the two-sided exact rule: R's binom.test and fisher.test accept a mass up to the observed
+    // one times 1 + 1e-7.
+    let private slack = 1.0 + 1e-7
+
+    // The p-value that sums every mass at most the observed one times the slack, over the support of d, capped at 1.
+    let private twoSidedByMass (d: Discrete) (x: int) : float =
+        let struct (lower, upper) = Discrete.support d
+        let limit = Discrete.mass d x * slack
+        let mutable total = 0.0
+
+        for k in lower..upper do
+            let m = Discrete.mass d k
+
+            if m <= limit then
+                total <- total + m
+
+        Math.Min(1.0, total)
+
+    // R's two-sided binom.test: the cdf up to x (or the survival from x) plus the far tail, whose outcomes are the y
+    // most distant ones of mass at most the observed one times the slack.
+    let private twoSidedBinomial (d: Discrete) (x: int) (trials: int) (p0: float) : float =
+        let m = float trials * p0
+        let limit = Discrete.mass d x * slack
+
+        if float x = m then
+            1.0
+        elif float x < m then
+            let mutable y = 0
+
+            for i in int (Math.Ceiling m) .. trials do
+                if Discrete.mass d i <= limit then
+                    y <- y + 1
+
+            Math.Min(1.0, Discrete.cdf d x + Discrete.survival d (trials - y))
+        else
+            let mutable y = 0
+
+            for i in 0 .. int (Math.Floor m) do
+                if Discrete.mass d i <= limit then
+                    y <- y + 1
+
+            Math.Min(1.0, Discrete.cdf d (y - 1) + Discrete.survival d (x - 1))
+
+    let private countResult (statistic: float) (p: float) : TestResult =
+        {
+            Statistic = statistic
+            DegreesOfFreedom = nan
+            DenominatorDegreesOfFreedom = nan
+            PValue = p
+        }
+
+    // A chi-squared result of the statistic on dof degrees of freedom: the survival at the statistic.
+    let private chiSquaredResult (statistic: float) (dof: float) : TestResult =
+        {
+            Statistic = statistic
+            DegreesOfFreedom = dof
+            DenominatorDegreesOfFreedom = nan
+            PValue = PValue.continuous Greater (Continuous.chiSquared dof) statistic
+        }
+
+    let private finiteNotNegative (name: string) (x: float) : unit =
+        if not (x >= 0.0 && x < infinity) then
+            raise (ArgumentOutOfRangeException(name, name + " must be finite and not negative."))
+
+    /// <summary>
+    /// The exact binomial test of the success probability against p0, for the given successes in the given trials:
+    /// Less is P(X ≤ x), Greater is P(X ≥ x) for X ~ Binomial(trials, p0), and TwoSided follows R's binom.test, the
+    /// rule of its default "minlike" method: x equal to trials · p0 gives 1; otherwise the tail on x's side up to x
+    /// plus the far tail made of the outcomes, counted from the end, whose mass is at most the mass at x times
+    /// 1 + 1e-7 (the slack that lets tied outcomes count, as 7 and 13 of 20 at ½), each tail by <c>Discrete.cdf</c>
+    /// or <c>Discrete.survival</c>, capped at 1 (read from R's binom.test.R at
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/binom.test.R, from documentation;
+    /// R compares logarithms of the masses where this compares the masses). Every mass comes from
+    /// <c>Discrete.mass</c>, the observed one included, so equal masses compare equal. At p0 of 0 or 1 the p-value is
+    /// 1 at the only possible count and 0 elsewhere. Statistic is the successes; both degrees-of-freedom fields are
+    /// NaN. Raises ArgumentOutOfRangeException unless 0 ≤ successes ≤ trials and 0 ≤ p0 ≤ 1 (NaN raises). Cost:
+    /// O(trials) masses for TwoSided, else one cdf. Relative error of the p-value at most 1e-12 over the rows of the
+    /// test "exact binomial against exact fractions", which pins it against the script
+    /// <c>tests/reference/special.py</c>, section counts.
+    /// </summary>
+    let binomial (alternative: Alternative) (successes: int) (trials: int) (p0: float) : TestResult =
+        if trials < 0 then
+            raise (ArgumentOutOfRangeException(nameof trials, "trials must not be negative."))
+
+        if successes < 0 || successes > trials then
+            raise (ArgumentOutOfRangeException(nameof successes, "successes must lie between 0 and trials."))
+
+        Check.probability (nameof p0) p0
+        let d = Discrete.binomial trials p0
+
+        let p =
+            match alternative with
+            | Less -> Discrete.cdf d successes
+            | Greater -> Discrete.survival d (successes - 1)
+            | TwoSided -> twoSidedBinomial d successes trials p0
+
+        countResult (float successes) p
+
+    /// <summary>
+    /// Pearson's chi-squared goodness-of-fit test of the observed counts against the expected ones: the expected
+    /// values are rescaled to the observed total, χ² = Σ (o − e)²/e, on k − 1 degrees of freedom for k cells, and the
+    /// p-value is the χ² survival at the statistic (there is no one-sided form). Raises ArgumentException unless the
+    /// two arrays have the same length, at least 2; raises ArgumentOutOfRangeException for an observed count that is
+    /// negative or not finite and an expected value that is not finite and greater than 0. An observed total of 0
+    /// gives every field NaN. The χ² approximation is poor where an expected count is below about 5 (general
+    /// knowledge). Relative error of the p-value at most 1e-12 over the counts of the test "goodness of fit against
+    /// Mendel's counts", which pins it, with the statistic, against the script <c>tests/reference/special.py</c>,
+    /// section counts.
+    /// </summary>
+    let chiSquaredGoodnessOfFit (observed: float[]) (expected: float[]) : TestResult =
+        if observed.Length <> expected.Length then
+            raise (ArgumentException("observed and expected must have the same length.", nameof expected))
+
+        if observed.Length < 2 then
+            raise (ArgumentException("A goodness-of-fit test needs at least two cells.", nameof observed))
+
+        for o in observed do
+            finiteNotNegative (nameof observed) o
+
+        for e in expected do
+            Check.finitePositive (nameof expected) e
+
+        let totalObserved = Array.sum observed
+
+        if totalObserved <= 0.0 then
+            TestSupport.nanResult
+        else
+            let scale = totalObserved / Array.sum expected
+            let mutable statistic = 0.0
+
+            for i in 0 .. observed.Length - 1 do
+                let e = expected[i] * scale
+                statistic <- statistic + (observed[i] - e) * (observed[i] - e) / e
+
+            chiSquaredResult statistic (float (observed.Length - 1))
+
+    /// <summary>
+    /// Pearson's chi-squared test of independence on a table of counts, one array per row: the expected count is
+    /// row total · column total / grand total, χ² = Σ (o − e)²/e without a continuity correction, on (r − 1)(c − 1)
+    /// degrees of freedom, and the p-value is the χ² survival at the statistic. Raises ArgumentException for fewer
+    /// than 2 rows or 2 columns or rows of unequal length; raises ArgumentOutOfRangeException for an entry that is
+    /// negative or not finite. A zero row or column total gives every field NaN. The χ² approximation is poor where
+    /// an expected count is below about 5 (general knowledge). Relative error of the p-value at most 1e-12 over the
+    /// tables of the test "independence against the reference", which pins it against the script
+    /// <c>tests/reference/special.py</c>, section counts.
+    /// </summary>
+    let chiSquaredIndependence (table: float[][]) : TestResult =
+        if table.Length < 2 then
+            raise (ArgumentException("A table needs at least two rows.", nameof table))
+
+        let columns = table[0].Length
+
+        if columns < 2 then
+            raise (ArgumentException("A table needs at least two columns.", nameof table))
+
+        for row in table do
+            if row.Length <> columns then
+                raise (ArgumentException("Every row of the table must have the same length.", nameof table))
+
+            for o in row do
+                finiteNotNegative (nameof table) o
+
+        let rowTotals = table |> Array.map Array.sum
+        let columnTotals = Array.init columns (fun j -> table |> Array.sumBy (fun row -> row[j]))
+        let total = Array.sum rowTotals
+
+        if total <= 0.0 || Array.exists (fun t -> t <= 0.0) rowTotals || Array.exists (fun t -> t <= 0.0) columnTotals then
+            TestSupport.nanResult
+        else
+            let mutable statistic = 0.0
+
+            for i in 0 .. table.Length - 1 do
+                for j in 0 .. columns - 1 do
+                    let e = rowTotals[i] * columnTotals[j] / total
+                    statistic <- statistic + (table[i][j] - e) * (table[i][j] - e) / e
+
+            chiSquaredResult statistic (float ((table.Length - 1) * (columns - 1)))
+
+    /// <summary>
+    /// Fisher's exact test on the 2 × 2 table [[a, b], [c, d]] of counts: under independence, given the margins,
+    /// X = a is Hypergeometric(a + b + c + d, a + b, a + c). Less is P(X ≤ a), Greater is P(X ≥ a), and TwoSided
+    /// sums the masses of every outcome whose mass is at most the mass at a times 1 + 1e-7, capped at 1, the rule of
+    /// R's fisher.test (read from fisher.test.R at
+    /// https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/fisher.test.R, from documentation;
+    /// R computes the masses by a different route, so its sum can differ in the last digits). Every mass comes from
+    /// <c>Discrete.mass</c>, the observed one included. Statistic is the sample odds ratio ad/(bc): +∞ where
+    /// bc = 0 &lt; ad, NaN where ad and bc are both 0 (R reports the conditional maximum likelihood estimate
+    /// instead). Both degrees-of-freedom fields are NaN. Raises ArgumentOutOfRangeException for a negative cell or a
+    /// total above Int32.MaxValue. Cost: O(support) masses for TwoSided, else one cdf. Relative error of the p-value
+    /// at most 1e-12 over the tables of the tests "Fisher's tea-tasting table" and "Fisher against exact fractions",
+    /// which pin it against the closed form of the tea table and the script <c>tests/reference/special.py</c>,
+    /// section counts.
+    /// </summary>
+    let fisherExact (alternative: Alternative) (a: int) (b: int) (c: int) (d: int) : TestResult =
+        if a < 0 then
+            raise (ArgumentOutOfRangeException(nameof a, "a must not be negative."))
+
+        if b < 0 then
+            raise (ArgumentOutOfRangeException(nameof b, "b must not be negative."))
+
+        if c < 0 then
+            raise (ArgumentOutOfRangeException(nameof c, "c must not be negative."))
+
+        if d < 0 then
+            raise (ArgumentOutOfRangeException(nameof d, "d must not be negative."))
+
+        if float a + float b + float c + float d > float Int32.MaxValue then
+            raise (ArgumentOutOfRangeException(nameof a, "The total of the table must not exceed Int32.MaxValue."))
+
+        let dist = Discrete.hypergeometric (a + b + c + d) (a + b) (a + c)
+
+        let p =
+            match alternative with
+            | Less -> Discrete.cdf dist a
+            | Greater -> Discrete.survival dist (a - 1)
+            | TwoSided -> twoSidedByMass dist a
+
+        let ad = float a * float d
+        let bc = float b * float c
+
+        let oddsRatio =
+            if bc > 0.0 then ad / bc
+            elif ad > 0.0 then infinity
+            else nan
+
+        countResult oddsRatio p

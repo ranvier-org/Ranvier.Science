@@ -44,6 +44,43 @@ let private anovaCases: struct (float * float * float * float * float * float)[]
         struct (9.264705882352942, 2.0, 15.0, 0.9976012226706071, 0.0023987773293929083, 0.004797554658785817)
     |]
 
+// python -I tests/reference/special.py counts
+// successes, trials, p0, then the Less, Greater and TwoSided p-values, as exact fractions
+let private binomialTestCases: struct (int * int * float * float * float * float)[] =
+    [|
+        struct (7, 20, 0.5, 0.13158798217773438, 0.9423408508300781, 0.26317596435546875)
+        struct (3, 20, 0.3, 0.10708680450373102, 0.9645168677015313, 0.2204182673807094)
+        struct (0, 10, 0.2, 0.10737418239999999, 1.0, 0.228248064)
+        struct (10, 10, 0.2, 1.0, 1.0240000000000006e-07, 1.0240000000000006e-07)
+    |]
+
+// Mendel's F2 seed counts against 9 : 3 : 3 : 1: the statistic, then the chi-squared survival at it
+let private mendelCase: struct (float * float)[] =
+    [|
+        struct (0.47002398081534774, 0.925425895103616)
+    |]
+
+// the statistic, then the chi-squared survival at it, for the 2 x 3 and the 3 x 3 table
+let private independenceCases: struct (float * float)[] =
+    [|
+        struct (3.111111111111111, 0.2110720877910902)
+        struct (20.0, 0.0004993992273873333)
+    |]
+
+// a, b, c, d, then the Less, Greater and TwoSided p-values, as exact fractions
+let private fisherCases: struct (int * int * int * int * float * float * float)[] =
+    [|
+        struct (10, 2, 3, 15, 0.9999845190186861, 0.00046518094336290503, 0.0005367241191434358)
+    |]
+
+let private independenceTables: float[][][] =
+    [|
+        [| [| 20.0; 30.0; 50.0 |]; [| 30.0; 30.0; 40.0 |] |]
+        [| [| 10.0; 20.0; 30.0 |]; [| 20.0; 20.0; 20.0 |]; [| 30.0; 20.0; 10.0 |] |]
+    |]
+
+let private mendelObserved = [| 315.0; 108.0; 101.0; 32.0 |]
+
 let private moments (xs: float[]) : Moments = Array.fold (Moments.add true) Moments.zero xs
 
 // R's datasets::sleep, extra by group, and the paired differences a - b.
@@ -307,4 +344,111 @@ let tests =
                     Expect.throwsT<ArgumentOutOfRangeException>
                         (fun () -> HypothesisTest.oneSampleZ TwoSided mu0 1.0 m |> ignore)
                         ("oneSampleZ mu0 " + string mu0))
+
+            testCase "exact binomial against exact fractions" (fun () ->
+                for struct (x, n, p0, less, greater, two) in binomialTestCases do
+                    let run alt = HypothesisTest.binomial alt x n p0
+                    let r = run TwoSided
+                    Expect.equal r.Statistic (float x) "Statistic is the successes"
+                    Expect.isTrue (isNaN r.DegreesOfFreedom) "DegreesOfFreedom is NaN"
+                    Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+                    pValues ("binomial " + string x + " of " + string n + " at " + string p0) run less greater two)
+
+            testCase "the binomial two-sided rule counts tied outcomes" (fun () ->
+                // The masses at 7 and 13 of Binomial(20, 1/2) tie in exact arithmetic.
+                let expected = 2.0 * Discrete.cdf (Discrete.binomial 20 0.5) 7
+                let actual = (HypothesisTest.binomial TwoSided 7 20 0.5).PValue
+                Expect.isLessThanOrEqual (abs (actual - expected)) (1e-15 * expected) "7 of 20 at 1/2")
+
+            testCase "binomial at p0 of 0 and 1" (fun () ->
+                Expect.equal (HypothesisTest.binomial TwoSided 0 10 0.0).PValue 1.0 "p0 0, 0 successes"
+                Expect.equal (HypothesisTest.binomial TwoSided 1 10 0.0).PValue 0.0 "p0 0, 1 success"
+                Expect.equal (HypothesisTest.binomial TwoSided 10 10 0.0).PValue 0.0 "p0 0, 10 successes"
+                Expect.equal (HypothesisTest.binomial TwoSided 10 10 1.0).PValue 1.0 "p0 1, 10 successes"
+                Expect.equal (HypothesisTest.binomial TwoSided 9 10 1.0).PValue 0.0 "p0 1, 9 successes"
+                Expect.equal (HypothesisTest.binomial TwoSided 0 10 1.0).PValue 0.0 "p0 1, 0 successes")
+
+            testCase "goodness of fit against Mendel's counts" (fun () ->
+                let struct (statistic, p) = mendelCase[0]
+                let r = HypothesisTest.chiSquaredGoodnessOfFit mendelObserved [| 9.0; 3.0; 3.0; 1.0 |]
+                // 196/417, exact by fractions: sum of (o - e)^2 / e with e = 556 * (9, 3, 3, 1) / 16.
+                Expect.isLessThanOrEqual (abs (r.Statistic - 196.0 / 417.0)) (1e-13 * (196.0 / 417.0)) "statistic is 196/417"
+                close "statistic against the script" r.Statistic statistic
+                Expect.equal r.DegreesOfFreedom 3.0 "degrees of freedom"
+                Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+                close "p-value" r.PValue p
+
+                let counts = HypothesisTest.chiSquaredGoodnessOfFit mendelObserved [| 312.75; 104.25; 104.25; 34.75 |]
+                Expect.isLessThanOrEqual (abs (counts.Statistic - r.Statistic)) (1e-15 * r.Statistic) "statistic, expected counts"
+                Expect.isLessThanOrEqual (abs (counts.PValue - r.PValue)) (1e-15 * r.PValue) "p-value, expected counts")
+
+            testCase "independence against the reference" (fun () ->
+                for i in 0 .. independenceCases.Length - 1 do
+                    let struct (statistic, p) = independenceCases[i]
+                    let table = independenceTables[i]
+                    let r = HypothesisTest.chiSquaredIndependence table
+                    close "statistic" r.Statistic statistic
+                    close "p-value" r.PValue p
+                    Expect.equal r.DegreesOfFreedom (float ((table.Length - 1) * (table[0].Length - 1))) "degrees of freedom"
+                    Expect.isTrue (isNaN r.DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN"
+
+                // The chi-squared survival with 2 degrees of freedom is exp(-x/2).
+                let two = HypothesisTest.chiSquaredIndependence independenceTables[0]
+                let closed = exp (-two.Statistic / 2.0)
+                Expect.isLessThanOrEqual (abs (two.PValue - closed)) (1e-13 * closed) "2 x 3 against exp(-x/2)")
+
+            testCase "Fisher's tea-tasting table" (fun () ->
+                // Fisher, The Design of Experiments, 1935, chapter 2: masses 1, 16, 36, 16, 1 over 70.
+                let run alt = HypothesisTest.fisherExact alt 3 1 1 3
+                pValues "tea" run (69.0 / 70.0) (17.0 / 70.0) (34.0 / 70.0)
+                close "odds ratio" (run TwoSided).Statistic 9.0
+                Expect.isTrue (isNaN (run TwoSided).DegreesOfFreedom) "DegreesOfFreedom is NaN"
+                Expect.isTrue (isNaN (run TwoSided).DenominatorDegreesOfFreedom) "DenominatorDegreesOfFreedom is NaN")
+
+            testCase "Fisher against exact fractions" (fun () ->
+                for struct (a, b, c, d, less, greater, two) in fisherCases do
+                    let run alt = HypothesisTest.fisherExact alt a b c d
+                    pValues "Fisher" run less greater two
+                    close "odds ratio" (run TwoSided).Statistic (float (a * d) / float (b * c)))
+
+            testCase "Fisher's odds ratio at a zero cell" (fun () ->
+                Expect.equal (HypothesisTest.fisherExact TwoSided 3 0 1 2).Statistic infinity "bc = 0 < ad"
+                Expect.equal (HypothesisTest.fisherExact TwoSided 0 3 2 0).Statistic 0.0 "ad = 0 < bc"
+                Expect.isTrue (isNaN (HypothesisTest.fisherExact TwoSided 0 0 2 0).Statistic) "ad = bc = 0")
+
+            testCase "count arguments out of range raise" (fun () ->
+                let range (message: string) (f: unit -> TestResult) =
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> f () |> ignore) message
+
+                let shape (message: string) (f: unit -> TestResult) =
+                    Expect.throwsT<ArgumentException> (fun () -> f () |> ignore) message
+
+                range "negative successes" (fun () -> HypothesisTest.binomial TwoSided -1 10 0.5)
+                range "successes above trials" (fun () -> HypothesisTest.binomial TwoSided 11 10 0.5)
+                range "negative trials" (fun () -> HypothesisTest.binomial TwoSided 0 -1 0.5)
+                range "p0 below 0" (fun () -> HypothesisTest.binomial TwoSided 1 10 -0.1)
+                range "p0 above 1" (fun () -> HypothesisTest.binomial TwoSided 1 10 1.1)
+                range "p0 NaN" (fun () -> HypothesisTest.binomial TwoSided 1 10 nan)
+
+                shape "lengths differ" (fun () -> HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; 2.0; 3.0 |] [| 1.0; 2.0 |])
+                shape "one cell" (fun () -> HypothesisTest.chiSquaredGoodnessOfFit [| 1.0 |] [| 1.0 |])
+                range "negative observed" (fun () -> HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; -2.0 |] [| 1.0; 1.0 |])
+                range "NaN observed" (fun () -> HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; nan |] [| 1.0; 1.0 |])
+                range "zero expected" (fun () -> HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; 2.0 |] [| 1.0; 0.0 |])
+                range "negative expected" (fun () -> HypothesisTest.chiSquaredGoodnessOfFit [| 1.0; 2.0 |] [| 1.0; -1.0 |])
+
+                shape "one row" (fun () -> HypothesisTest.chiSquaredIndependence [| [| 1.0; 2.0 |] |])
+                shape "one column" (fun () -> HypothesisTest.chiSquaredIndependence [| [| 1.0 |]; [| 2.0 |] |])
+                shape "ragged" (fun () -> HypothesisTest.chiSquaredIndependence [| [| 1.0; 2.0 |]; [| 3.0 |] |])
+                range "negative entry" (fun () -> HypothesisTest.chiSquaredIndependence [| [| 1.0; -2.0 |]; [| 3.0; 4.0 |] |])
+                range "infinite entry" (fun () -> HypothesisTest.chiSquaredIndependence [| [| 1.0; infinity |]; [| 3.0; 4.0 |] |])
+
+                range "negative a" (fun () -> HypothesisTest.fisherExact TwoSided -1 1 1 1)
+                range "negative b" (fun () -> HypothesisTest.fisherExact TwoSided 1 -1 1 1)
+                range "negative c" (fun () -> HypothesisTest.fisherExact TwoSided 1 1 -1 1)
+                range "negative d" (fun () -> HypothesisTest.fisherExact TwoSided 1 1 1 -1))
+
+            testCase "a zero row of a table gives NaN fields" (fun () ->
+                allNaN "zero row" (HypothesisTest.chiSquaredIndependence [| [| 0.0; 0.0 |]; [| 3.0; 4.0 |] |])
+                allNaN "zero column" (HypothesisTest.chiSquaredIndependence [| [| 0.0; 2.0 |]; [| 0.0; 4.0 |] |]))
         ]
