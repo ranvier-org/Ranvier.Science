@@ -4,8 +4,8 @@ open System
 open Expecto
 open Ranvier.Numerics
 
-// Reference values are closed forms of the type-7 quantile written in each test: h = (n − 1)p, and the value
-// x[⌊h⌋] + (h − ⌊h⌋)(x[⌊h⌋ + 1] − x[⌊h⌋]) over the 0-based sorted array.
+// Reference values are closed forms of the type-7 quantile written in each test: h = (n − 1)p, f = h − ⌊h⌋, and the
+// value (1 − f)·x[⌊h⌋] + f·x[⌊h⌋ + 1] over the 0-based sorted array.
 
 [<Tests>]
 let tests =
@@ -20,8 +20,8 @@ let tests =
                 Expect.equal (OrderStatistic.quantileSorted 0.5 three) 2.0 "p = 0.5: h = 1, x[1]"
                 let four = [| 1.0; 2.0; 3.0; 4.0 |]
                 // n = 4: h = 3p.
-                Expect.equal (OrderStatistic.quantileSorted 0.5 four) 2.5 "p = 0.5: h = 1.5, 2 + 0.5 · (3 − 2)"
-                Expect.equal (OrderStatistic.quantileSorted 0.25 four) 1.75 "p = 0.25: h = 0.75, 1 + 0.75 · (2 − 1)"
+                Expect.equal (OrderStatistic.quantileSorted 0.5 four) 2.5 "p = 0.5: h = 1.5, 0.5 · 2 + 0.5 · 3"
+                Expect.equal (OrderStatistic.quantileSorted 0.25 four) 1.75 "p = 0.25: h = 0.75, 0.25 · 1 + 0.75 · 2"
             }
 
             test "edge cases" {
