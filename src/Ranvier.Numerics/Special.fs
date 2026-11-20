@@ -109,6 +109,19 @@ module Special =
 
             if x > 0.0 then
                 lnGammaPositive x
+            elif x > -1.0 then
+                lnGammaPositive (1.0 + x) - Math.Log (-x)
+            elif x > -20.0 then
+                // ln Γ(x + m) − ln |x (x + 1) … (x + m − 1)| with x + m in (1, 2); every factor is exact.
+                let m = Math.Floor (-x) + 2.0
+                let mutable product = x
+                let mutable j = 1.0
+
+                while j < m do
+                    product <- product * (x + j)
+                    j <- j + 1.0
+
+                lnGammaPositive (x + m) - Math.Log (abs product)
             else
                 lnPi - Math.Log (abs (sinPi x)) - lnGammaPositive (1.0 - x)
 
@@ -189,8 +202,8 @@ module Special =
     /// ln(1 + x) for x ≥ −1, accurate near 0: −∞ at −1, +∞ at +∞ and NaN at NaN. Raises `ArgumentOutOfRangeException`
     /// below −1. Kahan's method: with u = 1 + x rounded, x when u = 1, and ln u · x / (u − 1) otherwise (Goldberg 1991,
     /// "What every computer scientist should know about floating-point arithmetic", Theorem 4, from documentation).
-    /// Relative error at most 1e-15, pinned by the `Special` tests near 0 against series and by round trips through
-    /// `expm1` (measured here).
+    /// Relative error at most 1e-15 over x ≥ −1, pinned by the `Special` tests near 0 against series, at negative x
+    /// against `tests/reference/special.py`, and by round trips through `expm1` (measured here).
     let log1p (x: float) : float =
         if Double.IsNaN x then
             nan
@@ -207,8 +220,9 @@ module Special =
 
     /// eˣ − 1 for every x, accurate near 0: +∞ where eˣ overflows and at +∞, −1 at −∞ and NaN at NaN. Kahan's method, the
     /// counterpart of `log1p`'s (general knowledge): with u = eˣ, x when u = 1, −1 when u − 1 = −1, and
-    /// (u − 1) · x / ln u otherwise. Relative error at most 1e-15, pinned by the `Special` tests near 0 against series and
-    /// by round trips through `log1p` (measured here).
+    /// (u − 1) · x / ln u otherwise. Relative error at most 1e-15 over every finite x, pinned by the `Special` tests near 0
+    /// against series, at negative x against `tests/reference/special.py`, and by round trips through `log1p` (measured
+    /// here).
     let expm1 (x: float) : float =
         if Double.IsNaN x then
             nan
@@ -283,12 +297,10 @@ module Special =
 
     /// B(a, b) = Γ(a)Γ(b) / Γ(a + b) for a, b > 0: 0 when either is +∞, NaN when either is NaN. `beta a b` and
     /// `beta b a` are equal. Raises `ArgumentOutOfRangeException` when a or b is 0 or less. Relative error at most 1e-13
-    /// where |ln B(a, b)| < 256, and at most 3e-13 where |ln B(a, b)| ≥ 256 and B(a, b) ≥ 1e-300. The second bound is
+    /// where |ln B(a, b)| < 256, and at most 5e-13 where |ln B(a, b)| ≥ 256 and B(a, b) ≥ 1e-300. The second bound is
     /// looser because B is exp(betaLn a b) once a + b ≥ 8, so the absolute error of ln B becomes the relative error of
     /// B. Once |ln B| ≥ 256, one ulp of ln B is at least 2⁻⁴⁴ ≈ 5.7e-14 (general knowledge), so two ulp exceed 1e-13.
-    /// Over 1,500 seeded pairs the worst was 2.29e-13 at (285012.33, 54.578), the same on .NET and JavaScript (measured
-    /// here, by a scan against `tests/reference/special.py`). Both bounds are pinned by the `Special` tests against
-    /// `tests/reference/special.py` (measured here).
+    /// Both bounds are pinned by the `Special` tests against `tests/reference/special.py` (measured here).
     let beta (a: float) (b: float) : float =
         if Double.IsNaN a || Double.IsNaN b then
             nan

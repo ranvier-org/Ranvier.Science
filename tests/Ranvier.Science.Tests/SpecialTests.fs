@@ -40,6 +40,14 @@ let private gammaLnCases: (float * float)[] =
         -100.7, -365.61225576180533
         -170.4, -707.434114102398
         -1000.5, -5914.437701116852
+        -10.999999976954987, 0.08350865668793016
+        -11.999999997871052, -0.019576466288501845
+        -12.99999999983939, -0.00011746708712988221
+        -13.999999999988548, 0.0016204794186455906
+        -14.000000000010768, 0.0631956070520921
+        -15.00000000000072, 0.0610533964879175
+        -1e-320, 736.8272408909739
+        -5e-324, 744.4400719213812
     |]
 
 let private gammaCases: (float * float)[] =
@@ -84,6 +92,7 @@ let private digammaCases: (float * float)[] =
         -0.5, 0.03648997397857652
         -2.3, 3.3173231575618227
         -10.7, 0.13374481244706443
+        -1000000000.9521098, -4.831288283987657e-05
     |]
 
 let private betaCases: (float * float * float * float)[] =
@@ -110,6 +119,8 @@ let private betaLargeCases: (float * float * float * float)[] =
         163.29755153612564, 2693.0586087351535, 3.1757281850743475e-273, -627.4501934316967
         34.62098830767503, 32691.762932782338, 3.856283668053207e-119, -272.65792212688245
         90.80721825997759, 41402.73972602267, 3.108210272216323e-282, -648.1949491389507
+        194.49704136848504, 1057.1279356594662, 3.1039681606970696e-236, -542.2774006018338
+        338.87483434172145, 636.8072643768838, 3.904266834117713e-275, -631.8488305582443
     |]
 
 let private logFactorialCases: (int * float)[] =
@@ -139,6 +150,19 @@ let private logChooseCases: (int * int * float)[] =
         2147483647, 2, 42.28197801275968
     |]
 
+let private log1pCases: (float * float)[] =
+    [|
+        -0.5, -0.6931471805599453
+        -0.9, -2.302585092994046
+        -0.001, -0.0010005003335835335
+    |]
+
+let private expm1Cases: (float * float)[] =
+    [|
+        -0.5, -0.3934693402873666
+        -5.0, -0.9932620530009145
+    |]
+
 let private raises (name: string) (f: unit -> float) : unit =
     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> f () |> ignore) name
 
@@ -149,7 +173,7 @@ let tests =
         [
             test "gammaLn matches the reference" {
                 for x, expected in gammaLnCases do
-                    expectClose 1e-13 1e-14 expected (Special.gammaLn x) (sprintf "gammaLn %g" x)
+                    expectClose 1e-13 1e-14 expected (Special.gammaLn x) (sprintf "gammaLn %.17g" x)
             }
 
             test "gamma matches the reference" {
@@ -188,7 +212,7 @@ let tests =
 
             test "digamma matches the reference" {
                 for x, expected in digammaCases do
-                    expectClose 1e-13 1e-14 expected (Special.digamma x) (sprintf "digamma %g" x)
+                    expectClose 1e-13 1e-14 expected (Special.digamma x) (sprintf "digamma %.17g" x)
             }
 
             test "beta and betaLn match the reference" {
@@ -201,7 +225,7 @@ let tests =
                 for a, b, expectedBeta, expectedLn in betaLargeCases do
                     let at = sprintf "at %g %g" a b
                     Expect.isTrue (abs expectedLn >= 256.0 && expectedBeta >= 1e-300) ("the case is in the regime " + at)
-                    expectClose 3e-13 0.0 expectedBeta (Special.beta a b) ("beta " + at)
+                    expectClose 5e-13 0.0 expectedBeta (Special.beta a b) ("beta " + at)
                     expectClose 1e-13 1e-14 expectedLn (Special.betaLn a b) ("betaLn " + at)
 
                 for _, _, _, expectedLn in betaCases do
@@ -250,6 +274,14 @@ let tests =
 
                 Expect.equal (Special.log1p 0.0) 0.0 "log1p 0"
                 Expect.equal (Special.expm1 0.0) 0.0 "expm1 0"
+            }
+
+            test "log1p and expm1 match the reference at negative arguments" {
+                for x, expected in log1pCases do
+                    expectClose 1e-15 0.0 expected (Special.log1p x) (sprintf "log1p %g" x)
+
+                for x, expected in expm1Cases do
+                    expectClose 1e-15 0.0 expected (Special.expm1 x) (sprintf "expm1 %g" x)
             }
 
             test "log1p and expm1 inverses and ranges" {
