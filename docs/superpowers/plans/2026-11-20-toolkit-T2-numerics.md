@@ -8,7 +8,7 @@
 
 **Tech Stack:** F# on .NET 10 and Fable (through Fickl); core `Ranvier` 0.2.1 (Plan T1's first task moves the packages to it); Expecto 11 with the Mocha shim; Python 3.14's standard library (`decimal`, `fractions`, `math`) for references.
 
-**Spec:** `C:\wk\ranvier-release\Ranvier.Science\docs\superpowers\specs\2026-11-20-toolkit-design.md`: sections 3.2, 3.3, 5, 6.1 to 6.10 and 8.7. Section numbers below refer to it. Plan T1 (sections 4, 6.11, 6.12, 8 but 8.7) runs before this plan and Plan T3 (sections 7 and 9) after it, on the same branch. This plan consumes from T1 only `Moments.sampleVariance`, `Moments.standardDeviation`, `Moments.sampleStandardDeviation`, `FloatPolicy.standard` with `RefoldFloor = 64`, and the core 0.2.1 dependency.
+**Spec:** `C:\wk\ranvier-release\Ranvier.Science\docs\superpowers\specs\2026-11-20-toolkit-design.md`: sections 3.2, 3.3, 5, 6.1 to 6.10 and 8.7. Section numbers below refer to it. Plan T1 (sections 4, 6.11, 6.12, 8 but 8.7) runs before this plan and Plan T3 (sections 7 and 9) after it, on the same branch. This plan consumes from T1 only `Moments.sampleVariance`, `Moments.standardDeviation`, `Moments.sampleStandardDeviation`, `FloatPolicy.standard` with `RefoldFloor = 64`, `OrderStatistic.quantileSorted` (Plan T1, Task 14; spec section 6.13) and the core 0.2.1 dependency.
 
 ## Global Constraints
 
@@ -26,13 +26,13 @@ The controller passes this section with every task.
 
 - Fable-compatible: no reflection, no `System.Random`, no thread APIs outside `#if !FABLE_COMPILER`, no `System.Numerics.Complex`, no BCL type Fable lacks (`PriorityQueue`, `BitConverter`). `Math.*`, arrays, lists and `ResizeArray` are fine.
 - The names and signatures in each task's Produces block are the spec's and are fixed. Plan T3 consumes `Special`, `Matrix` and its decompositions, `LeastSquares.levenbergMarquardt`, `Comoments`, the `Generator` variates, `Integrate.adaptive` and `Roots.brent` by them. Parameter order: configuration first, data last.
-- Errors (section 3.2): an argument outside the domain raises `ArgumentOutOfRangeException`, and a dimension or length mismatch raises `ArgumentException` naming both lengths; a NaN argument otherwise in the domain returns NaN (or NaN fields) and raises nothing; a data-dependent failure of a direct method returns `Result<'T, string>` whose message names the condition; an iterative method that may stop short returns a record with `Converged: bool`. No function returns a plausible number where it failed. An exception raised by a caller's function propagates unchanged.
+- Errors (section 3.2): an argument outside the domain raises `ArgumentOutOfRangeException`, and a dimension or length mismatch raises `ArgumentException` naming both lengths; a NaN data argument otherwise in the domain returns NaN (or NaN fields) and raises nothing, while a NaN configuration parameter (a distribution's or variate's parameter, a rate, a half-life, a tolerance, settings) raises `ArgumentOutOfRangeException`; a data-dependent failure of a direct method returns `Result<'T, string>` whose message names the condition; an iterative method that may stop short returns a record with `Converged: bool`. No function returns a plausible number where it failed. An exception raised by a caller's function propagates unchanged.
 - A kernel never reads or creates a node. Inputs are never mutated, and a returned array is fresh: never an input, and never the array a value holds.
 - Accumulators (sections 3.3, 6.8): immutable values, `compensated: bool` first, each running total a `Sum` added with `Sum.add compensated` as `Moments` does; `remove` and `unmerge` raise `InvalidOperationException` on an empty accumulator.
 - Cut-off (section 3.3): the core's default equality compares reference types by reference on .NET, and everything but primitives by reference under Fable. No doc comment claims a cut-off from structural equality, a memo returning anything but `float` says in its doc comment that it publishes on every recomputation, and no test expects a memo of a record, union, array or struct value to cut off under the default policy.
 - Exact kernels (section 5.3): LU, Cholesky, QR, `Vector.norm`, the moments family, interpolation, `Ode.rungeKutta4Step` and `Ode.rungeKutta4`, and the power-of-two Fourier path use only `+ − × ÷`, `sqrt`, `abs` and comparisons: no `**`, `pown`, `Math.Pow`, `exp`, `log` or trigonometric call.
 - Doc comments follow `C:\wk\ranvier-release\Ranvier\.claude\rules\comments.md`: the contract, the raise conditions, the cost where it is not O(1), the accuracy bound; no narration; British spelling. A bound reads "relative error at most E over D" (or absolute, near zero), names the test list that pins it, and is labelled *measured here*. A constant copied from a paper or table is *from documentation*, with the citation; a cost or rate not checked here is *general knowledge*. A limit the code defines (an iteration cap) is a definition and carries no label.
-- Bounds (section 5.1) are floors for the tests: `gammaLn`, `gamma`, `beta`, `erf`, `erfc`, `digamma` relative 1e-13 where the value is at least 1e-300; the regularised incomplete gamma and beta relative 1e-12 where the value is at least 1e-300; their inverses round-trip, the forward function at the result within 1e-12 relative of the target probability; adaptive quadrature and the ODE solve meet the requested tolerance on closed-form problems. A task may tighten a bound its tests show; it never loosens one. A bound that fails is reported to the controller with the measured error, and the task stops.
+- Bounds (section 5.1) are floors for the tests: `gammaLn`, `gamma`, `beta`, `erf`, `erfc`, `digamma` relative 1e-13 where the value is at least 1e-300; the regularised incomplete gamma and beta relative 1e-12 where the value is at least 1e-300; their inverses round-trip, the forward function at the result within 1e-12 relative of the target probability; adaptive quadrature and the ODE solve meet the requested tolerance on closed-form problems. A task may tighten a bound its tests show; it never loosens one except where a task states a ruling (Task 1). A bound that fails is reported to the controller with the measured error, and the task stops.
 
 **Tests and references**
 
@@ -75,7 +75,7 @@ tests/Ranvier.Science.Tests/     Bounds.fs (after Support.fs); SpecialTests.fs L
                                  WindowTests.fs (each before CrossTargetTests.fs); modified: RunTests.fs,
                                  AggregateTests.fs, GeneratorTests.fs, CrossTargetTests.fs
 tests/reference/special.py       references for Special (Tasks 1–4)
-docs/measurements/test-suite.md  the gate's times at the plan's end (Task 20)
+docs/measurements/gate.md        created by Plan T1, Task 15; a row of the gate's times appended at the plan's end (Task 20)
 ```
 
 Choices the spec leaves to the builder (section 12) are stated in the task that makes them, each on a line starting **Choice.**
@@ -114,8 +114,9 @@ module Special =
     val betaLn : a: float -> b: float -> float
     val logFactorial : n: int -> float
     val logChoose : n: int -> k: int -> float
+    val log1p : x: float -> float               // ln(1 + x): 1 + x rounded to u, then x when u = 1, else ln u · x / (u − 1)
+    val expm1 : x: float -> float               // eˣ − 1: u = eˣ, then x when u = 1, −1 when u − 1 = −1, else (u − 1) · x / ln u
     // internal helpers, used by Tasks 2 to 4
-    val internal log1p : x: float -> float               // ln(1 + x): 1 + x rounded to u, then x when u = 1, else ln u · x / (u − 1)
     val internal log1pmx : x: float -> float             // ln(1 + x) − x: its Taylor series for |x| < 0.5, log1p x − x otherwise
     val internal stirlingRemainder : x: float -> float   // lnΓ(x) − ((x − ½) ln x − x + ½ ln 2π), for x ≥ 8
     val internal sinPi : x: float -> float               // sin(πx), x reduced exactly to [−½, ½] before the sine
@@ -123,7 +124,9 @@ module Special =
 
 **Choice.** Domains: `gammaLn`, `gamma` and `digamma` take x > 0 or non-integer x < 0; 0, the negative integers and −∞ raise `ArgumentOutOfRangeException`; +∞ gives +∞; NaN gives NaN. `gamma` gives +∞ from 171.63 on. `beta` and `betaLn` take a, b > 0; `logFactorial` n ≥ 0; `logChoose` 0 ≤ k ≤ n.
 
-**Choice.** Bounds: `gamma` and `beta` relative 1e-13 where the value is at least 1e-300. `gammaLn`, `digamma`, `betaLn`, `logFactorial` and `logChoose`, whose values pass through zero, |error| ≤ max(1e-13 · |value|, 1e-14): relative 1e-13, and absolute 1e-14 where the value is below 0.1 in magnitude.
+**Choice.** Bounds: `gamma` and `beta` relative 1e-13 where the value is at least 1e-300. `gammaLn`, `digamma`, `betaLn`, `logFactorial` and `logChoose`, whose values pass through zero, |error| ≤ max(1e-13 · |value|, 1e-14): relative 1e-13, and absolute 1e-14 where the value is below 0.1 in magnitude. **Ruling (pre-flight, 2026-11-20):** this is a recorded loosening of spec section 5.1, accepted because relative accuracy is unattainable at the zeros of these functions (x = 1 and 2 for `gammaLn`; ψ's root near 1.4616); each of the five doc comments states the absolute floor and why. `log1p` and `expm1` are public (spec section 6.1) at relative 1e-15 or the bound this task's tests show, the larger of the two reported to the controller.
+
+**Choice.** `log1p` takes x ≥ −1: −1 gives −∞, x < −1 raises `ArgumentOutOfRangeException`, +∞ gives +∞, NaN gives NaN. `expm1` takes every x: +∞ and an overflowing x give +∞, −∞ gives −1, NaN gives NaN. Both use Kahan's trick as the Produces block states (Goldberg 1991, Theorem 4, *from documentation*); Plan T3 uses them in place of any copy.
 
 **Choice.** Methods (the spec offers Lanczos or Stirling with shifts; this plan takes Stirling, whose coefficients the script derives):
 - lnΓ for x ≥ 8: (x − ½) ln x − x + ½ ln 2π + Σₖ₌₁¹⁰ B₂ₖ / (2k(2k − 1) x^(2k−1)); for 0 < x < 8, lnΓ(x + N) − ln(x(x + 1)…(x + N − 1)) with the least N giving x + N ≥ 8; for x < 0, ln π − ln |sinPi x| − lnΓ(1 − x).
@@ -156,6 +159,8 @@ module Special =
 | `beta is symmetric` | for every `betaCases` pair, `beta a b = beta b a` and `betaLn a b = betaLn b a` (`Expect.equal`) |
 | `logFactorial matches the reference` | every `logFactorialCases` pair: `expectClose 1e-13 1e-14` (script); `logFactorial 0` and `logFactorial 1` equal `0.0` |
 | `logChoose matches the reference` | every `logChooseCases` row: `expectClose 1e-13 1e-14` (script); `logChoose n k = logChoose n (n - k)` (`Expect.equal`) |
+| `log1p and expm1 at small arguments` | x = 1e-10: `log1p x` within 1 ulp of 1e-10 − 5e-21 (series x − x²/2 + x³/3, with the x³ term 3.3e-31 below an ulp) and `expm1 x` within 1 ulp of 1e-10 + 5e-21 (series x + x²/2); x = 1e-300: both equal x; x = ±1e-5: `expectClose 1e-15 0.0` against the series to the x⁶ term written in the test; `log1p` and `expm1` of 0.0 are 0.0 |
+| `log1p and expm1 inverses and ranges` | x = 0.5, 3.0, 1e5: `expectClose 1e-15 0.0 x (expm1 (log1p x))`; `log1p -1.0 = -infinity`, `log1p infinity = infinity`, `expm1 -infinity = -1.0`, `expm1 1000.0 = infinity`; both of `nan` are NaN; `Expect.throwsT<ArgumentOutOfRangeException>` for `log1p -1.5` |
 | `infinity and NaN` | `gammaLn`, `gamma` and `digamma` of `infinity` are `infinity`; of `nan` are NaN; `beta nan 1.0` and `betaLn 1.0 nan` are NaN |
 | `arguments outside the domain raise` | `Expect.throwsT<ArgumentOutOfRangeException>` for `gammaLn 0.0`, `gammaLn -3.0`, `gammaLn -infinity`, `gamma -1.0`, `digamma 0.0`, `digamma -2.0`, `beta 0.0 1.0`, `betaLn 1.0 -1.0`, `logFactorial -1`, `logChoose 5 6`, `logChoose 5 -1` |
 
@@ -199,7 +204,7 @@ module Special =
 - Modify: `src/Ranvier.Numerics/Special.fs`, `tests/reference/special.py` (section `incgamma`), `tests/Ranvier.Science.Tests/SpecialTests.fs`
 
 **Interfaces:**
-- Consumes: `Special.gammaLn`, `Special.erf`, internal `log1p`, `log1pmx`, `stirlingRemainder` (Tasks 1, 2).
+- Consumes: `Special.gammaLn`, `Special.erf`, `log1p`, internal `log1pmx`, `stirlingRemainder` (Tasks 1, 2).
 - Produces:
 
 ```fsharp
@@ -212,7 +217,7 @@ val gammaLowerRegularizedInverse : a: float -> p: float -> float   // the x with
 
 **Choice.** Method: P by its power series when x < a + 1, Q by Legendre's continued fraction (modified Lentz) otherwise, the other as 1 minus. The prefactor xᵃe⁻ˣ/Γ(a) is `exp (a * log1pmx ((x - a) / a) - stirlingRemainder a) * sqrt (a / (2π))` for a ≥ 8 and `exp (a * log x - x - gammaLn a)` below: the naive form loses about 1e-11 relative at a = 1000. Iteration cap 10 000; NaN past it. The inverse starts from the guess of Numerical Recipes, 3rd edition, §6.2.1 (`invgammp`; *from documentation*) and takes Halley steps on P(a, x) − p, kept positive, until the step is below 1e-15 relative or 100 steps. The bound is pinned for a ≤ 1000, and the doc comment states that domain.
 
-- [ ] **Step 1: Add the `incgamma` section** to `special.py`: P(a, x) = xᵃe⁻ˣ/Γ(a + 1) · Σₙ xⁿ/((a + 1)…(a + n)) and Q = 1 − P, both through `value`, with the working precision raised by ⌈x/ln 10⌉ + 20 digits for Q. It prints `incompleteGammaCases: (float * float * float * float)[]` (a, x, P, Q) at (0.5, 0.01), (0.5, 0.1), (0.5, 2.0), (1.0, 1e-5), (1.0, 1.0), (1.0, 690.0), (2.5, 3.0), (3.0, 0.5), (10.0, 10.0), (10.0, 30.0), (10.0, 100.0), (30.0, 10.0), (100.0, 90.0), (100.0, 110.0), (1000.0, 1000.0), (1000.0, 900.0), (0.01, 0.001), (0.001, 5.0), with 0.0 printed for a value below 1e-300. Run `python -I tests/reference/special.py incgamma`. Expected: exit 0.
+- [ ] **Step 1: Add the `incgamma` section** to `special.py`: P(a, x) = xᵃe⁻ˣ/Γ(a + 1) · Σₙ xⁿ/((a + 1)…(a + n)) and Q = 1 − P, both through `value`, with the working precision raised by ⌈x/ln 10⌉ + 20 digits for Q; they are the functions `gamma_p(a, x)` and `gamma_q(a, x)` of `special.py`, which Plan T3's sections call (no second copy). It prints `incompleteGammaCases: (float * float * float * float)[]` (a, x, P, Q) at (0.5, 0.01), (0.5, 0.1), (0.5, 2.0), (1.0, 1e-5), (1.0, 1.0), (1.0, 690.0), (2.5, 3.0), (3.0, 0.5), (10.0, 10.0), (10.0, 30.0), (10.0, 100.0), (30.0, 10.0), (100.0, 90.0), (100.0, 110.0), (1000.0, 1000.0), (1000.0, 900.0), (0.01, 0.001), (0.001, 5.0), with 0.0 printed for a value below 1e-300. Run `python -I tests/reference/special.py incgamma`. Expected: exit 0.
 - [ ] **Step 2: Write the failing tests:**
 
 | Test name | Asserts |
@@ -238,7 +243,7 @@ val gammaLowerRegularizedInverse : a: float -> p: float -> float   // the x with
 - Modify: `src/Ranvier.Numerics/Special.fs`, `tests/reference/special.py` (section `incbeta`), `tests/Ranvier.Science.Tests/SpecialTests.fs`
 
 **Interfaces:**
-- Consumes: `Special.betaLn`, internal `log1p`, `log1pmx`, `stirlingRemainder` (Task 1).
+- Consumes: `Special.betaLn`, `log1p`, internal `log1pmx`, `stirlingRemainder` (Task 1).
 - Produces:
 
 ```fsharp
@@ -250,7 +255,7 @@ val betaRegularizedInverse : a: float -> b: float -> p: float -> float   // the 
 
 **Choice.** Method: the continued fraction of Numerical Recipes, 3rd edition, §6.4 (`betacf`, modified Lentz; *from documentation*) when x < (a + 1)/(a + b + 2), and 1 − I₁₋ₓ(b, a) otherwise. The prefactor xᵃ(1 − x)ᵇ/B(a, b), for a, b ≥ 8, with c = a + b, x₀ = a/c, y₀ = b/c and y = 1 − x, is `sqrt (a * b / (2π * c)) * exp (a * log1pmx ((x - x0) / x0) + b * log1pmx ((y - y0) / y0) - δ a - δ b + δ c)` (δ = `stirlingRemainder`); below 8, `exp (a * log x + b * log1p (-x) - betaLn a b)`. Iteration cap 10 000; NaN past it. The inverse starts from the guess of Numerical Recipes, 3rd edition, §6.14.1 (`invbetai`), and takes Halley steps kept inside (0, 1) by bisection, until the step is below 1e-15 relative or 100 steps. The bound is pinned for a, b ≤ 1000.
 
-- [ ] **Step 1: Add the `incbeta` section** to `special.py`: B(x; a, b) = xᵃ(1 − x)ᵇ/a · Σₙ (a + b)ₙ/(a + 1)ₙ · xⁿ for x ≤ ½, and 1 − I₁₋ₓ(b, a) above at 30 more digits, divided by B(a, b) from `ln_gamma`; through `value`. For integer a and b with a + b ≤ 200 it also evaluates I_x(a, b) = Σⱼ₌ₐᵃ⁺ᵇ⁻¹ C(a + b − 1, j) xʲ(1 − x)^(a+b−1−j) in exact `Fraction`s and exits non-zero unless both give the same double. It prints `incompleteBetaCases: (float * float * float * float)[]` (a, b, x, I) at (1, 1, 0.3), (0.5, 0.5, 0.2), (2, 3, 0.4), (5, 10, 0.1), (10, 5, 0.9), (0.1, 10, 0.01), (50, 50, 0.5), (50, 60, 0.4), (200, 300, 0.4), (0.001, 0.001, 0.5), (30, 2, 0.01), (1000, 1000, 0.49), (0.5, 1000, 1e-4), (7.5, 0.25, 0.999). Run `python -I tests/reference/special.py incbeta`. Expected: exit 0.
+- [ ] **Step 1: Add the `incbeta` section** to `special.py`: B(x; a, b) = xᵃ(1 − x)ᵇ/a · Σₙ (a + b)ₙ/(a + 1)ₙ · xⁿ for x ≤ ½, and 1 − I₁₋ₓ(b, a) above at 30 more digits, divided by B(a, b) from `ln_gamma`; through `value`. The computation is the function `beta_inc(a, b, x)` of `special.py`, which Plan T3's sections call (no second copy). For integer a and b with a + b ≤ 200 it also evaluates I_x(a, b) = Σⱼ₌ₐᵃ⁺ᵇ⁻¹ C(a + b − 1, j) xʲ(1 − x)^(a+b−1−j) in exact `Fraction`s and exits non-zero unless both give the same double. It prints `incompleteBetaCases: (float * float * float * float)[]` (a, b, x, I) at (1, 1, 0.3), (0.5, 0.5, 0.2), (2, 3, 0.4), (5, 10, 0.1), (10, 5, 0.9), (0.1, 10, 0.01), (50, 50, 0.5), (50, 60, 0.4), (200, 300, 0.4), (0.001, 0.001, 0.5), (30, 2, 0.01), (1000, 1000, 0.49), (0.5, 1000, 1e-4), (7.5, 0.25, 0.999). Run `python -I tests/reference/special.py incbeta`. Expected: exit 0.
 - [ ] **Step 2: Write the failing tests:**
 
 | Test name | Asserts |
@@ -354,7 +359,7 @@ module Matrix =                     // added inside the existing module
     val cholesky : Matrix -> Result<CholeskyDecomposition, string>
 ```
 
-**Choice.** Thresholds, relative to the matrix's scale (ε = 2⁻⁵²): `lu` returns `Error "singular …"` when a pivot satisfies |uₖₖ| ≤ n · ε · maxᵢⱼ |aᵢⱼ|. `cholesky` reads the lower triangle and returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤ 1e-12 · maxᵢⱼ |aᵢⱼ| for every pair, and `Error "not positive definite …"` when a pivot dₖ ≤ n · ε · maxᵢ |aᵢᵢ|. `determinant` is the LU product with the permutation's sign, and 0.0 when `lu` gives `Error`. A non-square matrix raises `ArgumentException`; a 0 × 0 matrix gives `Ok`, determinant 1, and `solve [||] = [||]`. A matrix holding a NaN or infinite entry gives `Ok`, and every number read through the result is NaN.
+**Choice.** Thresholds, relative to the matrix's scale (ε = 2⁻⁵²): `lu` returns `Error "singular …"` when a pivot satisfies |uₖₖ| ≤ n · ε · maxᵢⱼ |aᵢⱼ|. `cholesky` reads the lower triangle and returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤ 1e-12 · maxᵢⱼ |aᵢⱼ| for every pair, and `Error "not positive definite …"` when a pivot dₖ ≤ n · ε · maxᵢ |aᵢᵢ|. `determinant` is the LU product with the permutation's sign, and 0.0 when `lu` gives `Error`. A non-square matrix raises `ArgumentException`; a 0 × 0 matrix gives `Ok`, determinant 1, and `solve [||] = [||]`. `lu`, `cholesky` and `qr` (Task 7) scan for a non-finite entry first: a matrix holding a NaN or infinite entry gives `Ok`, and every number read through the result is NaN; no singularity, symmetry or positive-definiteness check runs on it (the symmetry test is false for a NaN, and an infinite entry makes the pivot threshold infinite, so without the scan the result would be an `Error`). Each doc comment states this.
 
 - [ ] **Step 1: Write the failing tests** (`"LinearAlgebra"`), with `A = [[4,-2,1],[-2,4,-2],[1,-2,4]]` and `b = [|11.;-16.;17.|]`, whose solution is `[|1.;-2.;3.|]` (check: A·x = b in integers):
 
@@ -368,7 +373,7 @@ module Matrix =                     // added inside the existing module
 | `scale does not decide singularity` | `scale 1e-150 A` and `scale 1e150 A`: `lu` is `Ok`, and `solve` of the equally scaled `b` matches the unscaled solution within absolute 1e-14 (Review Focus 1) |
 | `a decomposition is reusable` | two `LuDecomposition.solve` calls on one decomposition give equal arrays; mutating the first result leaves the second call's result unchanged |
 | `shapes` | `ArgumentException` for `lu` of a 2 × 3 matrix and for `solve` with a vector of length 2 against `A`; `lu (zero 0 0)` is `Ok` with determinant 1.0 and `solve [\|\|] = [\|\|]` |
-| `a NaN entry gives NaN results` | `A` with entry (0, 0) NaN: `lu` is `Ok`, `solve` is all NaN, `determinant` is NaN |
+| `a NaN or infinite entry gives NaN results` | `A` with entry (0, 0) NaN: `lu` is `Ok`, `solve` is all NaN, `determinant` is NaN; `A` with entry (1, 0) NaN (an asymmetric pair): `cholesky` is `Ok` with NaN reads, not `Error "not symmetric"`; `A` with entry (0, 0) infinite: `lu` is `Ok` and `determinant` is NaN, not `Error "singular"` |
 | `Cholesky solves a positive definite system` | `cholesky A`, `solve b`: within absolute 1e-14 of `[\|1.;-2.;3.\|]`; `scale 1e-150 A` is `Ok` (Review Focus 1) |
 | `Cholesky rejects what it cannot factor` | `[[1,2],[3,4]]`: `expectError "not symmetric"`; `[[1,2],[2,1]]` and `[[1,1],[1,1]]`: `expectError "not positive definite"`; a 2 × 3 matrix raises `ArgumentException` |
 
@@ -399,7 +404,7 @@ module Matrix =
     val symmetricEigen : Matrix -> Result<SymmetricEigen, string>               // cyclic Jacobi
 ```
 
-**Choice.** `leastSquares` returns `Error "rank-deficient …"` when some |Rₖₖ| ≤ max(m, n) · ε · (the largest column norm of the matrix). `symmetricEigen` applies Task 6's symmetry rule (`Error "not symmetric …"`), sweeps until the off-diagonal sum of squares is at most (ε · ‖A‖_F)², and returns `Error "did not converge …"` after 100 sweeps. Each eigenvector is normalised, with its first component of largest magnitude positive. A matrix holding a NaN or infinite entry gives NaN results as in Task 6.
+**Choice.** `leastSquares` returns `Error "rank-deficient …"` when some |Rₖₖ| ≤ max(m, n) · ε · (the largest column norm of the matrix). `symmetricEigen` applies Task 6's symmetry rule (`Error "not symmetric …"`), sweeps until the off-diagonal sum of squares is at most (ε · ‖A‖_F)², and returns `Error "did not converge …"` after 100 sweeps. Each eigenvector is normalised, with its first component of largest magnitude positive. `qr` and `symmetricEigen` scan for a non-finite entry first, as Task 6 states: a matrix holding a NaN or infinite entry gives `Ok` with NaN results, and no rank or symmetry check runs on it. Each doc comment states this.
 
 - [ ] **Step 1: Write the failing tests:**
 
@@ -413,7 +418,7 @@ module Matrix =
 | `R reproduces the Gram matrix` | for the line design of `QR fits a line`: `r` is 2 × 2 with a zero below the diagonal, and `Matrix.multiply (Matrix.transpose r) r` is within absolute 1e-13 of XᵀX = [[4, 6], [6, 14]] (the coordinator's addition: Plan T3 computes a regression's covariance from R) |
 | `eigen of a 2 × 2` | `[[2,1],[1,2]]`: `Values` within 1e-15 of `[\|1.;3.\|]`; the columns are `(1, −1)/√2` and `(1, 1)/√2` up to sign: \|v · e\| within 1e-15 of 1 (the sign rule is pinned by the diagonal case, where it is unambiguous) |
 | `eigen of the second-difference matrix` | tridiag(−1, 2, −1) of order 10: `Values[k − 1]` within absolute 1e-14 of `2 − 2 cos(kπ/11)` (closed form); ‖A·v − λv‖∞ ≤ 1e-13 for each pair; VᵀV within 1e-14 of the identity |
-| `eigen edge cases` | `diagonal [\|3.;1.;2.\|]`: values `[\|1.;2.;3.\|]`, vectors the matching unit columns; `[[5]]` gives values `[\|5.\|]` and vectors `[[1]]`; `zero 0 0` gives empty values; `[[1,2],[3,4]]`: `expectError "not symmetric"`; a NaN entry gives NaN values |
+| `eigen edge cases` | `diagonal [\|3.;1.;2.\|]`: values `[\|1.;2.;3.\|]`, vectors the matching unit columns; `[[5]]` gives values `[\|5.\|]` and vectors `[[1]]`; `zero 0 0` gives empty values; `[[1,2],[3,4]]`: `expectError "not symmetric"`; a NaN entry and an infinite entry each give `Ok` with NaN values (no symmetry check runs on them) |
 
 - [ ] **Step 2: Write the exact cross-target case** `QR least squares gives the same bits on both targets`: design rows `[1; t; t²]` for t = 0, 0.5, 1.5, 2, 3.25, y = `[|0.3;1.1;0.2;-0.8;2.4|]`, the three coefficients.
 - [ ] **Step 3: Run** the `"LinearAlgebra"` filter. Expected: the build fails, `Matrix.qr` is not defined.
@@ -728,7 +733,7 @@ module Fourier =
 |---|---|
 | `an impulse transforms to ones` | `[\|1.;0.;0.;0.;0.;0.;0.;0.\|]`: re all 1.0, im all 0.0 (`Expect.equal`) |
 | `a constant and a cosine` | 16 ones: re[0] = 16.0; every other bin within absolute 1e-14; xⱼ = cos(2π · 3j/16): bins 3 and 13 within 1e-13 of 8, the rest within 1e-13 of 0 (closed forms) |
-| `forward matches the direct sum` | n in 1, 2, 3, 5, 8, 12, 17, 64, 100, 1000, 1024, re and im from `Generator.normals 0.0 1.0 n (Generator.create n)` and seed n + 1: every bin within 1e-13 · Σⱼ (\|reⱼ\| + \|imⱼ\|) of `dft` |
+| `forward matches the direct sum` | n in 1, 2, 3, 5, 8, 12, 17, 64, 100, 1000, 1024, 4095 (Bluestein) and 4096 (radix-2), the top of the stated domain n ≤ 4096, re and im from `Generator.normals 0.0 1.0 n (Generator.create n)` and seed n + 1: every bin within 1e-13 · Σⱼ (\|reⱼ\| + \|imⱼ\|) of `dft` |
 | `inverse undoes forward` | the same inputs: `inverse (forward x)` within 1e-13 · max \|xⱼ\| of x |
 | `Parseval` | Σ\|x\|² against (1/n) Σ\|X\|²: `expectClose 1e-13 0.0` for n = 1000 and 1024 |
 | `real transforms and frequencies` | for n = 7 and 8: `realForward x` equals the first ⌊n/2⌋ + 1 bins of `forward x zeros`, and `powerSpectrum x` equals re² + im² of them (`Expect.equal`); `frequencies 8 0.5 = [\|0.;0.25;0.5;0.75;1.0\|]`; `frequencies 7 1.0` has 4 values |
@@ -873,6 +878,7 @@ module WeightedMoments =
 - Modify: `Ranvier.Numerics.fsproj` (`Histogram.fs` immediately before `FloatPolicy.fs`), `TestFiles.props`, Fable `Main.fs`
 
 **Interfaces:**
+- Consumes: `OrderStatistic.quantileSorted` (Plan T1, Task 14; spec section 6.13).
 - Produces:
 
 ```fsharp
@@ -899,7 +905,7 @@ module QuantileEstimate =
     val value : QuantileEstimate -> float     // exact type-7 below five observations; NaN when empty
 ```
 
-**Choice.** Bins follow NumPy's rule: [eᵢ, eᵢ₊₁) half-open, the last [eₙ₋₁, eₙ] closed; found by binary search. `add` and `remove` copy the counts, O(bins) each. `create` raises `ArgumentException` unless the edges are finite, strictly increasing and at least two, and copies them; `uniform` raises `ArgumentOutOfRangeException` unless lower < upper, both finite and bins ≥ 1, and its last edge is exactly `upper`. `remove` of a value whose bin (or under, over or missing count) is 0 raises `InvalidOperationException`, as does `unmerge` when a count would go negative; `merge` and `unmerge` raise `ArgumentException` unless the edges are equal. `QuantileEstimate.create` raises unless 0 < p < 1; from the fifth observation `value` is the middle marker's height; a NaN observation makes `value` NaN from then on; its state is copied per `add` (15 numbers).
+**Choice.** Bins follow NumPy's rule: [eᵢ, eᵢ₊₁) half-open, the last [eₙ₋₁, eₙ] closed; found by binary search. `add` and `remove` copy the counts, O(bins) each. `create` raises `ArgumentException` unless the edges are finite, strictly increasing and at least two, and copies them; `uniform` raises `ArgumentOutOfRangeException` unless lower < upper, both finite and bins ≥ 1, and its last edge is exactly `upper`. `remove` of a value whose bin (or under, over or missing count) is 0 raises `InvalidOperationException`, as does `unmerge` when a count would go negative; `merge` and `unmerge` raise `ArgumentException` unless the edges are equal. `QuantileEstimate.create` raises unless 0 < p < 1; below five observations `value` is `OrderStatistic.quantileSorted p` of the sorted observations (type 7; no second copy of the interpolation); from the fifth observation `value` is the middle marker's height; a NaN observation makes `value` NaN from then on; its state is copied per `add` (15 numbers).
 
 - [ ] **Step 1: Write the failing tests** (`"Histogram"`):
 
@@ -912,7 +918,7 @@ module QuantileEstimate =
 | `copies in and out` | mutating the edges array after `create`, and mutating the arrays returned by `edges` and `counts`, leave the histogram unchanged (Review Focus 2) |
 | `the quantile estimate is exact below five` | p = 0.25 over 3, 1, 2: `value` 1.5 (type 7: h = 2 · 0.25 = 0.5 between 1 and 2); `count 3.0`; empty is NaN |
 | `the quantile estimate at five` | p = 0.5 over 5, 1, 4, 2, 3: `value = 3.0` (the markers are the sorted observations) |
-| `the quantile estimate converges` | 100 000 `Generator.uniform` values (seed 11): p = 0.5 within 0.01 of 0.5 and p = 0.9 within 0.01 of 0.9; 100 000 `Generator.normal` values (seed 12), p = 0.975 within 0.03 of 1.959963984540054 (the normal's 0.975 quantile, *general knowledge*) |
+| `the quantile estimate converges` | 100 000 `Generator.uniform` values (seed 11): p = 0.5 within 0.01 of 0.5 and p = 0.9 within 0.01 of 0.9; 100 000 `Generator.normal` values (seed 12), p = 0.975 within 0.03 of 1.959963984540054 (the normal's 0.975 quantile: the literal printed by `python -I tests/reference/normal_quantile.py`, Plan T1, Task 14, a 60-digit decimal bisection on the exact double 0.975; the command is written beside the literal) |
 | `the quantile estimate's domain` | p = 0, 1 and NaN raise `ArgumentOutOfRangeException`; a NaN observation makes `value` NaN after 10 later finite ones |
 
 - [ ] **Step 2: Run** the `"Histogram"` filter. Expected: the build fails, `Histogram` is not defined.
@@ -978,6 +984,7 @@ module TimeWindow =
 | `a window is persistent` | pushing twice onto one window value gives two windows whose `items` differ, and the first value's `items` is unchanged |
 | `copies out` | mutating the array from `items` leaves the next `items` unchanged (Review Focus 2) |
 | `a time window keeps items no older than span` | span 10, pushes at t = 0, 5, 10, 15: `items` holds the items of 5, 10 and 15; an equal time is accepted |
+| `a time window's moments, value and count` | `TimeWindow.moments true 10.0`, pushes at t = 0, 5, 10, 15 of 1.0, 2.0, 3.0, 4.0 (items kept: tᵢ ≥ t − span = 5): `TimeWindow.count = 3`; `items = [\|2.;3.;4.\|]`; `TimeWindow.value` has `Moments.count 3.0`, `Moments.mean` 3.0 and `Moments.variance` within 1e-15 of 2/3 (closed form of 2, 3, 4); after a further push at t = 40 of 9.0, `count = 1` and `Moments.mean (value w) = 9.0`; an empty window has `count = 0` and `Moments.count (value w) = 0.0` |
 | `a time window's domain` | a time below the latest, NaN, span −1, and `Window.create 0` raise `ArgumentOutOfRangeException` |
 
 - [ ] **Step 2: Run** the `"Window"` filter. Expected: the build fails, `DecayedMoments` is not defined.
@@ -992,7 +999,7 @@ module TimeWindow =
 - Modify: `src/Ranvier.Numerics/Aggregate.fs` (`maintain`, lines 32 to 89, becomes public `maintainedBy`; new functions after `momentsFromScratchBy`), `tests/Ranvier.Science.Tests/AggregateTests.fs` (cases appended to the `"Aggregate"` list, reusing its `rowsOf`, `keyOf` and `valueOf`)
 
 **Interfaces:**
-- Consumes: `Comoments` and its internal `isFinite` (Task 15), `HigherMoments`, `WeightedMoments` and their internal `isFinite` (Task 16), `Histogram` (Task 17); core 0.2.1 `Projection.foldGroupBy`, `Projection.sortBy`, `Projection.Keys`, `Projection.Get`, `createMemo`, `createProjectionOnce`.
+- Consumes: `Comoments` and its internal `isFinite` (Task 15), `HigherMoments`, `WeightedMoments` and their internal `isFinite` (Task 16), `Histogram` (Task 17), `OrderStatistic.quantileSorted` (Plan T1, Task 14); core 0.2.1 `Projection.foldGroupBy`, `Projection.sortBy`, `Projection.Keys`, `Projection.Get`, `createMemo`, `createProjectionOnce`.
 - Produces:
 
 ```fsharp
@@ -1007,7 +1014,7 @@ module Aggregate =
     val quantileBy : p: float -> ('V -> float) -> Projection<'K, 'V> -> Memo<float>
 ```
 
-**Choice.** `comomentsBy`, `higherMomentsBy` and `weightedMomentsBy` are `maintainedBy` with the type's `merge` and `unmerge` under `policy.Compensated`, its `zero`, `id` as the result, and the type's internal `isFinite` as `finite` (a read such as `skewness` is NaN for a finite state, so the reads cannot serve). `histogramBy` is `Projection.foldGroupBy projection Histogram.add Histogram.remove (Histogram.create edges) id`, with no re-fold. `quantileBy` raises `ArgumentOutOfRangeException` unless 0 ≤ p ≤ 1, sorts with `Projection.sortBy projection`, and is one memo reading the sorted `Keys` and at most three rows: NaN when empty or when the last value (NaN sorts last) is NaN, else xₗ + (h − l)(xₗ₊₁ − xₗ) with h = (n − 1)p, l = ⌊h⌋. Its doc comment states the per-change cost from core 0.2.1's `sortBy` doc comment (`Combinators.fs`, `sortBy`: O(1) neighbour checks and a binary search and shift per touched position, O(N log N) on dense bursts; *from documentation*) plus O(1) for the read.
+**Choice.** `comomentsBy`, `higherMomentsBy` and `weightedMomentsBy` are `maintainedBy` with the type's `merge` and `unmerge` under `policy.Compensated`, its `zero`, `id` as the result, and the type's internal `isFinite` as `finite` (a read such as `skewness` is NaN for a finite state, so the reads cannot serve). `histogramBy` is `Projection.foldGroupBy projection Histogram.add Histogram.remove (Histogram.create edges) id`, with no re-fold. `quantileBy` raises `ArgumentOutOfRangeException` unless 0 ≤ p ≤ 1, sorts with `Projection.sortBy projection`, and is one memo reading the sorted `Keys` and at most three rows: NaN when empty or when the last value (NaN sorts last) is NaN, else the type-7 value xₗ + (h − l)(xₗ₊₁ − xₗ) with h = (n − 1)p, l = ⌊h⌋, taken from the one implementation of the interpolation: the read gathers xₗ and xₗ₊₁ (only xₗ when l = n − 1) and returns `OrderStatistic.quantileSorted (h − l) [| xₗ; xₗ₊₁ |]`, so the read stays O(1) and no copy of the interpolation remains. Its doc comment states the per-change cost from core 0.2.1's `sortBy` doc comment (`Combinators.fs`, `sortBy`: O(1) neighbour checks and a binary search and shift per touched position, O(N log N) on dense bursts; *from documentation*) plus O(1) for the read.
 
 **Choice.** Core 0.2.1 raises `NotSupportedException` for a `createProjectionOnce` projection in every `Projection` combinator, `foldGroupBy` included (`Combinators.fs`, the `RequireRowMemos` call in `foldGroupBy`; `Api.fs`, the remarks of `createProjectionOnce`), so every aggregate of this module accepts the same projections. Each doc comment says so once; the spec's sentence that `quantileBy` accepts fewer is superseded.
 
@@ -1033,7 +1040,7 @@ module Aggregate =
 ### Task 20: Random variates and the plan's closing measurement (spec 6.10, section 11)
 
 **Files:**
-- Modify: `src/Ranvier.Numerics/Generator.fs`, `tests/Ranvier.Science.Tests/GeneratorTests.fs` (cases appended to `"Generator"`), `docs/measurements/test-suite.md` (a section appended, the file created if absent)
+- Modify: `src/Ranvier.Numerics/Generator.fs`, `tests/Ranvier.Science.Tests/GeneratorTests.fs` (cases appended to `"Generator"`), `docs/measurements/gate.md` (a row appended; the file is created by Plan T1, Task 15)
 
 **Interfaces:**
 - Consumes: `Generator.uniform`, `Generator.normal`, the private `step` (`Generator.fs:21`); in the tests `Special.gammaUpperRegularized`, `Special.gammaLowerRegularized`, `Special.betaRegularized`, `Special.logFactorial`, `Special.logChoose` (Tasks 1 to 4) and `Comoments` (Task 15).
@@ -1059,7 +1066,7 @@ module Generator =
 - `binomial`: Knuth's order-statistic split (TAOCP vol. 2, 3rd edition, §3.4.1; *from documentation*): while trials > 64, draw X ~ Beta(a, trials + 1 − a) with a = 1 + trials/2, continue on (a − 1, p/X) when X ≥ p, else add a and continue on (trials − a, (p − X)/(1 − X)); then count Bernoulli trials. Expected cost O(log trials) beta deviates and at most 64 uniforms.
 - `poisson`: the same section's gamma split: while the mean exceeds 16, draw X ~ Gamma(m) with m = ⌊7·mean/8⌋, add m and continue on mean − X when X < mean, else return the count plus `binomial (m − 1) (mean / X)`; below 16 multiply uniforms (1 − u) until the product falls below e^(−mean).
 - `shuffle`: Fisher–Yates with `integer`. `split`: eight outputs of the given generator become the four words of each of two generators, each then warmed by 20 steps as `create` does; the doc comment states that no independence proof backs it.
-- Domains: rate > 0, shape > 0, scale > 0, a > 0, b > 0 else `ArgumentOutOfRangeException`, and NaN gives a NaN deviate. `binomial` needs trials ≥ 0 and p in [0, 1], `poisson` 0 ≤ mean ≤ 2³⁰, NaN raising for both (an `int` has no NaN).
+- Domains: rate > 0, shape > 0, scale > 0, a > 0, b > 0 else `ArgumentOutOfRangeException`, and a NaN parameter raises it too (a NaN configuration parameter raises, as an out-of-domain value does: spec section 3.2). `binomial` needs trials ≥ 0 and p in [0, 1], `poisson` 0 ≤ mean ≤ 2³⁰, NaN raising for both.
 
 - [ ] **Step 1: Write the failing tests** (appended to `"Generator"`), each with its own seed, n = 20 000 unless named; `ks cdf xs` is the Kolmogorov–Smirnov statistic computed in the test file:
 
@@ -1076,17 +1083,17 @@ module Generator =
 | `shuffle is a uniform permutation` | `[\|0;1;2\|]`, 60 000 shuffles: each of the 6 orders' count gives chi-squared df 5 with p-value ≥ 0.001; each result is a permutation; the input is unchanged; the first shuffle of `[\|0..9\|]` from `create 1` is pinned as above |
 | `split gives two other streams` | the two generators' first four uniforms differ from each other and from the parent's next four; splitting one state twice gives equal pairs; the correlation of 100 000 paired uniforms through `Comoments` is within 0.01 of 0 |
 | `variates at their edges` | `gamma 1e-3 1.0` (10 000 draws) all finite and ≥ 0; `beta 1e-3 1e-3` all in [0, 1], none NaN, mean within 0.02 of 0.5; `binomial 10 0.0 = 0`, `binomial 10 1.0 = 10`, `binomial 0 0.5 = 0`; `poisson 0.0 = 0`; `integer 5 6 = 5`; `shuffle [\|\|]` is empty (Review Focus 4) |
-| `domains` | `ArgumentOutOfRangeException` for `integer 3 3`, `exponential 0.0`, `gamma -1.0 1.0`, `beta 1.0 0.0`, `binomial -1 0.5`, `binomial 5 1.5`, `binomial 5 nan`, `poisson -1.0`, `poisson nan`, `poisson 2e9`; `exponential nan` gives NaN |
+| `domains` | `ArgumentOutOfRangeException` for `integer 3 3`, `exponential 0.0`, `gamma -1.0 1.0`, `beta 1.0 0.0`, `binomial -1 0.5`, `binomial 5 1.5`, `binomial 5 nan`, `poisson -1.0`, `poisson nan`, `poisson 2e9`, and for a NaN parameter: `exponential nan`, `gamma nan 1.0`, `gamma 1.0 nan`, `beta nan 1.0`, `beta 1.0 nan` |
 
 - [ ] **Step 2: Run** the `"Generator"` filter. Expected: the build fails, `Generator.integer` is not defined.
 - [ ] **Step 3: Implement** the eight functions in `Generator.fs`, each doc comment naming its method and expected cost (*from documentation* or *general knowledge*).
 - [ ] **Step 4: Run** the filter, paste the two pinned blocks from the .NET output. Expected: all pass.
 - [ ] **Step 5: Run the gate.** Expected: 0 warnings, 0 failed, 0 failing; the pinned integers and shuffle pass under mocha.
-- [ ] **Step 6: Measure the gate** (section 11): time each of the four gate commands once with PowerShell's `Measure-Command`, after one warm-up build, and append to `docs/measurements/test-suite.md` a section "After Plan T2 (date)" with each command, its time and the test counts each suite printed, labelled *measured here*, beside the baseline taken before Plan T1 (build 9 s incremental, .NET suite 2 s and 174 tests, Fable compile 4 s warm, mocha 5 s and 171 tests; *measured here* by the coordinator on 2026-11-20, quoted from this plan, Task 20). Compare two figures only when both are this machine's runs of the same command.
+- [ ] **Step 6: Measure the gate** (section 11): time each of the four gate commands once with PowerShell's `Measure-Command`, after one warm-up build, and append to `docs/measurements/gate.md` a dated row "After Plan T2" with each command, its time and the test counts each suite printed, labelled *measured here*, beside the baseline (build 9 s incremental, .NET suite 2 s and 174 tests, Fable compile 4 s warm, mocha 5 s and 171 tests; *measured here* by the coordinator on 2026-11-20, cited from Plan T1, Task 15, `docs/measurements/gate.md`). Compare two figures only when both are this machine's runs of the same command.
 - [ ] **Step 7: Commit** `feat(numerics): integer, exponential, gamma, beta, binomial and Poisson variates, shuffle and split`.
 
 ---
 
 ## What Plan T3 takes from this plan
 
-The Produces blocks of Tasks 1 to 4 (`Special`), 5 to 7 (`Vector`, `Matrix`, `LuDecomposition`, `CholeskyDecomposition`, `QrDecomposition`, `SymmetricEigen`), 8 (`Roots.brent`), 9 (`LeastSquares.levenbergMarquardt`, `LeastSquaresResult.Jacobian`), 10 (`Integrate.adaptive`), 15 (`Comoments`), 19 (`Aggregate.comomentsBy`) and 20 (the `Generator` variates); `Bounds.fs` and `tests/reference/special.py` for its own tests; and the gate times in `docs/measurements/test-suite.md`.
+The Produces blocks of Tasks 1 to 4 (`Special`), 5 to 7 (`Vector`, `Matrix`, `LuDecomposition`, `CholeskyDecomposition`, `QrDecomposition`, `SymmetricEigen`), 8 (`Roots.brent`), 9 (`LeastSquares.levenbergMarquardt`, `LeastSquaresResult.Jacobian`), 10 (`Integrate.adaptive`), 15 (`Comoments`), 19 (`Aggregate.comomentsBy`) and 20 (the `Generator` variates); `Bounds.fs` and `tests/reference/special.py` for its own tests; and the gate times in `docs/measurements/gate.md`.

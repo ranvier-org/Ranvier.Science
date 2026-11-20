@@ -4,7 +4,7 @@
 
 **Goal:** `Ranvier.Statistics` gains distributions, descriptive statistics, intervals, hypothesis tests, a sequential test, multiple-testing adjustments, regression, correlation, curve fitting, the bootstrap and density estimation (spec §7); the repository gains `docs/GUIDE.md`, `docs/measurements/accuracy.md` and a 0.2.0 README (spec §9); the three packages move to 0.2.0 and pack (spec goal 6).
 
-**Architecture:** Every part this plan adds is a kernel: a plain function over numbers, arrays and the immutable accumulators of `Ranvier.Numerics`, which reads and creates no node (spec §3.3). The kernels build on Plan T2's special functions, linear algebra, comoments, least squares and variates and on Plan T1's sequence settings and moments additions, by the spec's names. Reference values come from one self-contained Python script, `tests/reference/statistics.py`, that computes in 60-digit `decimal` or exact `fractions`.
+**Architecture:** Every part this plan adds is a kernel: a plain function over numbers, arrays and the immutable accumulators of `Ranvier.Numerics`, which reads and creates no node (spec §3.3). The kernels build on Plan T2's special functions, linear algebra, comoments, least squares and variates and on Plan T1's sequence settings and moments additions, by the spec's names. Reference values come from one self-contained Python script, Plan T2's `tests/reference/special.py`, to which this plan adds sections; it computes in 60-digit `decimal` or exact `fractions`.
 
 **Tech Stack:** F# on .NET 10 (`global.json`: SDK 10.0.100, `latestFeature`); core `Ranvier` 0.2.1; Expecto 11.0.0-alpha8; Fickl 0.10.1 with Fable.Mocha 2.17.0 and mocha 12; Python 3.14.4, standard library only.
 
@@ -22,7 +22,7 @@
 - Error conventions (spec §3.2): an argument outside the domain raises `ArgumentOutOfRangeException` or `ArgumentException`; a NaN argument where the domain is otherwise satisfied returns NaN (or NaN fields) and raises nothing; a data-dependent failure of a direct method is `Result<'T, string>` naming the condition; an iterative method reports `Converged`. A function never returns a plausible number where it failed (spec §2, anti-goals).
 - A kernel never reads or creates a node. No doc comment claims a cut-off from structural equality (spec §3.3).
 - Each approximating kernel states its bound in its doc comment in the form "relative error at most E over D" (or "absolute error at most E over D" near zero), and a test pins it (spec §5.1). Targets: distribution `cdf` and `survival` relative 1e-12 where the value is at least 1e-300; `quantile` by round trip, the forward function at the result within 1e-12 relative of the target probability.
-- Every reference value in a test carries its source beside it (spec §5.2): a closed form or identity written in the test; the script `tests/reference/statistics.py`, run as `python -I tests/reference/statistics.py <section>` with the standard library alone (never `pip install`), the command written beside the pasted literals; or a published table cited by name and edition. A value marked ⚠️ in this plan is used only after the implementer confirms it against its named source; otherwise the test cites the script alone.
+- Every reference value in a test carries its source beside it (spec §5.2): a closed form or identity written in the test; the script `tests/reference/special.py` (Plan T2's; this plan adds sections, named in each task), run as `python -I tests/reference/special.py <section>` with the standard library alone (never `pip install`), the command written beside the pasted literals; or a published table cited by name and edition. A value marked ⚠️ in this plan is used only after the implementer confirms it against its named source; otherwise the test cites the script alone.
 - Every figure in a doc comment, record or commit carries a label: *measured here* (with the command), *from documentation* (with the file or page), or *general knowledge*.
 - Doc comments follow `C:\wk\ranvier-release\Ranvier\.claude\rules\comments.md`: the contract, the raise conditions, the cost where it is not O(1), the accuracy bound; no narration. British spelling in prose.
 - Kernels that use `exp`, `log` or trigonometric functions meet their bound on each target separately; this plan claims no exact cross-target equality (spec §5.3).
@@ -34,8 +34,8 @@
 
 Each is stated again in the task that owns it.
 
-1. File layout: one file per §7 subsection (`Continuous.fs`, `Discrete.fs`, `Describe.fs`, `Intervals.fs`, `HypothesisTest.fs`, `Sequential.fs`, `Regression.fs`, `Resampling.fs`) plus internal helpers in `Elementary.fs` (Tasks 1 to 12).
-2. One reference script with sections, since `python -I` puts no script folder on `sys.path` and so a script cannot import a sibling (Task 1).
+1. File layout: one file per §7 subsection (`Continuous.fs`, `Discrete.fs`, `Describe.fs`, `Intervals.fs`, `HypothesisTest.fs`, `Sequential.fs`, `Regression.fs`, `Resampling.fs`) plus the internal argument checks `Check` in `Check.fs` (Tasks 1 to 12), which compiles before `ConfidenceSequence.fs` so that `ConfidenceSequence.fs` calls `Check` and keeps no private copy; `log1p` and `expm1` are Plan T2's `Special.log1p` and `Special.expm1` (spec §6.1).
+2. One reference script with sections, since `python -I` puts no script folder on `sys.path` and so a script cannot import a sibling: Plan T2's `tests/reference/special.py`, to which Tasks 1 to 11 add sections (`normal`, `lognormal`, `dist-gamma`, `dist-chi-squared`, `dist-beta`, `dist-student-t`, `dist-fisher-f`, `discrete`, `intervals`, `parametric`, `counts`, `ranks`, `regression`, `correlation`, named so that none collides with T2's `gamma`, `erf`, `incgamma`, `incbeta`). The sections call the script's `ln_gamma`, `gamma_p`, `gamma_q` and `beta_inc`, which Plan T2 writes as named functions; nothing re-implements ln Γ, Bernoulli numbers or the incomplete functions (Task 1).
 3. Upper-tail quantiles (p > 0.5) solve `survival q = 1 − p` and are tested on `survival`, so upper critical values keep full relative precision (Tasks 1, 2).
 4. Moments: +∞ where the defining integral diverges to +∞, NaN where the moment is undefined (Task 2).
 5. `describe` prints parameters with F#'s `string`; text for magnitudes outside [1e-5, 1e15) may differ between targets (Task 1).
@@ -66,17 +66,18 @@ Each is stated again in the task that owns it.
 ```
 src/Ranvier.Statistics/
   NormalQuantile.fs        doc comment points to Continuous.quantile (Task 1)
-  ConfidenceSequence.fs    Plan T1's (SequenceSettings, settings, tunedFor, standardBurnIn, interval); not edited here
-  Elementary.fs            internal: log1p, expm1, argument checks (Task 1)
+  Check.fs                 internal: the argument checks `Check` (Task 1); before ConfidenceSequence.fs
+  ConfidenceSequence.fs    Plan T1's (SequenceSettings, settings, tunedFor, standardBurnIn, interval); edited only in Task 1,
+                           where its private `Arguments` gives way to `Check`
   Continuous.fs            Continuous (Tasks 1, 2)
   Discrete.fs              Discrete (Task 3)
   Describe.fs              Describe, Summary, BinRule (Task 4)
   Intervals.fs             MeanInterval, ProportionInterval, VarianceInterval, DifferenceInterval (Task 5)
-  HypothesisTest.fs        Alternative, TestResult, Test, internal PValue (Tasks 6, 7, 8)
+  HypothesisTest.fs        Alternative, TestResult, HypothesisTest, internal PValue (Tasks 6, 7, 8)
   Sequential.fs            SequentialTest, Adjust (Task 9)
   Regression.fs            Regression, Correlation and their records (Tasks 10, 11)
   Resampling.fs            Bootstrap, Density (Task 12)
-tests/reference/statistics.py     the reference script, one section per test area (Task 1 on)
+tests/reference/special.py        Plan T2's reference script; one section added per test area (Task 1 on)
 tests/guide-snippets.py           guide snippet check (Task 14)
 tests/Ranvier.Science.Tests/      ContinuousTests.fs DiscreteTests.fs DescribeTests.fs IntervalTests.fs
                                   HypothesisTests.fs SequentialTestTests.fs AdjustTests.fs RegressionTests.fs
@@ -85,7 +86,7 @@ docs/GUIDE.md  docs/measurements/accuracy.md  README.md                  (Tasks 
 src/Directory.Build.props  src/*/Ranvier.*.fsproj                        (Task 15)
 ```
 
-`Compile` order of `Ranvier.Statistics.fsproj` at the end of the plan: `NormalQuantile.fs`, `ConfidenceSequence.fs`, `Elementary.fs`, `Continuous.fs`, `Discrete.fs`, `Describe.fs`, `Intervals.fs`, `HypothesisTest.fs`, `Sequential.fs`, `Regression.fs`, `Resampling.fs`. It references `Ranvier.Numerics` only; nothing here needs `Ranvier.Quantities`. New test files go into `TestFiles.props` after `ConfidenceSequenceTests.fs`, in task order, and `GuideTests.fs` last.
+`Compile` order of `Ranvier.Statistics.fsproj` at the end of the plan: `NormalQuantile.fs`, `Check.fs`, `ConfidenceSequence.fs`, `Continuous.fs`, `Discrete.fs`, `Describe.fs`, `Intervals.fs`, `HypothesisTest.fs`, `Sequential.fs`, `Regression.fs`, `Resampling.fs`. It references `Ranvier.Numerics` only; nothing here needs `Ranvier.Quantities`. New test files go into `TestFiles.props` and the Fable `Main.fs` immediately before `CrossTargetTests.fs` (Plan T2's rule), in task order, each after the previous T3 file, and `GuideTests.fs` last before `CrossTargetTests.fs`.
 
 Commands, from the repository root:
 
@@ -99,19 +100,15 @@ Commands, from the repository root:
 ### Task 1: Continuous distributions with closed forms, and the normal
 
 **Files:**
-- Create: `src/Ranvier.Statistics/Elementary.fs`, `src/Ranvier.Statistics/Continuous.fs`, `tests/Ranvier.Science.Tests/ContinuousTests.fs`, `tests/reference/statistics.py`
-- Modify: `src/Ranvier.Statistics/Ranvier.Statistics.fsproj` (`Elementary.fs`, `Continuous.fs` after `ConfidenceSequence.fs`); `src/Ranvier.Statistics/NormalQuantile.fs:22` (doc comment); `tests/Ranvier.Science.Tests/TestFiles.props`; `tests/Ranvier.Science.Tests.Fable/Main.fs`
+- Create: `src/Ranvier.Statistics/Check.fs`, `src/Ranvier.Statistics/Continuous.fs`, `tests/Ranvier.Science.Tests/ContinuousTests.fs`
+- Modify: `tests/reference/special.py` (sections `normal`, `lognormal`); `src/Ranvier.Statistics/ConfidenceSequence.fs` (its private `Arguments` module removed, its calls become `Check.alpha`, `Check.finitePositive`, `Check.notNegative`); `src/Ranvier.Statistics/Ranvier.Statistics.fsproj` (`Check.fs` immediately before `ConfidenceSequence.fs`, `Continuous.fs` after it); `src/Ranvier.Statistics/NormalQuantile.fs:22` (doc comment); `tests/Ranvier.Science.Tests/TestFiles.props`; `tests/Ranvier.Science.Tests.Fable/Main.fs`
 
 **Interfaces:**
-- Consumes (Plan T2, `Ranvier.Numerics`): `Special.erfc : float -> float`; `Generator.exponential : rate: float -> Generator -> struct (float * Generator)`; `Generator.uniform` and `Generator.normal` (0.1.0, `Generator.fs:55,62`); in tests, `Integrate.adaptive : absolute: float -> relative: float -> f: (float -> float) -> a: float -> b: float -> Integral` with `Integral = { Value: float; ErrorEstimate: float; Evaluations: int; Converged: bool }`.
+- Consumes (Plan T2, `Ranvier.Numerics`): `Special.erfc : float -> float`; `Special.log1p : float -> float` and `Special.expm1 : float -> float` (both public, spec §6.1; T2 Task 1); `Generator.exponential : rate: float -> Generator -> struct (float * Generator)`; `Generator.uniform` and `Generator.normal` (0.1.0, `Generator.fs:55,62`); in tests, `Integrate.adaptive : absolute: float -> relative: float -> f: (float -> float) -> a: float -> b: float -> Integral` with `Integral = { Value: float; ErrorEstimate: float; Evaluations: int; Converged: bool }`.
 - Produces:
 
 ```fsharp
 namespace Ranvier.Statistics
-
-module internal Elementary =
-    val log1p : float -> float   // ln(1 + x), accurate near 0; Goldberg (1991), Theorem 4
-    val expm1 : float -> float   // e^x − 1, accurate near 0; Kahan's method (Higham, Accuracy and Stability, §1.14.1)
 
 module internal Check =         // each raises ArgumentOutOfRangeException naming the parameter
     val alpha : float -> unit                        // unless 0 < alpha < 1
@@ -144,13 +141,13 @@ module Continuous =
     val describe : Continuous -> string
 ```
 
-- Produces (script): `tests/reference/statistics.py <section>` with Decimal helpers `pi()`, `ln_gamma(x)`, `gamma_p(a, x)`, `gamma_q(a, x)`, `normal_cdf(z)`, `normal_sf(z)`, `invert(f, target, lo, hi)` and `emit(name, rows)`; later tasks add sections and helpers.
+- Produces (script): sections of Plan T2's `tests/reference/special.py <section>`, with the new helpers `normal_cdf(z)`, `normal_sf(z)`, `invert(f, target, lo, hi)` and `emit(name, rows)`; later tasks add sections and helpers. Consumes from the same script (Plan T2, Tasks 1, 3 and 4): `pi()`, `ln_gamma(x)`, `gamma_p(a, x)`, `gamma_q(a, x)` and `beta_inc(a, b, x)`, which T2 writes as named functions behind its `incgamma` and `incbeta` sections.
 
-- [ ] **Step 1: Write the reference script** `tests/reference/statistics.py`. `decimal.getcontext().prec = 60`. Each input is converted with `Decimal(x)` or `Fraction(x)` from the double the test passes, so a reference is exact at that double. Methods: π by the `decimal` module documentation's recipe; ln Γ by Stirling's series after shifting the argument to at least 40, with 30 Bernoulli numbers from `fractions` (Akiyama–Tanigawa); P(a, x) by its series for x < a + 1 and Q(a, x) by the modified-Lentz continued fraction otherwise (Press et al., *Numerical Recipes*, 3rd edition, §6.2); `normal_sf(z) = gamma_q(1/2, z²/2) / 2` for z ≥ 0 and `1 − normal_sf(−z)` below; `invert` by 200 bisection steps on an increasing function. Before printing, the script asserts to 1e-50: `normal_cdf(0) = 1/2`; `gamma_p(1, x) = 1 − e^−x` at x = 0.3 and 7; `exp(ln_gamma(10)) = 362880`; `ln_gamma(0.5) = ln √π`. `emit` prints `let private <name> = [| struct (x, v); ... |]` with `repr(float(v))` (the nearest double, shortest form), and the script prints its command as the first line, as an F# comment. Sections of this task:
+- [ ] **Step 1: Add the sections `normal` and `lognormal` to `tests/reference/special.py`.** The script already sets `decimal.getcontext().prec = 60` and converts each input with `Decimal(x)` or `Fraction(x)` from the double the test passes (Plan T2's conventions), so a reference is exact at that double; this task writes no second copy of π, ln Γ, the Bernoulli numbers or P and Q. It adds: `normal_sf(z) = gamma_q(1/2, z²/2) / 2` for z ≥ 0 and `1 − normal_sf(−z)` below, `normal_cdf(z) = 1 − normal_sf(z)` through the same split; `invert` by 200 bisection steps on an increasing function. Before printing, the new sections assert to 1e-50: `normal_cdf(0) = 1/2`; `gamma_p(1, x) = 1 − e^−x` at x = 0.3 and 7; `exp(ln_gamma(10)) = 362880`; `ln_gamma(0.5) = ln √π`. `emit` prints `let private <name> = [| struct (x, v); ... |]` with `repr(float(v))` (the nearest double, shortest form), and the script prints its command as the first line, as an F# comment. Sections of this task:
   - `normal`: N(0, 1) `cdf` and `survival` at x ∈ {−37, −30, −10, −5, −1.96, −1, −0.5, 0, 0.3, 1, 1.96, 3, 5, 8, 10, 30, 37}; N(3, 2) `cdf` at {−5, 1, 3, 7.5}; N(0, 1) quantile at p ∈ {1e-300, 1e-100, 1e-10, 0.025, 0.3, 0.975, 1 − 1e-10}, bisecting the survival against `1 − Decimal(p)` for p > 0.5.
   - `lognormal`: LN(0.5, 0.8) `cdf` and `survival` at x ∈ {1e-10, 0.1, 1, 2, 10, 1000}.
 
-  Run `python -I tests/reference/statistics.py normal` and `... lognormal`. Expected: the asserts pass and two blocks of literals print.
+  Run `python -I tests/reference/special.py normal` and `... lognormal`. Expected: the asserts pass and two blocks of literals print.
 
 - [ ] **Step 2: Write the failing tests** in `ContinuousTests.fs`, list `"Continuous"`. Helpers: `rel a b = abs (a - b) / abs b`; `lowerGrid = [ 1e-100; 1e-10; 0.01; 0.3; 0.5 ]`; `upperGrid = [ 0.6; 0.975; 0.999; 1.0 - 1e-10 ]`; `roundTrip d p` asserts `rel (cdf d q) p <= 1e-12` for p ≤ 0.5 and `rel (survival d q) (1.0 - p) <= 1e-12` for p > 0.5, with `q = quantile d p`; `ksDistance (cdf: float -> float) (xs: float[])` is max over the sorted sample of max(i/n − F(x₍ᵢ₎), F(x₍ᵢ₎) − (i − 1)/n). Paste the script's tables above the list with their command.
   - `normal cdf and survival against the reference`: every row of the `normal` tables within relative 1e-12 (rows below 1e-300 are skipped by the assertion, not removed).
@@ -174,10 +171,10 @@ module Continuous =
 
 - [ ] **Step 3: Run** `dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter "Continuous"`. Expected: compile error, `Continuous` is not defined.
 
-- [ ] **Step 4: Implement `Elementary.fs` and `Continuous.fs`.** Decisions:
+- [ ] **Step 4: Implement `Check.fs` and `Continuous.fs`, and move `ConfidenceSequence.fs` onto `Check`.** `Check.fs` compiles before `ConfidenceSequence.fs`; `ConfidenceSequence.fs` loses its private `Arguments` module and calls `Check.alpha`, `Check.finitePositive` and `Check.notNegative`, so no copy remains. `ConfidenceSequence.radius`'s existing rule that a NaN standard deviation gives NaN is kept by calling `Check.notNegative (nameof sd) sd` only when `sd` is not NaN; the existing `ConfidenceSequence` tests pass unchanged. Decisions:
   - `Continuous` is `type Continuous = private | Normal of mean: float * sd: float | ...`, one case per constructor; Task 2 adds five cases. Constructors raise `ArgumentOutOfRangeException` for a NaN or infinite parameter, a scale, rate or shape ≤ 0, and `lower ≥ upper`.
   - Normal: z = (x − mean)/sd; `cdf = 0.5 · erfc(−z/√2)`, `survival = 0.5 · erfc(z/√2)`. Quantile: Acklam's approximation (the coefficients of `NormalQuantile.fs`) at min(p, 1 − p), then one Halley step on the lower-tail cdf, e = cdf(x) − p, u = e·√(2π)·exp(x²/2), x ← x − u/(1 + x·u/2), skipped where `exp` overflows; for p > 0.5 the result is the negated lower quantile at 1 − p (exact for p ≥ 0.5).
-  - Tails use `Elementary.log1p` and `expm1`: exponential `cdf = −expm1(−rate·x)`; Weibull `cdf = −expm1(−(x/scale)^shape)`; their quantiles use `−log1p(−p)` for p ≤ 0.5 and `−ln(1 − p)` above. Cauchy `cdf(z) = atan(−1/z)/π` for z < 0, `survival(z) = cdf(−z)`, quantile `location − scale / tan(πp)` for p < 0.5, symmetric above. Logistic cdf `1/(1 + e^−z)`, quantile `ln p − log1p(−p)` below 0.5, symmetric above.
+  - Tails use `Special.log1p` and `Special.expm1` (no local copy): exponential `cdf = −Special.expm1(−rate·x)`; Weibull `cdf = −Special.expm1(−(x/scale)^shape)`; their quantiles use `−Special.log1p(−p)` for p ≤ 0.5 and `−ln(1 − p)` above. Cauchy `cdf(z) = atan(−1/z)/π` for z < 0, `survival(z) = cdf(−z)`, quantile `location − scale / tan(πp)` for p < 0.5, symmetric above. Logistic cdf `1/(1 + e^−z)`, quantile `ln p − log1p(−p)` below 0.5, symmetric above.
   - Sampling: normal `mean + sd·z`; log-normal `exp` of a normal; uniform `lower + (upper − lower)·u`; exponential `Generator.exponential`; Cauchy, Weibull and logistic by inversion of a uniform, redrawing u = 0 where the inversion needs u in (0, 1).
   - `describe` prints `Name(param = value, ...)` with F#'s `string` of each parameter and the constructor's parameter names. Its doc comment states that a parameter's text outside [1e-5, 1e15) in magnitude may differ between .NET and JavaScript.
   - Doc comments: each of `cdf`, `survival` and `quantile` states "relative error at most 1e-12 where the value is at least 1e-300" over the parameter values the tests cover, and the quantile's round-trip rule; `quantile` raises `ArgumentOutOfRangeException` for p outside [0, 1].
@@ -190,10 +187,10 @@ module Continuous =
 ### Task 2: Continuous distributions over the incomplete gamma and beta functions
 
 **Files:**
-- Modify: `src/Ranvier.Statistics/Continuous.fs`, `tests/Ranvier.Science.Tests/ContinuousTests.fs`, `tests/reference/statistics.py`
+- Modify: `src/Ranvier.Statistics/Continuous.fs`, `tests/Ranvier.Science.Tests/ContinuousTests.fs`, `tests/reference/special.py` (sections `dist-gamma`, `dist-chi-squared`, `dist-beta`, `dist-student-t`, `dist-fisher-f`)
 
 **Interfaces:**
-- Consumes (Task 1): `Continuous` and its module, `Elementary.log1p`, `Elementary.expm1`, `Check.*`; the script's `ln_gamma`, `gamma_p`, `gamma_q`, `invert`, `emit`. Plan T2: `Special.gammaLn : float -> float`, `Special.betaLn : float -> float -> float`, `Special.gammaLowerRegularized : float -> float -> float` (P(a, x)), `Special.gammaUpperRegularized : float -> float -> float` (Q(a, x)), `Special.gammaLowerRegularizedInverse : float -> float -> float` (x with P(a, x) = p), `Special.betaRegularized : float -> float -> float -> float` (I_x(a, b)), `Special.betaRegularizedInverse : float -> float -> float -> float`; `Generator.gamma : shape: float -> scale: float -> Generator -> struct (float * Generator)`, `Generator.beta : a: float -> b: float -> Generator -> struct (float * Generator)`. The spec fixes these names but not the parameter order of the beta functions: this plan reads them as `betaRegularized a b x` and `betaRegularizedInverse a b p` (spec §6: configuration first, data last). Before Step 4, read the doc comments in the `Ranvier.Numerics` file that defines `module Special` (`rg -n "module Special" src`) and use the order they state.
+- Consumes (Task 1): `Continuous` and its module, `Check.*`; the script's `ln_gamma`, `gamma_p`, `gamma_q`, `invert`, `emit` (`special.py`). Plan T2: `Special.log1p`, `Special.expm1`, `Special.gammaLn : float -> float`, `Special.betaLn : float -> float -> float`, `Special.gammaLowerRegularized : float -> float -> float` (P(a, x)), `Special.gammaUpperRegularized : float -> float -> float` (Q(a, x)), `Special.gammaLowerRegularizedInverse : float -> float -> float` (x with P(a, x) = p), `Special.betaRegularized : float -> float -> float -> float` (I_x(a, b)), `Special.betaRegularizedInverse : float -> float -> float -> float`; `Generator.gamma : shape: float -> scale: float -> Generator -> struct (float * Generator)`, `Generator.beta : a: float -> b: float -> Generator -> struct (float * Generator)`. The spec fixes these names but not the parameter order of the beta functions: this plan reads them as `betaRegularized a b x` and `betaRegularizedInverse a b p` (spec §6: configuration first, data last). Before Step 4, read the doc comments in the `Ranvier.Numerics` file that defines `module Special` (`rg -n "module Special" src`) and use the order they state.
 - Produces:
 
 ```fsharp
@@ -207,12 +204,12 @@ module Continuous =
     // sample, samples, describe now cover these five families as well
 ```
 
-- [ ] **Step 1: Extend the script.** Add `beta_inc(a, b, x)`, the regularised incomplete beta by the modified-Lentz continued fraction with the symmetry I_x(a, b) = 1 − I_{1−x}(b, a) for x > (a + 1)/(a + b + 2), its prefactor `exp(a ln x + b ln(1 − x) − ln B(a, b))` from `ln_gamma` (*Numerical Recipes*, 3rd edition, §6.4). Self-checks to 1e-50: `beta_inc(1, 1, x) = x`; `beta_inc(2.5, 3.5, 0.3) + beta_inc(3.5, 2.5, 0.7) = 1`. Sections, each printing `cdf`, `survival` and `density` at the points and the quantile at p ∈ {0.05, 0.975}:
-  - `gamma`: (shape 2.5, scale 2) at x ∈ {1e-5, 0.1, 1, 5, 20, 100}; (0.5, 1) at {1e-10, 0.01, 0.5, 3, 50}; (100, 1) at {60, 90, 100, 110, 150}.
-  - `chi-squared`: dof 3 at {0.01, 1, 3, 10, 50}; dof 10 at {1, 10, 30, 100}.
-  - `beta`: (2.5, 3.5) at {1e-6, 0.1, 0.4, 0.8, 0.999}.
-  - `student-t`: dof ∈ {2.5, 5, 30} at t ∈ {−1000, −10, −2.5, −1, 0.4, 1.96, 4, 100}, through `beta_inc(ν/2, 1/2, ν/(ν + t²))`.
-  - `fisher-f`: (5, 10) at {0.01, 0.5, 1, 3, 20, 1000}; (2, 30) at {0.1, 1, 5, 50}.
+- [ ] **Step 1: Add the sections to `tests/reference/special.py`.** The script's `beta_inc(a, b, x)` (Plan T2, the function behind its `incbeta` section), `gamma_p` and `gamma_q` give the incomplete functions; nothing is re-implemented here. Self-checks to 1e-50 in the new sections: `beta_inc(1, 1, x) = x`; `beta_inc(2.5, 3.5, 0.3) + beta_inc(3.5, 2.5, 0.7) = 1`. Sections, each printing `cdf`, `survival` and `density` at the points and the quantile at p ∈ {0.05, 0.975}:
+  - `dist-gamma`: (shape 2.5, scale 2) at x ∈ {1e-5, 0.1, 1, 5, 20, 100}; (0.5, 1) at {1e-10, 0.01, 0.5, 3, 50}; (100, 1) at {60, 90, 100, 110, 150}.
+  - `dist-chi-squared`: dof 3 at {0.01, 1, 3, 10, 50}; dof 10 at {1, 10, 30, 100}.
+  - `dist-beta`: (2.5, 3.5) at {1e-6, 0.1, 0.4, 0.8, 0.999}.
+  - `dist-student-t`: dof ∈ {2.5, 5, 30} at t ∈ {−1000, −10, −2.5, −1, 0.4, 1.96, 4, 100}, through `beta_inc(ν/2, 1/2, ν/(ν + t²))`.
+  - `dist-fisher-f`: (5, 10) at {0.01, 0.5, 1, 3, 20, 1000}; (2, 30) at {0.1, 1, 5, 50}.
 
 - [ ] **Step 2: Write the failing tests**, appended to the `"Continuous"` list:
   - `gamma against the reference`, `chi-squared against the reference`, `beta against the reference`, `Student t against the reference`, `F against the reference`: every row within relative 1e-12 (cdf, survival and density; quantiles too).
@@ -247,10 +244,10 @@ module Continuous =
 
 **Files:**
 - Create: `src/Ranvier.Statistics/Discrete.fs`, `tests/Ranvier.Science.Tests/DiscreteTests.fs`
-- Modify: `Ranvier.Statistics.fsproj` (`Discrete.fs` after `Continuous.fs`), `tests/reference/statistics.py`, `TestFiles.props`, the Fable `Main.fs`
+- Modify: `Ranvier.Statistics.fsproj` (`Discrete.fs` after `Continuous.fs`), `tests/reference/special.py` (section `discrete`), `TestFiles.props`, the Fable `Main.fs`
 
 **Interfaces:**
-- Consumes: Task 1's `Elementary.log1p`, `Elementary.expm1`, `Check.*`, `Continuous.quantile (Continuous.normal 0.0 1.0)`; the script's helpers. Plan T2: `Special.logChoose : int -> int -> float` (ln C(n, k)), `Special.logFactorial : int -> float`, `Special.gammaLn`, `Special.betaRegularized`, `Special.gammaLowerRegularized`, `Special.gammaUpperRegularized` (read the parameter order in the doc comments of the file that defines `module Special`; this plan expects `betaRegularized a b x`); `Generator.binomial : trials: int -> p: float -> Generator -> struct (int * Generator)`, `Generator.poisson : mean: float -> Generator -> struct (int * Generator)`, `Generator.gamma`, `Generator.integer : lower: int -> upperExclusive: int -> Generator -> struct (int * Generator)`, `Generator.uniform`.
+- Consumes: Task 1's `Check.*`, `Continuous.quantile (Continuous.normal 0.0 1.0)`; the script's helpers. Plan T2: `Special.log1p`, `Special.expm1`, `Special.logChoose : int -> int -> float` (ln C(n, k)), `Special.logFactorial : int -> float`, `Special.gammaLn`, `Special.betaRegularized`, `Special.gammaLowerRegularized`, `Special.gammaUpperRegularized` (read the parameter order in the doc comments of the file that defines `module Special`; this plan expects `betaRegularized a b x`); `Generator.binomial : trials: int -> p: float -> Generator -> struct (int * Generator)`, `Generator.poisson : mean: float -> Generator -> struct (int * Generator)`, `Generator.gamma`, `Generator.integer : lower: int -> upperExclusive: int -> Generator -> struct (int * Generator)`, `Generator.uniform`.
 - Produces:
 
 ```fsharp
@@ -299,10 +296,10 @@ module Discrete =
 - [ ] **Step 3: Run** `-- --filter "Discrete"`. Expected: compile error, `Discrete` is not defined.
 
 - [ ] **Step 4: Implement `Discrete.fs`.** Decisions:
-  - Binomial `cdf k = I_{1−p}(n − k, k + 1)` and `survival k = I_p(k + 1, n − k)` for 0 ≤ k < n. Poisson `cdf k = Q(k + 1, λ)`, `survival k = P(k + 1, λ)`. Geometric by `log1p`/`expm1` closed forms. Negative binomial `cdf k = I_p(r, k + 1)`, `survival k = I_{1−p}(k + 1, r)`. Masses through `exp` of `logMass` (`logChoose`, `logFactorial`, `gammaLn`, `log1p`), with 0·ln 0 taken as 0 at p = 0 or 1.
+  - Binomial `cdf k = I_{1−p}(n − k, k + 1)` and `survival k = I_p(k + 1, n − k)` for 0 ≤ k < n. Poisson `cdf k = Q(k + 1, λ)`, `survival k = P(k + 1, λ)`. Geometric by `Special.log1p`/`Special.expm1` closed forms. Negative binomial `cdf k = I_p(r, k + 1)`, `survival k = I_{1−p}(k + 1, r)`. Masses through `exp` of `logMass` (`logChoose`, `logFactorial`, `gammaLn`, `log1p`), with 0·ln 0 taken as 0 at p = 0 or 1.
   - Hypergeometric: `mass` from three `logChoose` terms; `cdf k` sums the masses from the lower support bound to k when k is below the mode, else is 1 − `survival k`, which sums from k + 1 to the upper bound; cost O(min(k − lower, upper − k)), stated in the doc comment.
   - Quantile: start at ⌊mean + sd · z_p⌋ clamped to the support (z_p the standard normal quantile), then step down while the condition holds at k − 1 and up while it fails at k; for p > 0.5 the condition is `survival k ≤ 1 − p`. p = 0 and 1 give the support's bounds; a result past `Int32.MaxValue` saturates there; a NaN p raises (an `int` has no NaN).
-  - Sampling, exact in distribution: binomial and Poisson from the generator; geometric ⌊ln u / log1p(−p)⌋ with u = 1 − uniform in (0, 1]; negative binomial as a Poisson draw whose mean is a `Generator.gamma r ((1 − p)/p)` draw; hypergeometric by `draws` sequential urn draws (O(draws)); Bernoulli `uniform < p`; uniform `Generator.integer lower (upper + 1)`. A degenerate distribution returns its value and the generator unchanged.
+  - Sampling, exact in distribution: binomial and Poisson from the generator; geometric ⌊ln u / Special.log1p(−p)⌋ with u = 1 − uniform in (0, 1]; negative binomial as a Poisson draw whose mean is a `Generator.gamma r ((1 − p)/p)` draw; hypergeometric by `draws` sequential urn draws (O(draws)); Bernoulli `uniform < p`; uniform `Generator.integer lower (upper + 1)`. A degenerate distribution returns its value and the generator unchanged.
   - Doc comments: `mass`, `cdf` and `survival` state "relative error at most 1e-12 where the value is at least 1e-300" over the tests' parameters (trials and population up to 1000, means up to 1000).
 
 - [ ] **Step 5: Run** the filtered list. Expected: PASS.
@@ -316,7 +313,7 @@ module Discrete =
 - Modify: `Ranvier.Statistics.fsproj` (`Describe.fs` after `Discrete.fs`), `TestFiles.props`, the Fable `Main.fs`
 
 **Interfaces:**
-- Consumes: Task 1's `Check.*`.
+- Consumes: Task 1's `Check.*`; Plan T1's `OrderStatistic.quantileSorted : p: float -> sorted: float[] -> float` (type 7; NaN for an empty array; raises `ArgumentOutOfRangeException` unless 0 ≤ p ≤ 1).
 - Produces:
 
 ```fsharp
@@ -355,7 +352,7 @@ module Describe =
 
 - [ ] **Step 2: Run** `-- --filter "Describe"`. Expected: compile error, `Describe` is not defined.
 
-- [ ] **Step 3: Implement `Describe.fs`.** Decisions: type 7, h = (n − 1)p, `x[⌊h⌋] + (h − ⌊h⌋)(x[⌊h⌋ + 1] − x[⌊h⌋])`. `quantile`, `quantiles` and the order statistics scan for NaN while copying (O(n)) and return NaN; `quantileSorted` is O(1), reads the array as sorted ascending and scans nothing. `trimmedMean` cuts ⌊n · proportion⌋ from each end (R's `mean(trim =)` and SciPy's `trim_mean`, *general knowledge*), 0 ≤ proportion < 0.5. `medianAbsoluteDeviation`'s doc comment gives 1.4826 as the factor for consistency with the normal. `autocorrelation` r_k = Σ_{t<n−k}(x_t − x̄)(x_{t+k} − x̄) / Σ(x_t − x̄)². `binEdges` follows NumPy's `histogram_bin_edges` (numpy 2.x, as confirmed in Step 1), with constant data widened to [x − 0.5, x + 0.5] and one bin for the width rules, as NumPy does. Doc comments state costs: O(n log n) for the sorting reads.
+- [ ] **Step 3: Implement `Describe.fs`.** Decisions: type 7, h = (n − 1)p, `x[⌊h⌋] + (h − ⌊h⌋)(x[⌊h⌋ + 1] − x[⌊h⌋])`, taken from Plan T1's `OrderStatistic.quantileSorted` (spec §6.13): `Describe.quantileSorted` delegates to it and no second copy of the interpolation is written. `quantile`, `quantiles` and the order statistics scan for NaN while copying (O(n)) and return NaN; `quantileSorted` is O(1), reads the array as sorted ascending and scans nothing. `trimmedMean` cuts ⌊n · proportion⌋ from each end (R's `mean(trim =)` and SciPy's `trim_mean`, *general knowledge*), 0 ≤ proportion < 0.5. `medianAbsoluteDeviation`'s doc comment gives 1.4826 as the factor for consistency with the normal. `autocorrelation` r_k = Σ_{t<n−k}(x_t − x̄)(x_{t+k} − x̄) / Σ(x_t − x̄)². `binEdges` follows NumPy's `histogram_bin_edges` (numpy 2.x, as confirmed in Step 1), with constant data widened to [x − 0.5, x + 0.5] and one bin for the width rules, as NumPy does. Doc comments state costs: O(n log n) for the sorting reads.
 
 - [ ] **Step 4: Run** the filtered list. Expected: PASS.
 - [ ] **Step 5: Run the gate**: `dotnet build -c Release` (0 warnings, 0 errors); `dotnet run -c Release --project tests/Ranvier.Science.Tests`; `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release`, then `npx mocha dist/tests/Main.fs.js`; all unfiltered. Expected: every test passes on both targets.
@@ -365,7 +362,7 @@ module Describe =
 
 **Files:**
 - Create: `src/Ranvier.Statistics/Intervals.fs`, `tests/Ranvier.Science.Tests/IntervalTests.fs`
-- Modify: `Ranvier.Statistics.fsproj` (`Intervals.fs` after `Describe.fs`), `tests/reference/statistics.py`, `TestFiles.props`, the Fable `Main.fs`
+- Modify: `Ranvier.Statistics.fsproj` (`Intervals.fs` after `Describe.fs`), `tests/reference/special.py` (section `intervals`), `TestFiles.props`, the Fable `Main.fs`
 
 **Interfaces:**
 - Consumes: `Interval = { Lower: float; Upper: float }` (struct, `ConfidenceSequence.fs:7`); Task 1's `Check.alpha`, `Check.finitePositive`; `Continuous.quantile`, `Continuous.normal`, `Continuous.studentT`, `Continuous.chiSquared`, `Continuous.beta` (Tasks 1, 2); `Moments.count`, `Moments.mean`; Plan T1's `Moments.sampleVariance : Moments -> float` (divisor n − 1, NaN below 2) and `Moments.sampleStandardDeviation : Moments -> float`.
@@ -412,7 +409,7 @@ module DifferenceInterval =                                              // mean
 
 **Files:**
 - Create: `src/Ranvier.Statistics/HypothesisTest.fs`, `tests/Ranvier.Science.Tests/HypothesisTests.fs`
-- Modify: `Ranvier.Statistics.fsproj` (`HypothesisTest.fs` after `Intervals.fs`), `tests/reference/statistics.py`, `TestFiles.props`, the Fable `Main.fs`
+- Modify: `Ranvier.Statistics.fsproj` (`HypothesisTest.fs` after `Intervals.fs`), `tests/reference/special.py` (section `parametric`), `TestFiles.props`, the Fable `Main.fs`
 
 **Interfaces:**
 - Consumes: `Continuous.normal`, `studentT`, `fisherF`, `cdf`, `survival` (Tasks 1, 2); `Moments.count`, `Moments.mean`, `Moments.variance`; Plan T1's `Moments.sampleVariance`, `Moments.sampleStandardDeviation`.
@@ -461,7 +458,7 @@ The module is `HypothesisTest`, not the spec's first name `Test`, which collides
 ### Task 7: Exact and contingency-table tests
 
 **Files:**
-- Modify: `src/Ranvier.Statistics/HypothesisTest.fs`, `tests/Ranvier.Science.Tests/HypothesisTests.fs`, `tests/reference/statistics.py`
+- Modify: `src/Ranvier.Statistics/HypothesisTest.fs`, `tests/Ranvier.Science.Tests/HypothesisTests.fs`, `tests/reference/special.py` (section `counts`)
 
 **Interfaces:**
 - Consumes: Task 6's `Alternative = TwoSided | Less | Greater`, `TestResult = { Statistic; DegreesOfFreedom; DenominatorDegreesOfFreedom; PValue }` (NaN where a field does not apply) and the internal `PValue.continuous : Alternative -> Continuous -> statistic: float -> float` (Less: cdf; Greater: survival; TwoSided: min 1 (2 · min cdf survival); NaN statistic → NaN); `Discrete.binomial`, `Discrete.hypergeometric`, `mass`, `cdf`, `survival` (Task 3); `Continuous.chiSquared` (Task 2).
@@ -505,7 +502,7 @@ module HypothesisTest =
 ### Task 8: Rank and Kolmogorov–Smirnov tests
 
 **Files:**
-- Modify: `src/Ranvier.Statistics/HypothesisTest.fs`, `tests/Ranvier.Science.Tests/HypothesisTests.fs`, `tests/reference/statistics.py`
+- Modify: `src/Ranvier.Statistics/HypothesisTest.fs`, `tests/Ranvier.Science.Tests/HypothesisTests.fs`, `tests/reference/special.py` (section `ranks`)
 
 **Interfaces:**
 - Consumes: Task 6's `Alternative = TwoSided | Less | Greater`, `TestResult = { Statistic; DegreesOfFreedom; DenominatorDegreesOfFreedom; PValue }` (NaN where a field does not apply) and the internal `PValue.continuous : Alternative -> Continuous -> statistic: float -> float` (Less: cdf; Greater: survival; TwoSided: min 1 (2 · min cdf survival); NaN statistic → NaN); `Describe.ranks` (Task 4); `Continuous.normal`.
@@ -605,10 +602,10 @@ module Adjust =                               // adjusted p-values in input orde
 
 **Files:**
 - Create: `src/Ranvier.Statistics/Regression.fs`, `tests/Ranvier.Science.Tests/RegressionTests.fs`
-- Modify: `Ranvier.Statistics.fsproj` (`Regression.fs` after `Sequential.fs`), `tests/reference/statistics.py`, `TestFiles.props`, the Fable `Main.fs`
+- Modify: `Ranvier.Statistics.fsproj` (`Regression.fs` after `Sequential.fs`), `tests/reference/special.py` (section `regression`), `TestFiles.props`, the Fable `Main.fs`
 
 **Interfaces:**
-- Consumes: Task 6's `Alternative = TwoSided | Less | Greater`, `TestResult = { Statistic; DegreesOfFreedom; DenominatorDegreesOfFreedom; PValue }` (NaN where a field does not apply) and the internal `PValue.continuous : Alternative -> Continuous -> statistic: float -> float` (Less: cdf; Greater: survival; TwoSided: min 1 (2 · min cdf survival); NaN statistic → NaN); `Continuous.studentT`. Plan T2 (`Ranvier.Numerics`): `type Matrix` with `Matrix.ofRows`, `Matrix.init`, `Matrix.rowCount`, `Matrix.columnCount`, `Matrix.get`, `Matrix.column`, `Matrix.transpose`, `Matrix.multiply`, `Matrix.multiplyVector`, `Matrix.identity`; `Matrix.qr : Matrix -> QrDecomposition` (rows ≥ columns, else raises); `QrDecomposition.leastSquares : QrDecomposition -> float[] -> Result<float[], string>` (Error when rank-deficient); `Matrix.cholesky : Matrix -> Result<CholeskyDecomposition, string>`; `CholeskyDecomposition.solve : CholeskyDecomposition -> float[] -> float[]`. The `Comoments` reads `count`, `meanX`, `meanY`, `varianceX`, `varianceY`, `covariance`, `slope`, `intercept` (spec §6.8; `varianceX`, `varianceY` and `covariance` with divisor n, as `Moments.variance`). Read T2's `Comoments` doc comments before Step 3 to confirm the divisors and that `count` is a `float`.
+- Consumes: Task 6's `Alternative = TwoSided | Less | Greater`, `TestResult = { Statistic; DegreesOfFreedom; DenominatorDegreesOfFreedom; PValue }` (NaN where a field does not apply) and the internal `PValue.continuous : Alternative -> Continuous -> statistic: float -> float` (Less: cdf; Greater: survival; TwoSided: min 1 (2 · min cdf survival); NaN statistic → NaN); `Continuous.studentT`. Plan T2 (`Ranvier.Numerics`): `type Matrix` with `Matrix.ofRows`, `Matrix.init`, `Matrix.rowCount`, `Matrix.columnCount`, `Matrix.get`, `Matrix.column`, `Matrix.transpose`, `Matrix.multiply`, `Matrix.multiplyVector`, `Matrix.identity`; `Matrix.qr : Matrix -> QrDecomposition` (rows ≥ columns, else raises); `QrDecomposition.leastSquares : QrDecomposition -> float[] -> Result<float[], string>` (Error when rank-deficient); `QrDecomposition.r : QrDecomposition -> Matrix` (upper-triangular factor R); `Matrix.inverse : Matrix -> Result<Matrix, string>`. The `Comoments` reads `count`, `meanX`, `meanY`, `varianceX`, `varianceY`, `covariance`, `slope`, `intercept` (spec §6.8; `varianceX`, `varianceY` and `covariance` with divisor n, as `Moments.variance`). Read T2's `Comoments` doc comments before Step 3 to confirm the divisors and that `count` is a `float`.
 - Produces:
 
 ```fsharp
@@ -647,7 +644,7 @@ module Regression =
 
 - [ ] **Step 3: Run** `-- --filter "Regression"`. Expected: compile error.
 
-- [ ] **Step 4: Implement** the records and `Regression.simple`, `linear`, `weighted`, `polynomial` in `Regression.fs`. Decisions, each in the doc comment: `simple` from the comoments: slope cov/var_x, residual variance n(var_y − cov²/var_x)/(n − 2), slope standard error s/√(n·var_x), intercept standard error s·√(1/n + x̄²/(n·var_x)), R² = cov²/(var_x·var_y). `linear` solves by `Matrix.qr` and `QrDecomposition.leastSquares`, passing its `Error` on; σ² = eᵀe/(n − p), NaN when n = p (no division by 0); the covariance σ² R⁻¹R⁻ᵀ, with R from `QrDecomposition.r` of the same decomposition and R⁻¹ by back-substitution or `Matrix.inverse` (an `Error` if R is singular, which `leastSquares` has already reported as rank-deficient); two-sided p-values from Student t with n − p degrees of freedom. A constant column is one whose entries all equal its first entry, which is non-zero; with one, R² is taken about the mean, otherwise about zero; adjusted R² = 1 − (1 − R²)(n − c)/(n − p), c = 1 with a constant column, else 0 (R's `summary.lm`, *general knowledge*). `weighted` scales each row and observation by √w, reports `Residuals` y − Xβ unscaled, counts only positive weights in n, and uses the weighted mean for R²; fewer positive weights than columns is an `Error`. A NaN or infinite input is an `Error` naming it. `polynomial` builds the raw Vandermonde design; its doc comment says its conditioning grows with the degree. Coefficients have relative error at most 1e-12 over well-conditioned designs (the tests' integer designs of up to 3 columns).
+- [ ] **Step 4: Implement** the records and `Regression.simple`, `linear`, `weighted`, `polynomial` in `Regression.fs`. Decisions, each in the doc comment: `simple` from the comoments: slope cov/var_x, residual variance n(var_y − cov²/var_x)/(n − 2), slope standard error s/√(n·var_x), intercept standard error s·√(1/n + x̄²/(n·var_x)), R² = cov²/(var_x·var_y). `linear` solves by `Matrix.qr` and `QrDecomposition.leastSquares`, passing its `Error` on; σ² = eᵀe/(n − p), NaN when n = p (no division by 0); the covariance σ² R⁻¹R⁻ᵀ, with R from `QrDecomposition.r` of the same decomposition and R⁻¹ by back-substitution or `Matrix.inverse` (an `Error` if R is singular, which `leastSquares` has already reported as rank-deficient), computed in one private helper of `Regression.fs`, `unscaledCovariance : r: Matrix -> Result<Matrix, string>` (R⁻¹R⁻ᵀ), which Task 11's `curve` calls too; two-sided p-values from Student t with n − p degrees of freedom. A constant column is one whose entries all equal its first entry, which is non-zero; with one, R² is taken about the mean, otherwise about zero; adjusted R² = 1 − (1 − R²)(n − c)/(n − p), c = 1 with a constant column, else 0 (R's `summary.lm`, *general knowledge*). `weighted` scales each row and observation by √w, reports `Residuals` y − Xβ unscaled, counts only positive weights in n, and uses the weighted mean for R²; fewer positive weights than columns is an `Error`. A NaN or infinite input is an `Error` naming it. `polynomial` builds the raw Vandermonde design; its doc comment says its conditioning grows with the degree. Coefficients have relative error at most 1e-12 over well-conditioned designs (the tests' integer designs of up to 3 columns).
 
 - [ ] **Step 5: Run** the filtered list. Expected: PASS.
 - [ ] **Step 6: Run the gate**: `dotnet build -c Release` (0 warnings, 0 errors); `dotnet run -c Release --project tests/Ranvier.Science.Tests`; `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release`, then `npx mocha dist/tests/Main.fs.js`; all unfiltered. Expected: every test passes on both targets.
@@ -657,10 +654,10 @@ module Regression =
 
 **Files:**
 - Create: `tests/Ranvier.Science.Tests/CorrelationTests.fs`
-- Modify: `src/Ranvier.Statistics/Regression.fs`, `tests/Ranvier.Science.Tests/RegressionTests.fs`, `tests/reference/statistics.py`, `TestFiles.props`, the Fable `Main.fs`
+- Modify: `src/Ranvier.Statistics/Regression.fs`, `tests/Ranvier.Science.Tests/RegressionTests.fs`, `tests/reference/special.py` (section `correlation`), `TestFiles.props`, the Fable `Main.fs`
 
 **Interfaces:**
-- Consumes: Task 10's `Regression.linear : design: Matrix -> y: float[] -> Result<LinearRegression, string>` (fields `Coefficients`, `StandardErrors`, `DegreesOfFreedom` among others) in `Regression.fs`, where this task adds its code; Task 6's `Alternative = TwoSided | Less | Greater`, `TestResult = { Statistic; DegreesOfFreedom; DenominatorDegreesOfFreedom; PValue }` (NaN where a field does not apply) and the internal `PValue.continuous : Alternative -> Continuous -> statistic: float -> float` (Less: cdf; Greater: survival; TwoSided: min 1 (2 · min cdf survival); NaN statistic → NaN); `Describe.ranks` (Task 4); `Continuous.studentT`, `Continuous.normal`. Plan T2: `LeastSquaresOptions.standard`; `LeastSquares.levenbergMarquardt : LeastSquaresOptions -> residuals: (float[] -> float[]) -> initial: float[] -> LeastSquaresResult` with `LeastSquaresResult = { Parameters: float[]; Residuals: float[]; Jacobian: Matrix; Cost: float; Iterations: int; Converged: bool }` (`Cost` is half the sum of squared residuals; the Jacobian is by forward differences); `Matrix.cholesky`, `CholeskyDecomposition.solve`; `Comoments.zero`, `Comoments.add : compensated: bool -> Comoments -> float -> float -> Comoments`, `Comoments.correlation`.
+- Consumes: Task 10's `Regression.linear : design: Matrix -> y: float[] -> Result<LinearRegression, string>` (fields `Coefficients`, `StandardErrors`, `DegreesOfFreedom` among others) in `Regression.fs`, where this task adds its code; Task 6's `Alternative = TwoSided | Less | Greater`, `TestResult = { Statistic; DegreesOfFreedom; DenominatorDegreesOfFreedom; PValue }` (NaN where a field does not apply) and the internal `PValue.continuous : Alternative -> Continuous -> statistic: float -> float` (Less: cdf; Greater: survival; TwoSided: min 1 (2 · min cdf survival); NaN statistic → NaN); `Describe.ranks` (Task 4); `Continuous.studentT`, `Continuous.normal`. Plan T2: `LeastSquaresOptions.standard`; `LeastSquares.levenbergMarquardt : LeastSquaresOptions -> residuals: (float[] -> float[]) -> initial: float[] -> LeastSquaresResult` with `LeastSquaresResult = { Parameters: float[]; Residuals: float[]; Jacobian: Matrix; Cost: float; Iterations: int; Converged: bool }` (`Cost` is half the sum of squared residuals; the Jacobian is by forward differences); `Matrix.qr`, `QrDecomposition.r`, `Matrix.inverse`; `Comoments.zero`, `Comoments.add : compensated: bool -> Comoments -> float -> float -> Comoments`, `Comoments.correlation`.
 - Produces:
 
 ```fsharp
@@ -686,13 +683,13 @@ module Correlation =
 
   List `"Correlation"`, with the script's tables:
   - `Pearson, Spearman and Kendall against exact fractions`: each value within relative 1e-12; `pearsonTest` and `spearmanTest` Statistic (t, n − 2 degrees of freedom) and PValue within relative 1e-12; `kendallTest` Statistic (z) and PValue.
-  - `Spearman is Pearson of the ranks`: on 300 points from the generator (seed 11), rounded to one decimal so ties occur, `spearman x y` within 1e-14 of `pearson (ranks x) (ranks y)` (identity).
+  - `Spearman with ties against the reference`: on the tied pair x = `[| 1.0; 2.0; 2.0; 3.0; 4.0; 5.0; 5.0; 6.0 |]`, y = `[| 1.0; 3.0; 2.0; 2.0; 5.0; 4.0; 6.0; 6.0 |]`, `spearman x y` within relative 1e-12 of the Spearman r printed by `python -I tests/reference/special.py correlation` (the script computes it from average ranks in exact `fractions`, independently of `Describe.ranks`; the command is written beside the literal); and `spearman` of x = `[| 1.0 .. 6.0 |]` and y = x³ (monotone, non-linear) within 1e-14 of 1.0 (by definition: identical ranks).
   - `Kendall tau-b matches a direct count`: on the same points, `kendall` within 1e-14 of (C − D)/√((n₀ − n₁)(n₀ − n₂)) counted over all pairs in the test (O(n²), the definition); and `kendall [|1..5|] [|3;1;2;5;4|] = 0.4` (7 concordant, 3 discordant pairs, by hand).
   - `degenerate inputs`: a constant series gives NaN from all three and NaN fields from the tests; fewer than 2 points gives NaN; a NaN gives NaN; lengths that differ raise `ArgumentException`.
 
 - [ ] **Step 3: Run** `-- --filter "Regression"` and `-- --filter "Correlation"`. Expected: compile errors.
 
-- [ ] **Step 4: Implement.** Decisions, each in the doc comment: `curve` runs `LeastSquares.levenbergMarquardt LeastSquaresOptions.standard` on residuals y_i − model p x_i; ResidualStandardError √(2·Cost/(n − p)); Covariance σ²(JᵀJ)⁻¹ from the result's Jacobian by `Matrix.cholesky`, NaN entries (and NaN StandardErrors) when it fails; Iterations and Converged from the result. `pearson` is `Comoments.correlation` of the fold; `spearman` the Pearson of `Describe.ranks`; `kendall` tau-b by Knight's O(n log n) merge-sort algorithm (Knight, "A computer method for calculating Kendall's tau with ungrouped data", *JASA* 61, 1966; *general knowledge*). `pearsonTest` and `spearmanTest`: t = r√((n − 2)/(1 − r²)) with n − 2 degrees of freedom; `kendallTest`: z = S/√var(S) with R's tie-corrected variance, no continuity correction. A NaN is checked before `Describe.ranks`, which raises on NaN, so these return NaN.
+- [ ] **Step 4: Implement.** Decisions, each in the doc comment: `curve` runs `LeastSquares.levenbergMarquardt LeastSquaresOptions.standard` on residuals y_i − model p x_i; ResidualStandardError √(2·Cost/(n − p)); Covariance σ²(RᵀR)⁻¹ = σ² R⁻¹R⁻ᵀ from `Matrix.qr` of the result's Jacobian and `QrDecomposition.r`, through Task 10's private helper `unscaledCovariance` (no Cholesky of JᵀJ, which squares the Jacobian's condition number), NaN entries (and NaN StandardErrors) when the helper gives `Error` or the Jacobian has fewer rows than columns; Iterations and Converged from the result. `pearson` is `Comoments.correlation` of the fold; `spearman` the Pearson of `Describe.ranks`; `kendall` tau-b by Knight's O(n log n) merge-sort algorithm (Knight, "A computer method for calculating Kendall's tau with ungrouped data", *JASA* 61, 1966; *general knowledge*). `pearsonTest` and `spearmanTest`: t = r√((n − 2)/(1 − r²)) with n − 2 degrees of freedom; `kendallTest`: z = S/√var(S) with R's tie-corrected variance, no continuity correction. A NaN is checked before `Describe.ranks`, which raises on NaN, so these return NaN.
 
 - [ ] **Step 5: Run** both filtered lists. Expected: PASS.
 - [ ] **Step 6: Run the gate**: `dotnet build -c Release` (0 warnings, 0 errors); `dotnet run -c Release --project tests/Ranvier.Science.Tests`; `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release`, then `npx mocha dist/tests/Main.fs.js`; all unfiltered. Expected: every test passes on both targets.
@@ -729,7 +726,7 @@ module Density =
   - `bootstrap arguments out of range raise`: resamples 0 (`percentile`) and 1 (`standardError`); α ∈ {0, 1}; an empty sample (`ArgumentException`).
   - `Silverman and Scott bandwidths`: for `[| 1.0 .. 10.0 |]`, `silvermanBandwidth` within 1e-14 of `0.9 * min (sqrt (55.0 / 6.0)) (4.5 / 1.34) * 10.0 ** -0.2` and `scottBandwidth` of the same with 1.06 (R's `bw.nrd0` and `bw.nrd`, closed forms).
   - `Silverman's fallbacks at zero spread`: `[| 5.0; 5.0; 5.0; 5.0 |]` gives `0.9 * 5.0 * 4.0 ** -0.2`; four zeros give `0.9 * 4.0 ** -0.2` (R's `bw.nrd0`); `scottBandwidth` of either is 0.
-  - `the estimate of one point is a normal density`: `gaussianKernel 0.5 [| 2.0 |]` at x ∈ {2, 2.7, −1} within 1e-14 of `exp (-((x - 2.0) / 0.5) ** 2.0 / 2.0) / (0.5 * sqrt (2π))`.
+  - `the estimate of one point is a normal density`: `gaussianKernel 0.5 [| 2.0 |]` at x ∈ {2, 2.7, −1} within 1e-14 of `exp (-(((x - 2.0) / 0.5) ** 2.0) / 2.0) / (0.5 * sqrt (2.0 * Math.PI))` (the parentheses matter: F#'s prefix minus binds before `**`, so `-((x - 2.0) / 0.5) ** 2.0` is +u²; *measured here* by the pre-flight scan with `dotnet fsi`: the unparenthesised text gives 2.66446 at x = 2.7 against 0.375311).
   - `the estimate integrates to 1`: `Integrate.adaptive 1e-12 1e-10 f (min − 10h) (max + 10h)` for xs with Silverman's h: Value within 1e-9 of 1, Converged.
   - `the estimate copies its sample`: writing to xs after `gaussianKernel` leaves f's values unchanged.
   - `density arguments out of range raise`: bandwidth ∈ {0, −1, NaN, ∞}, an empty sample; a NaN in the data gives NaN bandwidths.
@@ -790,7 +787,7 @@ module Density =
 ### Task 15: Release 0.2.0
 
 **Files:**
-- Modify: `src/Directory.Build.props` (`Version`, `PackageReleaseNotes`, the FSharp.Core comment at line 7), `src/Ranvier.Numerics/Ranvier.Numerics.fsproj`, `src/Ranvier.Quantities/Ranvier.Quantities.fsproj`, `src/Ranvier.Statistics/Ranvier.Statistics.fsproj` (`Description`, `PackageTags`), `README.md`
+- Modify: `src/Directory.Build.props` (`Version`, `PackageReleaseNotes`, the FSharp.Core comment at line 7), `src/Ranvier.Numerics/Ranvier.Numerics.fsproj`, `src/Ranvier.Quantities/Ranvier.Quantities.fsproj`, `src/Ranvier.Statistics/Ranvier.Statistics.fsproj` (`Description`, `PackageTags`), `README.md`, `docs/measurements/gate.md` (a row appended)
 
 **Interfaces:**
 - Consumes: the branch as Tasks 1 to 14 and Plans T1 and T2 left it.
@@ -800,7 +797,7 @@ module Density =
 - [ ] **Step 2: Set the version and notes** in `src/Directory.Build.props`: `<Version>0.2.0</Version>`; the FSharp.Core comment names Ranvier 0.2.1; `PackageReleaseNotes`: "0.2.0, the toolkit. Numerics: special functions, roots, minimisation and least squares, quadrature and differentiation, ODE integration, interpolation, dense linear algebra, the Fourier transform, streaming and windowed accumulators, random variates. Quantities: an SI unit catalogue with prefixes, parsing and conversion, CODATA 2022 physical constants, first-order and Monte Carlo propagation of uncertainty, formula entries, runs with an ODE integrator. Statistics: distributions, descriptive statistics, intervals, hypothesis tests, a sequential test, multiple-testing adjustments, regression, correlation, curve fitting, the bootstrap and density estimation. Breaking changes from 0.1.0 are listed in docs/FINDINGS.md §3. Built on Ranvier 0.2.1. The interfaces will change before 1.0." Before writing it, confirm each named area exists on the branch (`git diff --stat f329053 -- src`).
 - [ ] **Step 3: Set descriptions and tags.** `Ranvier.Numerics`: "Numerics for the Ranvier reactive graph: special functions, root finding, minimisation and least squares, quadrature, ODE integration, interpolation, dense linear algebra, the Fourier transform, compensated sums, moments, streaming and windowed accumulators, maintained aggregates, tolerances and random variates." Tags `numerics;special-functions;linear-algebra;least-squares;root-finding;quadrature;ode;interpolation;fft;moments;aggregates;random;ranvier;reactive;fsharp`. `Ranvier.Quantities`: "Units, quantities and models on the Ranvier reactive graph: an SI unit catalogue with prefixes, parsing and conversion, physical constants with their uncertainty, first-order and Monte Carlo propagation of uncertainty, a one-line formula notation whose results are model entries, and runs: simulations advanced with a clock, with an ODE integrator." Tags `units;units-of-measure;quantities;si;physical-constants;uncertainty;formula;simulation;ranvier;reactive;fsharp`. `Ranvier.Statistics`: "Statistics for the Ranvier reactive graph: continuous and discrete distributions, descriptive statistics, confidence intervals, hypothesis tests, a sequential test with its confidence sequence, multiple-testing adjustments, regression, correlation, curve fitting, the bootstrap and kernel density estimation." Tags `statistics;distributions;hypothesis-testing;confidence-interval;confidence-sequence;sequential-testing;regression;correlation;bootstrap;kernel-density;ranvier;fsharp`. (`Directory.Build.targets` appends the Fable tags.)
 - [ ] **Step 4: Rewrite the README's opening and package sections** for 0.2.0: the first paragraph (packages built on the reactive graph, 0.2.0 on `Ranvier` 0.2.1, interfaces that will change before 1.0); "Packages" by area, one short list per package naming its modules, with `dotnet add package … --version 0.2.0`; links (absolute `https://github.com/ranvier-org/Ranvier.Science/blob/main/…`, as the README's other links are, since nuget.org shows the packed copy) to `docs/GUIDE.md` and `docs/measurements/accuracy.md`; "What it holds" and "Records" list the guide and the accuracy record and keep the AstroTracked note. The Tests, Monitor and Benchmarks sections stay as they are unless a command in them changed.
-- [ ] **Step 5: Run the gate and time it.** `dotnet build -c Release` (0 warnings, 0 errors), both suites unfiltered. Record the four wall-clock times (*measured here*, with the commands) and the test counts for the commit message and the hand-off; the baseline is the brief's 2026-11-20 gate (build 9 s incremental, .NET suite 2 s for 174 tests, Fable compile 4 s warm, mocha 5 s for 171 tests).
+- [ ] **Step 5: Run the gate and time it.** `dotnet build -c Release` (0 warnings, 0 errors), both suites unfiltered. Record the four wall-clock times (*measured here*, with the commands) and the test counts in the commit message and the hand-off, and append them as a dated row "After Plan T3" to `docs/measurements/gate.md` (the one gate record, created by Plan T1, Task 15, and appended to by Plan T2, Task 20; spec §11); the baseline is the brief's 2026-11-20 gate (build 9 s incremental, .NET suite 2 s for 174 tests, Fable compile 4 s warm, mocha 5 s for 171 tests), the first row of that file.
 - [ ] **Step 6: Pack into a scratch folder** (`artifacts/` is git-ignored): `dotnet pack src/Ranvier.Numerics -c Release -o artifacts/pack-0.2.0`, and the same for `src/Ranvier.Quantities` and `src/Ranvier.Statistics`. Write a check script to the session scratchpad and run it with `python -I`: each of the three `.nupkg` files is version 0.2.0; its nuspec's dependencies are FSharp.Core 8.0.100 and Ranvier 0.2.1 (Numerics) or Ranvier.Numerics 0.2.0 (the other two); its `releaseNotes`, `description` and `tags` are Steps 2 and 3's; its `README.md` is byte-for-byte the repository's `README.md`; its `fable/` folder holds every `.fs` of its project's `Compile` list. Expected: every check passes. Delete `artifacts/pack-0.2.0` afterwards (this task created it).
 - [ ] **Step 7: Commit** `build: version 0.2.0, release notes, descriptions, tags and README`, with the gate times in the body. Do not push.
 

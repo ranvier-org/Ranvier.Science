@@ -98,7 +98,8 @@ browser from one source. So the toolkit has two kinds of part:
 | Situation | Convention |
 |---|---|
 | An argument outside the function's domain (a negative standard deviation, `p` outside [0, 1], mismatched lengths) | Raise `ArgumentOutOfRangeException` or `ArgumentException`, as the 0.1.0 code does |
-| A NaN argument where the domain is otherwise satisfied | Return NaN (or NaN fields), raise nothing |
+| A NaN data argument (an observation, an x at which to evaluate) where the domain is otherwise satisfied | Return NaN (or NaN fields), raise nothing |
+| A NaN configuration parameter (a distribution's or variate's parameter, a rate, a half-life, a tolerance, settings) | Raise `ArgumentOutOfRangeException`, as an out-of-domain value does |
 | A data-dependent failure of a direct method (a singular matrix, a root not bracketed, a non-positive-definite matrix) | `Result<'T, string>`, the message naming the condition |
 | An iterative method that may stop before its tolerance (minimisation, least squares, adaptive quadrature, ODE steps) | A record with the best result found and `Converged: bool`, or `Result` when no usable result exists (an ODE step size underflow) |
 
@@ -215,6 +216,8 @@ Special.logFactorial : int -> float              // ln n!, n ≥ 0
 Special.logChoose : int -> int -> float          // ln C(n, k), 0 ≤ k ≤ n
 Special.erf : float -> float
 Special.erfc : float -> float
+Special.log1p : float -> float                   // ln(1 + x), relative 1e-15 near 0
+Special.expm1 : float -> float                   // eˣ − 1, relative 1e-15 near 0
 Special.gammaLowerRegularized : float -> float -> float          // P(a, x)
 Special.gammaUpperRegularized : float -> float -> float          // Q(a, x), accurate where P is near 1
 Special.gammaLowerRegularizedInverse : float -> float -> float   // x with P(a, x) = p
@@ -452,6 +455,16 @@ propagates as NaN.
 
 I9 (section 4).
 
+### 6.13 Order statistics: `OrderStatistic`
+
+```fsharp
+OrderStatistic.quantileSorted : p: float -> sorted: float[] -> float   // type 7: h = (n − 1)p, linear between order statistics
+```
+
+NaN for an empty array; raises `ArgumentOutOfRangeException` unless 0 ≤ p ≤ 1; the array is assumed sorted ascending and
+is not checked. It is the one type-7 implementation: Monte Carlo propagation (§8.6), `QuantileEstimate`, `Aggregate`'s
+`quantileBy` and `Describe.quantileSorted` use it.
+
 ## 7. Ranvier.Statistics additions
 
 ### 7.1 Distributions: `Continuous`, `Discrete`
@@ -621,7 +634,7 @@ with `dotnet fsi`), so the minute's measure is `minute`; the unit's symbol stays
 | SI base | m, kg, s, A, K, mol, cd |
 | SI derived with special names | rad, sr (both dimensionless), Hz, N, Pa, J, W, C, V, F, Ω, S, Wb, T, H, lm, lx, Bq, Gy, Sv, kat |
 | Prefixed, in common use | km, cm, mm, µm, nm, g, mg, ms, µs, ns, mK (existing), kPa, MPa, kJ, kW, MW, mA, mV, kV |
-| Outside the SI, accepted for use with it | min (60 s), h (3600 s), d (86400 s), au (149 597 870 700 m), L (10⁻³ m³), t (1000 kg), eV, Da, ° (π/180) |
+| Outside the SI, accepted for use with it | min (60 s), h (3600 s), d (86400 s), au (149 597 870 700 m), L (10⁻³ m³), t (1000 kg), eV, Da, ° (π/180) (also `deg`) |
 | Other, common in science | a (the Julian year, 31 557 600 s), ly, pc, bar (10⁵ Pa), atm (101 325 Pa) |
 
 The values for au, eV, Da, ly and pc are *general knowledge* ⚠️ until the builder confirms them against the SI Brochure

@@ -63,7 +63,8 @@ Docs, figures and references:
 src/Ranvier.Numerics/
   FloatPolicy.fs, Moments.fs        Task 3
   Uncertain.fs                      new, Task 5 (last in the Compile list)
-  Ranvier.Numerics.fsproj           Tasks 1, 5
+  OrderStatistic.fs                 new, Task 14 (immediately before Uncertain.fs, which stays last)
+  Ranvier.Numerics.fsproj           Tasks 1, 5, 14
 src/Ranvier.Statistics/
   ConfidenceSequence.fs             Task 4
 src/Ranvier.Quantities/             Compile order at the end of this plan:
@@ -78,7 +79,9 @@ src/Ranvier.Quantities/             Compile order at the end of this plan:
   Run.fs          unchanged (Plan T2 edits it)
 tests/Ranvier.Science.Tests/        new files: UncertainTests.fs (5), FormulaEntryTests.fs (7), LifetimeTests.fs (8),
                                     CatalogueTests.fs (9), UnitTextTests.fs (10), NotationTests.fs (11, 12),
-                                    ConstantsTests.fs (13), MonteCarloTests.fs (14)
+                                    ConstantsTests.fs (13), OrderStatisticTests.fs (14), MonteCarloTests.fs (14);
+                                    each after the previous T1 file in TestFiles.props and the Fable Main.fs, the first
+                                    (UncertainTests.fs) after MomentsTests.fs
 tests/reference/normal_quantile.py  new, Task 14
 examples/Monitor/model/Monitor.fs   Tasks 3, 4
 docs/FINDINGS.md                    Task 15; docs/measurements/gate.md new, Task 15
@@ -235,7 +238,7 @@ module ConfidenceSequence =
 ### Task 5: `Uncertain`, first-order uncertainty (§6.11)
 
 **Files:**
-- Create: `src/Ranvier.Numerics/Uncertain.fs` (last in `Ranvier.Numerics.fsproj`'s Compile list), `tests/Ranvier.Science.Tests/UncertainTests.fs`.
+- Create: `src/Ranvier.Numerics/Uncertain.fs` (last in `Ranvier.Numerics.fsproj`'s Compile list), `tests/Ranvier.Science.Tests/UncertainTests.fs` (after `MomentsTests.fs` in `TestFiles.props` and the Fable `Main.fs`).
 
 **Interfaces:**
 - Consumes: nothing.
@@ -343,7 +346,7 @@ Choices: every input, constant and derived entry owns one `Uncertain` source, al
 
 **Files:**
 - Modify: `src/Ranvier.Quantities/Ranvier.Quantities.fsproj` (Compile order `Units.fs Model.fs Formula.fs Quantity.fs Run.fs`: `Quantity.formula` calls `Formula`, and `Formula` uses only `Model`, `Entry` and `UnitInfo`), `src/Ranvier.Quantities/Formula.fs`, `src/Ranvier.Quantities/Quantity.fs`.
-- Create: `tests/Ranvier.Science.Tests/FormulaEntryTests.fs` (after `FormulaTests.fs` in `TestFiles.props` and the Fable `Main.fs`).
+- Create: `tests/Ranvier.Science.Tests/FormulaEntryTests.fs` (after `UncertainTests.fs` in `TestFiles.props` and the Fable `Main.fs`).
 
 **Interfaces:**
 - Consumes: `Entry.Measured`, `Entry.Uncertainty`, `Entry.Formula`, `Input.SetUncertainty`, `Quantity.inputWithUncertainty` (Task 6); the `Uncertain` operators and static members (Task 5); `UnitInfo.sameUnit` (Task 2).
@@ -425,7 +428,7 @@ Doc comments: `Model`'s remarks state the lifetime rules above and that names re
 
 **Files:**
 - Modify: `src/Ranvier.Quantities/Units.fs`: add the `Prefix` record and module, the `UnitCatalogue` class, `UnitInfo.prefixed`, `UnitOf.prefixed`; move the measure types and `module Units` out.
-- Create: `src/Ranvier.Quantities/Catalogue.fs` (after `Units.fs`): every measure type, `module Units`, and `[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>] module UnitCatalogue`. Create `tests/Ranvier.Science.Tests/CatalogueTests.fs` (after `UnitsTests.fs`).
+- Create: `src/Ranvier.Quantities/Catalogue.fs` (after `Units.fs`): every measure type, `module Units`, and `[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>] module UnitCatalogue`. Create `tests/Ranvier.Science.Tests/CatalogueTests.fs` (after `LifetimeTests.fs` in `TestFiles.props` and the Fable `Main.fs`).
 
 **Interfaces:**
 - Consumes: `UnitOf.define`, `UnitInfo.multiply`, `sameUnit` (Task 2).
@@ -475,9 +478,11 @@ The catalogue, one `Units` value and measure type per row. Dimensions: L length,
 | au | au | astronomicalUnit | L | §8.1's value, IAU 2012 Resolution B2 | |
 | L, t | L, t | litre, tonne | L³; M | 1e-3, 1e3 | P |
 | eV, Da | eV, Da | electronvolt, dalton | M L² T⁻²; M | e in J; m_u in kg (CODATA 2022, NIST) | P |
-| ° | deg | degree | none | `Math.PI / 180.0` | |
+| °, deg | deg | degree | none | `Math.PI / 180.0` | |
 | a, ly, pc | a, ly, pc | julianYear, lightYear, parsec | T; L; L | 31 557 600; c (exact, CODATA 2022) × 31 557 600; 648 000/π au (IAU 2015 Resolution B2) | |
 | bar, atm | bar, atm | bar, atmosphere | as Pa | 1e5, 101 325 | |
+
+The degree has two catalogue symbols, both non-prefixable: `"°"` and `"deg"`. `UnitCatalogue.si` registers `"deg"` as a second symbol of the same unit (same dimension, scale `Math.PI / 180.0`); its factor name is `"deg"`, so `UnitInfo.symbol` of a value found by `"deg"` is `"deg"`. Reason: spec §8.3 and Task 12's tests write `[deg]`, and `°` is hard to type.
 
 The minute's measure is `minute`, not `min`: a measure type named `min` hides FSharp.Core's `min` after `open Ranvier.Quantities` (Review Focus 1), and breaks this repository's own `min dt 0.1` (`examples/Monitor/model/Monitor.fs:510`) and `min maxStep …` (`src/Ranvier.Quantities/Run.fs:85`). Before writing the au, eV, Da, ly and pc scales, confirm each against its source (SI Brochure 9th edition Table 8, CODATA 2022 from NIST, IAU 2012 B2, IAU 2015 B2, and the IAU's definitions of the Julian year and the light-year) and cite it in the value's doc comment; fetch e and m_u from NIST as the Global Constraints say.
 
@@ -489,6 +494,7 @@ The minute's measure is `minute`, not `min`: a measure type named `min` hides FS
 | `the 24 prefixes` | symbol and factor of each, `1e-30 … 1e30` (SI Brochure, 9th edition, Table 7, with the four prefixes of the 27th CGPM, 2022, Resolution 3) |
 | `prefixed units` | `UnitInfo.prefixed Prefix.kilo Units.metre.Info`: symbol `"km"`, `sameUnit` with `Units.kilometre.Info`; `prefixed` of `(Units.metre / Units.second).Info` and of `(UnitOf.squared Units.metre).Info` raise `ArgumentException`; `(UnitOf.prefixed Prefix.micro Units.second : UnitOf<us>).Info` is `sameUnit` with `Units.microsecond.Info` |
 | `tryFind takes an exact symbol first` | `"min"`, `"Pa"`, `"cd"`, `"mm"`, `"Gy"`, `"T"`, `"h"`, `"kg"` give minute, pascal, candela, millimetre, gray, tesla, hour, kilogram |
+| `tryFind "deg" is the degree` | `tryFind "deg" si` finds a dimensionless unit of scale `Math.PI / 180.0` (closed form), with symbol `"deg"`; `tryFind "°" si` finds the same scale; `tryFind "kdeg"` is `ValueNone` |
 | `tryFind then a prefix and a prefixable symbol` | `"hPa"` symbol `"hPa"`, scale 100; `"dam"` scale 10 (`"da"` before `"d"`); `"dL"` scale within relative 1e-15 of 1e-4; `"keV"` 1000 × eV's scale; `"GHz"` 1e9; `"µg"` within 1e-15 of 1e-9 |
 | `look-alike characters read the catalogue's symbols` | `"μg"` (U+03BC) gives symbol `"µg"` (U+00B5) and the scale of `"µg"`; `"kΩ"` (U+2126) gives `"kΩ"` (U+03A9) |
 | `prefixes attach to g, not to kg, and only to prefixable units` | `tryFind ("Q" + s)` is `ValueSome` exactly for the **P** symbols of the table (`Q` matches no exact symbol); `"kkg"`, `"mkg"`, `"kmin"`, `"kau"`, `"Mbar"`, `"Mpc"`, `"kkm"` give `ValueNone` |
@@ -558,7 +564,7 @@ Spaces around `/`, `^`, parentheses and at either end are ignored. Each catalogu
 
 **Files:**
 - Modify: `src/Ranvier.Quantities/Model.fs` (catalogue), `src/Ranvier.Quantities/Formula.fs` (`Expr`, `parse`, `check`, `evaluator`, `measuredEvaluator`).
-- Create: `tests/Ranvier.Science.Tests/NotationTests.fs` (after `FormulaEntryTests.fs`).
+- Create: `tests/Ranvier.Science.Tests/NotationTests.fs` (after `UnitTextTests.fs`).
 
 **Interfaces:**
 - Consumes: `UnitInfo.parse`, `UnitInfo.conversionFactor` (Task 10); `UnitCatalogue.si`, `UnitCatalogue.add` (Task 9); `Formula.measuredEvaluator` (Task 7).
@@ -674,8 +680,8 @@ Fetch the NIST ASCII table first; write the page, the access date and each paste
 | `every constant is declared` | for each identifier, `model.TryFind id` finds an entry with a non-empty `Source`, the same entry as the record's field (`Entry.Id`), and `sameUnit` with the field's unit |
 | `the defining constants are exact` | c, h, e, k_B, N_A, g_n: `Read ()` equals the NIST literal; `Uncertainty () = 0.0`; `Kind = Constant` |
 | `the measured constants` | α, G, m_e, m_p, m_n, m_u, a_0: `Read ()` equals the NIST value; `Uncertainty ()` equals the NIST standard uncertainty |
-| `constants computed from exact ones` | ħ, R, σ: `Read ()` within half a unit of the last digit NIST prints; `Uncertainty () = 0.0` |
-| `mu_0 and epsilon_0 come from alpha` | values within half a unit of NIST's last printed digit; uncertainties within half a unit of the last digit of NIST's printed uncertainty; `correlation` of α and μ0 within 1e-12 of 1, of μ0 and ε0 within 1e-12 of −1; μ0's relative uncertainty within relative 1e-12 of α's |
+| `constants computed from exact ones` | ħ, R, σ (exact; NIST truncates them with "…"): `0 <= computed - printed < one unit of the last printed digit`; `Uncertainty () = 0.0` |
+| `mu_0 and epsilon_0 come from alpha` | values within relative 1e-11 of NIST's printed value; standard uncertainties within relative 0.07 of NIST's two-digit value; the exact check u_r(μ0) = u_r(α) within relative 1e-12, and the same for ε0; `correlation` of α and μ0 within 1e-12 of 1, of μ0 and ε0 within 1e-12 of −1 |
 | `epsilon_0 times mu_0 is 1/c² with no propagated uncertainty` | `p = ε0.Measured () * μ0.Measured ()`: `value p * c * c` within 1e-15 of 1; `standardUncertainty p <= 1e-6 * value p * ur` with `ur` α's relative standard uncertainty |
 | `units agree with the constants` | `Units.electronvolt.Info.Scale = pc.ElementaryCharge.Entry.Read ()`; `Units.dalton.Info.Scale = pc.AtomicMassConstant.Entry.Read ()`; `pc.AstronomicalUnit.Entry.Read () = Units.astronomicalUnit.Info.Scale` |
 | `independent measured constants are uncorrelated` | `correlation` of G and m_e, and of m_p and m_n, is 0.0 |
@@ -692,13 +698,18 @@ Fetch the NIST ASCII table first; write the page, the access date and each paste
 **Files:**
 - Create: `src/Ranvier.Quantities/Expr.fs` (before `Model.fs`): the `Expr` union moved out of `Formula.fs`, unchanged, same namespace.
 - Modify: `src/Ranvier.Quantities/Model.fs` (an internal record per formula entry), `src/Ranvier.Quantities/Quantity.fs` (`formula` records it), `src/Ranvier.Quantities/Formula.fs` (`monteCarlo`), `src/Ranvier.Quantities/Ranvier.Quantities.fsproj`.
-- Create: `tests/reference/normal_quantile.py`, `tests/Ranvier.Science.Tests/MonteCarloTests.fs` (after `ConstantsTests.fs`).
+- Create: `src/Ranvier.Numerics/OrderStatistic.fs` (in `Ranvier.Numerics.fsproj`'s Compile list immediately before `Uncertain.fs`, which stays last), `tests/Ranvier.Science.Tests/OrderStatisticTests.fs` (after `ConstantsTests.fs`), `tests/reference/normal_quantile.py`, `tests/Ranvier.Science.Tests/MonteCarloTests.fs` (after `OrderStatisticTests.fs`).
+- Modify: `src/Ranvier.Numerics/Ranvier.Numerics.fsproj` (the Compile list).
 
 **Interfaces:**
-- Consumes: Task 11's context and `check`; `Entry.Measured` (Task 6); `Quantity.formula` (Task 7); Task 8's cleanup; `Uncertain.value`, `contributions` (Task 5); `Generator.create`, `Generator.normal`, `Moments.add`, `Moments.mean`, `Moments.sampleStandardDeviation` (Task 3).
+- Consumes: Task 11's context and `check`; `Entry.Measured` (Task 6); `Quantity.formula` (Task 7); Task 8's cleanup; `Uncertain.value`, `contributions` (Task 5); `Generator.create`, `Generator.normal`, `Moments.add`, `Moments.mean`, `Moments.sampleStandardDeviation` (Task 3); `OrderStatistic.quantileSorted` (this task).
 - Produces:
 
 ```fsharp
+module OrderStatistic =     // namespace Ranvier.Numerics, spec §6.13
+    /// Type-7 quantile: h = (n − 1)p, linear between the order statistics. NaN for an empty array.
+    /// Raises ArgumentOutOfRangeException unless 0 ≤ p ≤ 1. The array is assumed sorted ascending and is not checked.
+    val quantileSorted : p: float -> sorted: float[] -> float
 type MonteCarloResult = { Mean: float; StandardDeviation: float; Lower: float; Upper: float; Draws: int }
 module Formula =
     val monteCarlo : draws: int -> seed: int -> coverage: float -> Model -> Expr -> (unit -> MonteCarloResult)
@@ -708,9 +719,17 @@ Behaviour (§8.6) and choices:
 - At creation, `check` runs (`ArgumentException` with its message on `Error`, and for an unknown identifier); `draws` must be at least 2 and `coverage` strictly between 0 and 1, else `ArgumentOutOfRangeException`. Names resolve once, at creation.
 - The expression's formula entries are inlined down to leaves that are not formula entries. Inlining uses each formula entry's names as they resolved at its declaration: `Quantity.formula` records, internal to the assembly, `{ Expr; Names; Catalogue }` with `Names` mapping each identifier of its text to the entry found then and, for a formula entry, that entry's own record; `Model` keeps these records, finds them as `TryFind` finds entries (own, then ancestors), and Task 8's cleanup removes a record with its entry. A leaf named twice is one leaf.
 - Each read reads every leaf's `Measured ()` (tracked). With any NaN leaf value or contribution, every float field is NaN and `Draws = draws`. Otherwise each draw takes one standard normal deviate zᵢ per source reached by the leaves, in ascending id order, from `Generator.create seed` threaded through the draws; sets each leaf to its value plus Σᵢ cᵢzᵢ over its contributions; and evaluates the inlined expression with the evaluator's arithmetic, conversion factors and scale rule.
-- `Mean` and `StandardDeviation` (divisor n − 1) come from `Moments` over the draws; `Lower` and `Upper` are the type-7 quantiles of the sorted draws at (1 − coverage)/2 and (1 + coverage)/2, the probabilistically symmetric interval. The doc comment states the cost, O(draws · (sources + Σ leaf contributions + expression size)) plus a sort of the draws; that the reader creates no node and evaluates inside the node that reads it; that its record publishes on every recomputation; and the resolve-once rule of Task 8.
+- `Mean` and `StandardDeviation` (divisor n − 1) come from `Moments` over the draws; `Lower` and `Upper` are `OrderStatistic.quantileSorted` (type 7) of the sorted draws at (1 − coverage)/2 and (1 + coverage)/2, the probabilistically symmetric interval. The doc comment states the cost, O(draws · (sources + Σ leaf contributions + expression size)) plus a sort of the draws; that the reader creates no node and evaluates inside the node that reads it; that its record publishes on every recomputation; and the resolve-once rule of Task 8.
 
-- [ ] **Step 1: Write the reference script** `tests/reference/normal_quantile.py`: with `statistics.NormalDist`, print `repr(NormalDist().inv_cdf(0.975))`, and in a header comment the command `python -I tests/reference/normal_quantile.py`. Run it and paste the printed literal into the test file beside that command.
+- [ ] **Step 1: Write the reference script** `tests/reference/normal_quantile.py`: it computes the normal quantile for `p = 0.975` by bisection on the normal distribution function in `decimal` at 60 digits, taking `Decimal(0.975)`, the exact value of the double (not `statistics.NormalDist`, which works in double precision: *measured here* by the pre-flight scan, `NormalDist().inv_cdf(0.975)` = 1.9599639845400536 against 1.9599639845400538 from a 70-digit bisection), and prints the result rounded to a double with `repr`; a header comment gives the command `python -I tests/reference/normal_quantile.py`. Run it and paste the printed literal into the test file beside that command; Plan T2, Task 17 cites the same output for 1.959963984540054.
+- [ ] **Step 1b: Write the order-statistic tests** (`"OrderStatistic"`, `OrderStatisticTests.fs`, before `MonteCarloTests.fs`; the file is in the project's `TestFiles.props` and the Fable `Main.fs` in the positions above):
+
+| Test | Asserts |
+|---|---|
+| `the type-7 quantile` | `[| 1.0; 2.0; 3.0 |]`: p = 0 gives 1, p = 1 gives 3, p = 0.5 gives 2 (h = 1); `[| 1.0; 2.0; 3.0; 4.0 |]`: p = 0.5 gives 2.5 (h = 1.5), p = 0.25 gives 1.75 (h = 0.75); all closed forms of h = (n − 1)p written in the test |
+| `edge cases` | a one-element array gives its element for every p in 0, 0.3, 1; the empty array gives NaN |
+| `arguments` | `ArgumentOutOfRangeException` for p = −0.1, 1.1 (and for p = nan: a NaN configuration parameter raises, as Plan T2's ruling states) |
+
 - [ ] **Step 2: Write the failing tests** (`"MonteCarlo"`, inside `withGraph`; N = 20,000 draws, seed 1, coverage 0.95 unless stated; dimensionless inputs through `inputWithUncertainty`):
 
 | Test | Asserts |
@@ -727,7 +746,7 @@ Behaviour (§8.6) and choices:
 | `a reader keeps the entries it resolved` | `a` = 1 ± 0.1 under a root; a reader of `"a"`; the root disposed and `"a"` declared again at 10 ± 0.1: the reader's `Mean` stays within 0.01 of 1 |
 
 - [ ] **Step 3: Run** `-- --filter "MonteCarlo"`. Expected: the build fails (`Formula.monteCarlo` is not defined).
-- [ ] **Step 4: Implement**: the `Expr.fs` move, the records, `monteCarlo`.
+- [ ] **Step 4: Implement**: `OrderStatistic.fs` (and its place in the Compile list), the `Expr.fs` move, the records, `monteCarlo`.
 - [ ] **Step 5: Run the gate.** Expected: PASS.
 - [ ] **Step 6: Commit** `feat(quantities): Monte Carlo propagation of a formula's distributions`.
 
@@ -739,7 +758,7 @@ Behaviour (§8.6) and choices:
 
 **Interfaces:**
 - Consumes: Tasks 1 to 14 (their tests by name).
-- Produces: §3 of the findings with a disposition on every item and every bullet of item 7 (§2 goal 4); a dated record of the gate's figures (§11, "measured at each plan's end").
+- Produces: §3 of the findings with a disposition on every item and every bullet of item 7 (§2 goal 4); `docs/measurements/gate.md`, the single dated record of the gate's figures (§11, "measured at each plan's end").
 
 - [ ] **Step 1: Mark each item of §3.** After each numbered item (and each bullet of item 7) add one line, `**0.2.0:** resolved (…)`, `**0.2.0:** not applicable (…)` or `**0.2.0:** deferred (…)`, keeping the finding's text as written:
   - 1 resolved: I1, `UnitInfo.sameUnit`, `equivalent` removed; test `sameUnit at the relative bound, in both orders` (`UnitsTests.fs`).
@@ -754,6 +773,6 @@ Behaviour (§8.6) and choices:
   - 7, `Run` and `Flow.Reset ()`: deferred; `Run.ode` (§8.7) adds no reset.
   - 7, unit scales unchecked for overflow: resolved, I2; test `a scale that overflows or vanishes raises` (`UnitsTests.fs`).
   - 7, the tracked Attitude page's chart frame: not applicable, the AstroShowcase pages left on 2026-11-20.
-- [ ] **Step 2: Record the gate.** Time each of the four gate commands once from a warm state, and write `docs/measurements/gate.md`: a table with one row per plan end (date, plan, build, .NET suite with its test count, Fable compile, mocha with its test count), *measured here*, with the commands and the machine (`[System.Environment]::ProcessorCount`, OS); add the baseline row from the Global Constraints, labelled *measured here* by the coordinator on 2026-11-20.
+- [ ] **Step 2: Record the gate.** Time each of the four gate commands once from a warm state, and write `docs/measurements/gate.md`: a table with one row per plan end (date, plan, build, .NET suite with its test count, Fable compile, mocha with its test count), *measured here*, with the commands and the machine (`[System.Environment]::ProcessorCount`, OS); add the baseline row from the Global Constraints, labelled *measured here* by the coordinator on 2026-11-20. `gate.md` is the one gate record: Plan T2, Task 20 and Plan T3, Task 15 each append a dated row to it, and no other file holds gate figures.
 - [ ] **Step 3: Run the gate.** Expected: PASS.
 - [ ] **Step 4: Commit** `docs: the dispositions of the findings' section 3, and the gate's figures at the end of Plan T1`.
