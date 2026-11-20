@@ -128,4 +128,80 @@ let tests =
                     // 10 · 2, from the second a.
                     Expect.equal (Formula.evaluator model expr ()) 20.0 "an evaluator built after the declaration")
             }
+
+            test "an entry removed before it was computed raises" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.input model "a" "A" Units.one 3.0
+
+                    let owner, (entries, block) =
+                        createRoot (fun o ->
+                            o,
+                            ([
+                                (Quantity.derive model "d" "D" Units.one (fun () -> a.Value * 2.0)).Entry
+                                (Quantity.deriveWithin (Tolerance.absolute 0.5) model "w" "W" Units.one (fun () -> a.Value))
+                                    .Entry
+                                (Quantity.deriveMeasured model "dm" "DM" Units.one (fun () -> a.Entry.Measured () * 2.0))
+                                    .Entry
+                                declared (Quantity.formula model "g" "G" "a * 2")
+                             ],
+                             Quantity.block model "series" "Series" (fun () -> [| a.Value |])))
+
+                    // Formula entries that resolved d and dm before the removal and first read them after it.
+                    let f = declared (Quantity.formula model "f" "F" "d + 1")
+                    let fm = declared (Quantity.formula model "fm" "FM" "dm + 1")
+                    owner.Dispose ()
+
+                    for e in entries do
+                        Expect.throwsT<InvalidOperationException> (fun () -> e.Read () |> ignore) (e.Id + ": Read")
+                        Expect.throwsT<InvalidOperationException> (fun () -> e.Measured () |> ignore) (e.Id + ": Measured")
+
+                        match e.Status () with
+                        | QuantityStatus.Failed error ->
+                            Expect.isTrue (error :? InvalidOperationException) (e.Id + ": Failed with InvalidOperationException")
+
+                            Expect.stringContains
+                                error.Message
+                                ("\"" + e.Id + "\" was removed before it was computed")
+                                (e.Id + ": the message")
+                        | other -> failtestf "%s: expected Failed, got %A" e.Id other
+
+                    Expect.throwsT<InvalidOperationException> (fun () -> block.Value |> ignore) "the block's Value"
+
+                    for e in [ f; fm ] do
+                        Expect.throwsT<InvalidOperationException> (fun () -> e.Read () |> ignore) (e.Id + ": Read")
+
+                        match e.Status () with
+                        | QuantityStatus.Failed error ->
+                            Expect.isTrue (error :? InvalidOperationException) (e.Id + ": Failed with InvalidOperationException")
+                        | other -> failtestf "%s: expected Failed, got %A" e.Id other)
+            }
+
+            test "a removed entry that was computed keeps its last value" {
+                withGraph (fun () ->
+                    let model = Model.create "m"
+                    let a = Quantity.input model "a" "A" Units.one 3.0
+
+                    let owner, (d, g, block) =
+                        createRoot (fun o ->
+                            o,
+                            (Quantity.derive model "d" "D" Units.one (fun () -> a.Value * 2.0),
+                             declared (Quantity.formula model "g" "G" "a * 3"),
+                             Quantity.block model "series" "Series" (fun () -> [| a.Value |])))
+
+                    let f = declared (Quantity.formula model "f" "F" "d + 1")
+                    // 3 · 2, 3 · 3 and [| 3 |], computed before the removal.
+                    Expect.equal (d.Entry.Read ()) 6.0 "d before the removal"
+                    Expect.equal (g.Read ()) 9.0 "g before the removal"
+                    Expect.equal block.Value [| 3.0 |] "the block before the removal"
+                    owner.Dispose ()
+                    a.Set 10.0
+                    Expect.equal (d.Entry.Read ()) 6.0 "d keeps its last value"
+                    Expect.equal (d.Entry.Status ()) QuantityStatus.Ready "d's status"
+                    Expect.equal (f.Read ()) 7.0 "f, first read after the removal, reads d's last value: 6 + 1"
+                    Expect.equal (g.Read ()) 9.0 "g keeps its last value"
+                    Expect.equal block.Value [| 3.0 |] "the block keeps its last value"
+                    // g's measured value is computed only when read, and was not before the removal.
+                    Expect.throwsT<InvalidOperationException> (fun () -> g.Measured () |> ignore) "g's Measured")
+            }
         ]
