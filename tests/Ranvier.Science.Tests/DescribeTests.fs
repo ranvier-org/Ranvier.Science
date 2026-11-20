@@ -81,6 +81,8 @@ let tests =
                 // lag 2 sum (-2)(0) + (-1)(1) + 0(2) = -1.
                 closeAll 1e-15 (Describe.autocorrelation 2 [| 1.0 .. 5.0 |]) [| 1.0; 0.4; -0.1 |] "1..5"
                 Expect.all (Describe.autocorrelation 2 [| 2.0; 2.0; 2.0; 2.0 |]) isNaN "constant series"
+                // 0.1 is not exact, so the computed mean differs from it; the rule is equality with the first value.
+                Expect.all (Describe.autocorrelation 2 [| 0.1; 0.1; 0.1 |]) isNaN "constant series, inexact mean"
 
                 Expect.throwsT<ArgumentOutOfRangeException>
                     (fun () -> Describe.autocorrelation -1 [| 1.0 .. 5.0 |] |> ignore)
@@ -160,8 +162,19 @@ let tests =
                 Expect.equal (Describe.binEdges FreedmanDiaconis xs) (edges 0.0 99.0 5) "Freedman-Diaconis"
                 Expect.equal (Describe.binEdges (Count 4) xs) [| 0.0; 24.75; 49.5; 74.25; 99.0 |] "Count 4"
 
+                // NumPy takes width = range / (log2 n + 1) and then ceil (range / width): for n = 64 (7) and range 37.1
+                // that quotient rounds above 7, so NumPy gives 8 bins where ceil (log2 64 + 1) is 7.
+                let sixtyFour = Array.init 64 (fun i -> if i = 63 then 37.1 else float i * 0.5)
+                Expect.equal (Describe.binEdges Sturges sixtyFour).Length 9 "Sturges at 64, range 37.1"
+
                 // log2 128 + 1 = 8 exactly, so 8 bins and 9 edges.
                 Expect.equal (Describe.binEdges Sturges (Array.init 128 float)).Length 9 "Sturges at 128")
+
+            testCase "a width rule that asks for too many bins raises" (fun () ->
+                // 99 values within 1e-7 of 0 and one at 1000: the IQR is about 5e-8, so the width is about 2e-8 and
+                // 1000 / width is about 5e10 bins, over the limit of 16777216.
+                let xs = Array.init 100 (fun i -> if i = 99 then 1000.0 else float i * 1e-9)
+                Expect.throwsT<ArgumentException> (fun () -> Describe.binEdges FreedmanDiaconis xs |> ignore) "FD")
 
             testCase "bin edges of constant data and bad input" (fun () ->
                 let c = [| 2.0; 2.0; 2.0 |]

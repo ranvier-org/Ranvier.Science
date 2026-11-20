@@ -21,7 +21,7 @@ type Summary =
 /// <summary>How <c>Describe.binEdges</c> chooses the number of equal-width bins, following NumPy's
 /// <c>histogram_bin_edges</c>.</summary>
 type BinRule =
-    /// ⌈log₂ n + 1⌉ bins.
+    /// Width range / (log₂ n + 1), about ⌈log₂ n + 1⌉ bins.
     | Sturges
     /// Width σ·(24√π / n)^(1/3) with σ the population standard deviation.
     | Scott
@@ -161,7 +161,7 @@ module Describe =
         result
 
     /// <summary>The sample autocorrelation at lags 0 to maxLag: r_k = Σ_{t&lt;n−k}(x_t − x̄)(x_{t+k} − x̄) /
-    /// Σ(x_t − x̄)², so r_0 = 1. NaN at every lag for a constant series or one that holds a NaN. Raises
+    /// Σ(x_t − x̄)², so r_0 = 1. NaN at every lag when every value equals the first (exact comparison, so a constant series whose mean is inexact is still NaN) or when the array holds a NaN. Raises
     /// ArgumentOutOfRangeException unless 0 ≤ maxLag &lt; n. O(n · maxLag). Pinned by "autocorrelation".</summary>
     let autocorrelation (maxLag: int) (xs: float[]) : float[] =
         let n = xs.Length
@@ -169,6 +169,7 @@ module Describe =
         if maxLag < 0 || maxLag >= n then
             raise (ArgumentOutOfRangeException("maxLag", "maxLag must be at least 0 and less than the length of xs."))
 
+        let constant = Array.forall (fun x -> x = xs[0]) xs
         let m = mean xs
         let mutable denominator = 0.0
 
@@ -181,7 +182,7 @@ module Describe =
             for t in 0 .. n - k - 1 do
                 sum <- sum + (xs[t] - m) * (xs[t + k] - m)
 
-            sum / denominator)
+            if constant then nan else sum / denominator)
 
     /// <summary>Count, mean, sample standard deviation (divisor n − 1), minimum, quartiles (type 7), median and
     /// maximum. Count is the array's length; for an empty array or one that holds a NaN every other field is NaN, and
@@ -224,11 +225,11 @@ module Describe =
     let private maxBins = 16777216.0
 
     /// <summary>The n + 1 edges of equal-width bins over the data's range, by NumPy's rules: <c>Count k</c> gives k
-    /// bins; the others give a bin width and ⌈range / width⌉ bins (Sturges directly ⌈log₂ n + 1⌉). The first edge is
+    /// bins; the others give a bin width and ⌈range / width⌉ bins (Sturges with width range / (log₂ n + 1), as NumPy computes it). The first edge is
     /// the minimum, the last exactly the maximum. Constant data, or a width of 0, gives one bin over
     /// [x − 0.5, x + 0.5] (as NumPy does). Raises ArgumentException for an empty array or a NaN or infinite value,
     /// ArgumentOutOfRangeException for <c>Count k</c> with k &lt; 1, and ArgumentException when a rule asks for more
-    /// than 16 777 216 bins (a limit chosen here; NumPy has none). O(n log n) for the quartiles of Freedman–Diaconis,
+    /// than 16 777 216 bins (a deliberate deviation: NumPy has no limit and would fail on memory). O(n log n) for the quartiles of Freedman–Diaconis,
     /// O(n) for the others. Pinned by "bin edges follow NumPy's rules" and "bin edges of constant data and bad
     /// input".</summary>
     let binEdges (rule: BinRule) (xs: float[]) : float[] =
@@ -262,7 +263,7 @@ module Describe =
 
             match rule with
             | Count k -> k
-            | Sturges -> if range > 0.0 then int (Math.Ceiling(Math.Log2 n + 1.0)) else 1
+            | Sturges -> fromWidth (range / (Math.Log2 n + 1.0))
             | Scott ->
                 let m = mean xs
                 let mutable squares = 0.0
