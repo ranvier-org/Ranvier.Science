@@ -538,7 +538,7 @@ let tests =
 
                     match m.Formula.Value.Valid with
                     | ValueSome c when m.Formula.Value.Error = ValueNone ->
-                        Expect.isTrue (UnitInfo.equivalent c.Unit entry.Unit) (entry.Id + ": an equivalent unit")
+                        Expect.isTrue (UnitInfo.sameUnit c.Unit entry.Unit) (entry.Id + ": the same unit")
                     | _ -> failtestf "%s is not in the schema: %A" entry.Id m.Formula.Value.Error
 
                 // The reverse: a row's model, or the page's model above it, declares every identifier of the schema.
@@ -547,7 +547,7 @@ let tests =
                 for entry in m.Schema.Entries do
                     match row.Model.TryFind entry.Id with
                     | ValueSome declared ->
-                        Expect.isTrue (UnitInfo.equivalent declared.Unit entry.Unit) (entry.Id + ": declared with an equivalent unit")
+                        Expect.isTrue (UnitInfo.sameUnit declared.Unit entry.Unit) (entry.Id + ": declared with the same unit")
                     | ValueNone -> failtestf "%s of the schema is declared by neither the row's model nor the page's" entry.Id)
         }
     ] @ threadTests)

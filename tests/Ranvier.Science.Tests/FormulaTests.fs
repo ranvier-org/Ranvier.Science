@@ -36,7 +36,7 @@ let private unitOf (model: Model) (text: string) : Result<UnitInfo, string> =
 let private expectUnit (model: Model) (text: string) (expected: UnitInfo) : unit =
     match unitOf model text with
     | Result.Ok u ->
-        Expect.isTrue (UnitInfo.equivalent u expected) (sprintf "%s has unit %s, expected %s" text (UnitInfo.symbol u) (UnitInfo.symbol expected))
+        Expect.isTrue (UnitInfo.sameUnit u expected) (sprintf "%s has unit %s, expected %s" text (UnitInfo.symbol u) (UnitInfo.symbol expected))
     | Result.Error message -> failtestf "expected a unit for \"%s\", got: %s" text message
 
 let private expectUnitError (model: Model) (text: string) : string =
@@ -91,7 +91,7 @@ let tests =
                 withGraph (fun () ->
                     match unitOf (pageModel ()) pageFormula with
                     | Result.Ok u ->
-                        Expect.isTrue (UnitInfo.equivalent u UnitInfo.dimensionless) (sprintf "dimensionless, got %s" (UnitInfo.symbol u))
+                        Expect.isTrue (UnitInfo.sameUnit u UnitInfo.dimensionless) (sprintf "dimensionless, got %s" (UnitInfo.symbol u))
                     | Result.Error message -> failtestf "expected a unit, got: %s" message)
             }
 
@@ -210,5 +210,16 @@ let tests =
                     Expect.equal memo.TryValue Pending "pending before the first item"
                     feed.Push 2.5
                     Expect.equal memo.TryValue (Ready 5.0) "ready after an item")
+            }
+
+            test "a unit whose scale overflows is an error" {
+                withGraph (fun () ->
+                    // 1000^103 = 1e309 and 1000^120 = 1e360 exceed 1.797e308, the largest double; 1000^102 = 1e306 does
+                    // not (closed form).
+                    let model = Model.create "p"
+                    Quantity.input model "x" "X" Units.kilometre 1.0<km> |> ignore
+                    Expect.stringContains (expectUnitError model "x^103") "km^103" "the message names km^103"
+                    Expect.stringContains (expectUnitError model "x^60 * x^60") "km^120" "the message names km^120"
+                    Expect.isFalse (isError (unitOf model "x^102")) "km^102 is a unit")
             }
         ]

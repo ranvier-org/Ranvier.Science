@@ -237,8 +237,8 @@ module Formula =
         | _, Result.Error m -> Result.Error m
         | Result.Ok x, Result.Ok y -> f x y
 
-    let private sameUnit (operation: string) (a: UnitInfo) (b: UnitInfo) : Result<UnitInfo, string> =
-        if UnitInfo.equivalent a b then
+    let private oneUnit (operation: string) (a: UnitInfo) (b: UnitInfo) : Result<UnitInfo, string> =
+        if UnitInfo.sameUnit a b then
             Result.Ok a
         elif UnitInfo.sameDimension a b then
             Result.Error(
@@ -253,12 +253,21 @@ module Formula =
             Result.Error(operation + " needs operands of one unit, but met " + describe a + " and " + describe b + ".")
 
     let private pureNumber (name: string) (u: UnitInfo) : Result<UnitInfo, string> =
-        if UnitInfo.equivalent u UnitInfo.dimensionless then
+        if UnitInfo.sameUnit u UnitInfo.dimensionless then
             Result.Ok UnitInfo.dimensionless
         else
             Result.Error(name + " needs a dimensionless operand, but met " + describe u + ".")
 
+    /// The result of `operation`, or `Error` with the message of the exception it raises.
+    let private guarded (operation: unit -> Result<UnitInfo, string>) : Result<UnitInfo, string> =
+        try
+            operation ()
+        with e ->
+            Result.Error e.Message
+
     /// The unit of `expr` over the identifiers of `model`, or a message naming the operation and the units it met.
+    /// A product, quotient, power or root whose scale is not finite or is 0 is an `Error` stating that unit's
+    /// symbol, as "km^103".
     let rec check (model: Model) (expr: Expr) : Result<UnitInfo, string> =
         let unitOf = check model
 
@@ -269,17 +278,17 @@ module Formula =
             | ValueSome entry -> Result.Ok entry.Unit
             | ValueNone -> Result.Error("The name \"" + id + "\" is not in the model.")
         | Negate a -> unitOf a
-        | Add(a, b) -> both (unitOf a) (unitOf b) (sameUnit "+")
-        | Subtract(a, b) -> both (unitOf a) (unitOf b) (sameUnit "-")
-        | Multiply(a, b) -> both (unitOf a) (unitOf b) (fun x y -> Result.Ok(UnitInfo.multiply x y))
-        | Divide(a, b) -> both (unitOf a) (unitOf b) (fun x y -> Result.Ok(UnitInfo.divide x y))
-        | Power(a, n) -> unitOf a |> Result.map (fun u -> UnitInfo.power u n)
+        | Add(a, b) -> both (unitOf a) (unitOf b) (oneUnit "+")
+        | Subtract(a, b) -> both (unitOf a) (unitOf b) (oneUnit "-")
+        | Multiply(a, b) -> both (unitOf a) (unitOf b) (fun x y -> guarded (fun () -> Result.Ok(UnitInfo.multiply x y)))
+        | Divide(a, b) -> both (unitOf a) (unitOf b) (fun x y -> guarded (fun () -> Result.Ok(UnitInfo.divide x y)))
+        | Power(a, n) -> unitOf a |> Result.bind (fun u -> guarded (fun () -> Result.Ok(UnitInfo.power u n)))
         | Call(name, arguments) ->
             match name, arguments with
-            | "sqrt", [ a ] -> unitOf a |> Result.bind UnitInfo.sqrt
+            | "sqrt", [ a ] -> unitOf a |> Result.bind (fun u -> guarded (fun () -> UnitInfo.sqrt u))
             | "abs", [ a ] -> unitOf a
             | ("exp" | "ln" | "log10"), [ a ] -> unitOf a |> Result.bind (pureNumber name)
-            | ("min" | "max"), [ a; b ] -> both (unitOf a) (unitOf b) (sameUnit name)
+            | ("min" | "max"), [ a; b ] -> both (unitOf a) (unitOf b) (oneUnit name)
             | _ -> Result.Error("\"" + name + "\" with " + string arguments.Length + " argument(s) is not in the notation.")
 
     /// `x` to the integer power `n`, by repeated multiplication so both targets round alike.

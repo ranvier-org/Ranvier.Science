@@ -81,29 +81,6 @@ module UnitInfo =
 
         if n < 0 then 1.0 / product else product
 
-    let multiply (a: UnitInfo) (b: UnitInfo) : UnitInfo =
-        {
-            Factors = merge (a.Factors @ b.Factors)
-            Dimension = Dimension.map2 (+) a.Dimension b.Dimension
-            Scale = a.Scale * b.Scale
-        }
-
-    let divide (a: UnitInfo) (b: UnitInfo) : UnitInfo =
-        {
-            Factors = merge (a.Factors @ (b.Factors |> List.map (fun (n, e) -> n, -e)))
-            Dimension = Dimension.map2 (-) a.Dimension b.Dimension
-            Scale = a.Scale / b.Scale
-        }
-
-    /// `u` to the power `n`; any integer, and `power u 0` is dimensionless with scale 1. The scale is the
-    /// floating-point product of `n` factors (its reciprocal for negative `n`).
-    let power (u: UnitInfo) (n: int) : UnitInfo =
-        {
-            Factors = merge (u.Factors |> List.map (fun (name, e) -> name, e * n))
-            Dimension = Dimension.map (fun e -> e * n) u.Dimension
-            Scale = scalePower u.Scale n
-        }
-
     let private format (name: string, e: int) = if e = 1 then name else name + "^" + string e
 
     /// The numerator factors joined by `·`, then `/` and the denominator factors with positive exponents:
@@ -124,42 +101,97 @@ module UnitInfo =
         | _, [ single ] -> top + "/" + single
         | _, _ -> top + "/(" + String.Join("·", denominator) + ")"
 
+    /// The unit itself when its scale is finite and not 0. Raises ArithmeticException otherwise, with a message
+    /// stating the unit's symbol ("1" for a unit without factors) and its scale.
+    let private checkedScale (u: UnitInfo) : UnitInfo =
+        let scale = u.Scale
+
+        if Double.IsNaN scale || Double.IsInfinity scale || scale = 0.0 then
+            let name =
+                match symbol u with
+                | "" -> "1"
+                | text -> text
+
+            let value =
+                if Double.IsNaN scale then "NaN"
+                elif scale = 0.0 then "0"
+                elif scale > 0.0 then "∞"
+                else "−∞"
+
+            let message = "The scale of " + name + " is " + value + "; a unit's scale must be positive and finite."
+            raise (ArithmeticException message)
+
+        u
+
+    /// The product of two units. Raises ArithmeticException when the product of the scales is not finite or is 0;
+    /// the message states the product's symbol.
+    let multiply (a: UnitInfo) (b: UnitInfo) : UnitInfo =
+        checkedScale
+            {
+                Factors = merge (a.Factors @ b.Factors)
+                Dimension = Dimension.map2 (+) a.Dimension b.Dimension
+                Scale = a.Scale * b.Scale
+            }
+
+    /// The quotient of two units. Raises ArithmeticException when the quotient of the scales is not finite or is 0;
+    /// the message states the quotient's symbol.
+    let divide (a: UnitInfo) (b: UnitInfo) : UnitInfo =
+        checkedScale
+            {
+                Factors = merge (a.Factors @ (b.Factors |> List.map (fun (n, e) -> n, -e)))
+                Dimension = Dimension.map2 (-) a.Dimension b.Dimension
+                Scale = a.Scale / b.Scale
+            }
+
+    /// `u` to the power `n`; any integer, and `power u 0` is dimensionless with scale 1. The scale is the
+    /// floating-point product of `n` factors (its reciprocal for negative `n`), O(|n|). Raises ArithmeticException
+    /// when that scale is not finite or is 0; the message states the result's symbol, as "km^103".
+    let power (u: UnitInfo) (n: int) : UnitInfo =
+        checkedScale
+            {
+                Factors = merge (u.Factors |> List.map (fun (name, e) -> name, e * n))
+                Dimension = Dimension.map (fun e -> e * n) u.Dimension
+                Scale = scalePower u.Scale n
+            }
+
     /// `Ok` with every exponent halved and the correctly rounded square root of the scale. Error names the unit when
-    /// an exponent is odd. The root of a unit reached through `power`, `divide` or `multiply` can differ in the last
-    /// place from the same unit reached by another route: `sqrt (power u -2)` and `power u -1` for a scale of 0.7.
+    /// an exponent is odd. Raises ArithmeticException when every exponent is even and the root of the scale is not
+    /// finite or is 0; the message states the root's symbol. The root of a unit reached through `power`, `divide` or
+    /// `multiply` can differ in the last place from the same unit reached by another route: `sqrt (power u -2)` and
+    /// `power u -1` for a scale of 0.7; `sameUnit` joins the two.
     let sqrt (u: UnitInfo) : Result<UnitInfo, string> =
         let odd e = e % 2 <> 0
 
         if u.Factors |> List.exists (fun (_, e) -> odd e) || Dimension.exponents u.Dimension |> List.exists odd then
             Error("The square root of " + symbol u + " needs every exponent to be even.")
         else
-            Ok
-                {
-                    Factors = u.Factors |> List.map (fun (n, e) -> n, e / 2)
-                    Dimension = Dimension.map (fun e -> e / 2) u.Dimension
-                    Scale = Math.Sqrt u.Scale
-                }
+            Ok(
+                checkedScale
+                    {
+                        Factors = u.Factors |> List.map (fun (n, e) -> n, e / 2)
+                        Dimension = Dimension.map (fun e -> e / 2) u.Dimension
+                        Scale = Math.Sqrt u.Scale
+                    }
+            )
 
     let sameDimension (a: UnitInfo) (b: UnitInfo) : bool = a.Dimension = b.Dimension
 
-    /// Same dimension and same scale, with scales compared exactly (`=`). Two routes to one unit through `power`,
-    /// `divide`, `multiply` or `sqrt` can give scales that differ in the last place, and then `sameUnit` is false;
-    /// compare derived scales within a tolerance where routes differ.
-    let sameUnit (a: UnitInfo) (b: UnitInfo) : bool = sameDimension a b && a.Scale = b.Scale
-
-    /// Same dimension, and scales equal within a relative 1e-12. Two routes to one unit are equivalent where
-    /// `sameUnit` separates them by a difference in the last place.
-    let equivalent (a: UnitInfo) (b: UnitInfo) : bool =
-        sameDimension a b && abs (a.Scale - b.Scale) <= 1e-12 * abs b.Scale
+    /// True when the dimensions are equal and |a.Scale − b.Scale| ≤ 1e-12 · max(|a.Scale|, |b.Scale|); symmetric. Two
+    /// routes to one unit through `power`, `divide`, `multiply` or `sqrt` whose scales differ in the last place are
+    /// one unit.
+    let sameUnit (a: UnitInfo) (b: UnitInfo) : bool =
+        sameDimension a b && abs (a.Scale - b.Scale) <= 1e-12 * max (abs a.Scale) (abs b.Scale)
 
 /// A unit of measure with the description its values carry at run time.
 [<Sealed>]
 type UnitOf<[<Measure>] 'u> internal (info: UnitInfo) =
     member _.Info: UnitInfo = info
 
+    /// The product, as `UnitInfo.multiply`. Raises ArithmeticException when the product's scale is not finite or is 0.
     static member (*)(a: UnitOf<'u>, b: UnitOf<'v>) : UnitOf<'u 'v> =
         UnitOf<'u 'v>(UnitInfo.multiply a.Info b.Info)
 
+    /// The quotient, as `UnitInfo.divide`. Raises ArithmeticException when the quotient's scale is not finite or is 0.
     static member (/)(a: UnitOf<'u>, b: UnitOf<'v>) : UnitOf<'u / 'v> =
         UnitOf<'u / 'v>(UnitInfo.divide a.Info b.Info)
 
@@ -176,22 +208,28 @@ module UnitOf =
 
         UnitOf<'u>({ Factors = [ (symbol, 1) ]; Dimension = dimension; Scale = scale })
 
+    /// The square, as `UnitInfo.power` with exponent 2. Raises ArithmeticException when the square's scale is not
+    /// finite or is 0.
     let squared (u: UnitOf<'u>) : UnitOf<'u ^ 2> = UnitOf<'u ^ 2>(UnitInfo.power u.Info 2)
 
+/// The metre: FSharp.Core's `UnitSymbols.m`, so a `float<m>` is a `float<UnitSymbols.m>`.
 [<Measure>]
-type m
+type m = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.m
 
 [<Measure>]
 type km
 
+/// The kilogram: FSharp.Core's `UnitSymbols.kg`.
 [<Measure>]
-type kg
+type kg = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.kg
 
+/// The second: FSharp.Core's `UnitSymbols.s`.
 [<Measure>]
-type s
+type s = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.s
 
+/// The kelvin: FSharp.Core's `UnitSymbols.K`.
 [<Measure>]
-type K
+type K = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.K
 
 [<Measure>]
 type mK
