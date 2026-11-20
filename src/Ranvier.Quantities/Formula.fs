@@ -1,6 +1,7 @@
 namespace Ranvier.Quantities
 
 open System
+open Ranvier.Numerics
 
 /// One line of the formula notation, parsed.
 type Expr =
@@ -227,7 +228,8 @@ module Formula =
         with FormulaSyntax message ->
             Result.Error message
 
-    let private describe (u: UnitInfo) : string =
+    /// The unit's symbol; "1" for a unit without factors.
+    let internal describe (u: UnitInfo) : string =
         let symbol = UnitInfo.symbol u
         if symbol = "" then "1" else symbol
 
@@ -351,6 +353,86 @@ module Formula =
                 | "max", [ a; b ] ->
                     let f, g = build a, build b
                     fun () -> Math.Max(f (), g ())
+                | _ ->
+                    raise (
+                        ArgumentException(
+                            "\"" + name + "\" with " + string arguments.Length + " argument(s) is not in the notation.",
+                            "expr"
+                        )
+                    )
+
+        build expr
+
+    /// True when the two floats are equal and, at zero, of one sign.
+    let private identical (x: float) (y: float) : bool = x = y && 1.0 / x = 1.0 / y
+
+    /// The operand whose value `pick` gives, the first when both have it; an exact NaN when either value is NaN.
+    let private operandOf (pick: float -> float -> float) (a: Uncertain) (b: Uncertain) : Uncertain =
+        let x = Uncertain.value a
+        let y = Uncertain.value b
+
+        if Double.IsNaN x || Double.IsNaN y then Uncertain.exact nan
+        elif identical (pick x y) x then a
+        else b
+
+    /// A function that evaluates `expr` as `evaluator` does, over tracked reads of each entry's `Entry.Measured`: the
+    /// value has the evaluator's bits, with first-order contributions by source (`Uncertain`). A number is exact;
+    /// `min` and `max` give the operand whose value `Math.Min` and `Math.Max` give, the first when both have it, and an
+    /// exact NaN when either value is NaN. Each operation costs O(m + n) in its operands' numbers of sources.
+    /// Raises ArgumentException for an identifier `model` lacks.
+    let measuredEvaluator (model: Model) (expr: Expr) : unit -> Uncertain =
+        let rec build (e: Expr) : unit -> Uncertain =
+            match e with
+            | Number x ->
+                let exact = Uncertain.exact x
+                fun () -> exact
+            | Name id ->
+                match model.TryFind id with
+                | ValueSome entry -> entry.Measured
+                | ValueNone -> raise (ArgumentException("The name \"" + id + "\" is not in the model.", "expr"))
+            | Negate a ->
+                let f = build a
+                fun () -> -(f ())
+            | Add(a, b) ->
+                let f, g = build a, build b
+                fun () -> f () + g ()
+            | Subtract(a, b) ->
+                let f, g = build a, build b
+                fun () -> f () - g ()
+            | Multiply(a, b) ->
+                let f, g = build a, build b
+                fun () -> f () * g ()
+            | Divide(a, b) ->
+                let f, g = build a, build b
+                fun () -> f () / g ()
+            | Power(a, n) ->
+                let f = build a
+                let power (v: float) = integerPower v n
+                let derivative (v: float) = float n * integerPower v (n - 1)
+                fun () -> Uncertain.map power derivative (f ())
+            | Call(name, arguments) ->
+                match name, arguments with
+                | "sqrt", [ a ] ->
+                    let f = build a
+                    fun () -> Uncertain.Sqrt(f ())
+                | "abs", [ a ] ->
+                    let f = build a
+                    fun () -> Uncertain.abs (f ())
+                | "exp", [ a ] ->
+                    let f = build a
+                    fun () -> Uncertain.Exp(f ())
+                | "ln", [ a ] ->
+                    let f = build a
+                    fun () -> Uncertain.Log(f ())
+                | "log10", [ a ] ->
+                    let f = build a
+                    fun () -> Uncertain.Log10(f ())
+                | "min", [ a; b ] ->
+                    let f, g = build a, build b
+                    fun () -> operandOf (fun x y -> Math.Min(x, y)) (f ()) (g ())
+                | "max", [ a; b ] ->
+                    let f, g = build a, build b
+                    fun () -> operandOf (fun x y -> Math.Max(x, y)) (f ()) (g ())
                 | _ ->
                     raise (
                         ArgumentException(

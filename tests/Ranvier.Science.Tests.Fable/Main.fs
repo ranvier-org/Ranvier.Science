@@ -12,6 +12,7 @@ let all =
             testList "SumTests.fs" [ Ranvier.Science.Tests.SumTests.tests ]
             testList "MomentsTests.fs" [ Ranvier.Science.Tests.MomentsTests.tests ]
             testList "UncertainTests.fs" [ Ranvier.Science.Tests.UncertainTests.tests ]
+            testList "FormulaEntryTests.fs" [ Ranvier.Science.Tests.FormulaEntryTests.tests ]
             testList "AggregateTests.fs" [ Ranvier.Science.Tests.AggregateTests.tests ]
             testList "ToleranceTests.fs" [ Ranvier.Science.Tests.ToleranceTests.tests ]
             testList "UnitsTests.fs" [ Ranvier.Science.Tests.UnitsTests.tests ]

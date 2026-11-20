@@ -253,6 +253,57 @@ module Quantity =
         model.Add e
         Quantity<'u>(e)
 
+    /// The entry of the formula `text` over the identifiers of `model`: a `QuantityKind.Derived` with the unit
+    /// `Formula.check` gives and `Entry.Formula` set to `text`, over two memos owned by the current owner, the value
+    /// (as `Formula.evaluator` computes it) and the measured value (as `Formula.measuredEvaluator` computes it, only
+    /// when read). `Entry.Read` and `Entry.Status` read the value and are notified only when it changes, so they stay
+    /// clean through a change of an uncertainty alone; `Entry.Uncertainty` and `Entry.Measured` read the measured value
+    /// and are notified on every recomputation. Raises `ArgumentException` as `input` does, before `text` is parsed.
+    /// `Error` with the message of `Formula.parse` or `Formula.check` for text that does not parse or check, and then
+    /// the model is unchanged.
+    let formula (model: Model) (id: string) (name: string) (text: string) : Result<Entry, string> =
+        model.Check id
+
+        Formula.parse text
+        |> Result.bind (fun expr -> Formula.check model expr |> Result.map (fun unitInfo -> expr, unitInfo))
+        |> Result.map (fun (expr, unitInfo) ->
+            let evaluate = Formula.evaluator model expr
+            let evaluateMeasured = Formula.measuredEvaluator model expr
+            let value = createMemo (fun _ -> evaluate ())
+            let measuredValue = createMemo (fun _ -> evaluateMeasured ())
+
+            let e =
+                entry
+                    id
+                    name
+                    unitInfo
+                    QuantityKind.Derived
+                    ""
+                    (fun () -> value.Value)
+                    (statusOf value)
+                    (fun () -> Uncertain.standardUncertainty measuredValue.Value)
+                    (fun () -> measuredValue.Value)
+                    text
+
+            model.Add e
+            e)
+
+    /// The entry as a quantity in `unit`. `Error` stating both units unless `UnitInfo.sameUnit` holds for the unit and
+    /// the entry's unit.
+    let view (unit: UnitOf<'u>) (entry: Entry) : Result<Quantity<'u>, string> =
+        if UnitInfo.sameUnit unit.Info entry.Unit then
+            Result.Ok(Quantity<'u>(entry))
+        else
+            Result.Error(
+                "The entry \""
+                + entry.Id
+                + "\" is in "
+                + Formula.describe entry.Unit
+                + ", not in "
+                + Formula.describe unit.Info
+                + "."
+            )
+
     /// The value of `compute`, which receives the block's last published value (`ValueNone` before the first), over a
     /// memo owned by the current owner. Returning that value keeps the block's readers clean. Identifiers follow `block`.
     let blockFrom (model: Model) (id: string) (name: string) (compute: 'T voption -> 'T) : Block<'T> =
