@@ -103,8 +103,7 @@ let tests =
                 match UnitInfo.conversionFactor (ok "m") (ok "s") with
                 | Ok v -> failwith $"expected Error, got Ok {v}"
                 | Error e ->
-                    Expect.stringContains e "m" "names m"
-                    Expect.stringContains e "s" "names s"
+                    Expect.stringContains e "convert m to s" "names both units, in order"
 
                 Expect.equal (UnitInfo.convert (ok "km") (ok "m") 2.5) (Ok 2500.0) "2.5 km"
 
@@ -120,5 +119,9 @@ let tests =
                 Expect.equal (UnitOf.convert Units.kilometre Units.metre 2.5<km>) 2500.0<m> "km to m"
                 Expect.equal (UnitOf.convert Units.hour Units.second 1.5<h>) 5400.0<s> "h to s"
                 Expect.throwsT<ArgumentException> (fun () -> UnitOf.convert Units.metre Units.second 1.0<m> |> ignore) "across dimensions"
+
+                Expect.throwsC
+                    (fun () -> UnitOf.convert Units.metre Units.second 1.0<m> |> ignore)
+                    (fun e -> Expect.stringContains e.Message "convert m to s" "the message names both units")
             }
         ]

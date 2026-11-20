@@ -329,8 +329,9 @@ module UnitInfo =
     /// around '/', '^' and the parentheses are ignored. Each symbol keeps its written form, after the catalogue's
     /// look-alike replacement, as a factor's name, so the symbol of "km/h" is "km/h". The error message states the
     /// 1-based character where reading stopped and, for an unknown symbol, the symbol; a scale that overflows or is 0
-    /// (a product, a quotient or a power) is an `Error` with the message of its `ArithmeticException`. Cost O(n) in the
-    /// length of the text, plus O(|exponent|) for each power.
+    /// (a product, a quotient or a power) is an `Error` with the message of its `ArithmeticException`. Cost, general
+    /// knowledge from reading the code and not measured: O(n) to scan the text of length n, plus O(k^3) for k factors,
+    /// since each product or quotient merges the factor lists in O(k^2), plus O(|exponent|) for each power.
     let parse (catalogue: UnitCatalogue) (text: string) : Result<UnitInfo, string> =
         let text = if isNull text then "" else text
         let length = text.Length
