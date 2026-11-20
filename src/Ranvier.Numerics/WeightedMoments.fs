@@ -49,7 +49,8 @@ module WeightedMoments =
 
     /// <summary>
     /// Raises ArgumentOutOfRangeException when the weight is negative. A weight of 0 raises the count and leaves the
-    /// other totals. A NaN weight poisons the state.
+    /// other totals, whatever the observation, NaN or infinite included: a zero weight masks it. A NaN weight poisons
+    /// the state.
     /// </summary>
     let add (compensated: bool) (m: WeightedMoments) (x: float) (w: float) : WeightedMoments =
         checkWeight w

@@ -5,7 +5,8 @@ open System
 /// <summary>Count, means, spreads and co-moment of a set of (x, y) pairs. Immutable.</summary>
 /// <remarks>
 /// Every operation on one accumulator takes the same value of <c>compensated</c>. An operation with <c>false</c> on a
-/// state built with <c>true</c> drops the state's carries. Every read is NaN on an empty accumulator.
+/// state built with <c>true</c> drops the state's carries. On an empty accumulator the count is 0 and every other
+/// read is NaN.
 /// </remarks>
 [<Struct; NoComparison>]
 type Comoments =
@@ -49,7 +50,9 @@ module Comoments =
     /// <summary>
     /// Raises InvalidOperationException when the count is zero. Returns <c>zero</c> when the count reaches zero. At a
     /// count of one the spreads and the co-moment are exactly zero and the means equal the remaining pair within
-    /// rounding.
+    /// rounding. Above a count of one the sums of squares are zero only up to rounding after a removal: pairs left with
+    /// one x value can keep a small positive M2x, so <c>slope</c>, <c>intercept</c> and <c>correlation</c> read large
+    /// finite numbers where a fresh fold of those pairs reads NaN.
     /// </summary>
     let remove (compensated: bool) (m: Comoments) (x: float) (y: float) : Comoments =
         if m.N <= 0.0 then
@@ -99,6 +102,8 @@ module Comoments =
     /// `unmerge whole part` is the comoments of the pairs of `whole` outside `part`.
     /// Raises InvalidOperationException when `part` has more pairs than `whole`; returns `zero` when the counts are equal,
     /// and `whole` itself when `part` is empty. At a remaining count of one the spreads and the co-moment are exactly zero.
+    /// Above it the sums of squares are zero only up to rounding, as after `remove`: pairs left with one x value can read
+    /// a large finite slope, intercept and correlation where a fresh fold reads NaN.
     let unmerge (compensated: bool) (whole: Comoments) (part: Comoments) : Comoments =
         let n = whole.N - part.N
 

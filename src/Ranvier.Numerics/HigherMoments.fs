@@ -5,7 +5,8 @@ open System
 /// <summary>Count, mean and central moments to the fourth order of a set of observations. Immutable.</summary>
 /// <remarks>
 /// Every operation on one accumulator takes the same value of <c>compensated</c>. An operation with <c>false</c> on a
-/// state built with <c>true</c> drops the state's carries. Every read is NaN on an empty accumulator.
+/// state built with <c>true</c> drops the state's carries. On an empty accumulator the count is 0 and every other
+/// read is NaN.
 /// </remarks>
 [<Struct; NoComparison>]
 type HigherMoments =
@@ -92,7 +93,9 @@ module HigherMoments =
 
     /// `unmerge whole part` is the moments of the observations of `whole` outside `part`.
     /// Raises InvalidOperationException when `part` has more observations than `whole`; returns `zero` when the counts are equal,
-    /// and `whole` itself when `part` is empty. At a remaining count of one the central moments are exactly zero.
+    /// and `whole` itself when `part` is empty. At a remaining count of one the central moments are exactly zero. Above
+    /// it they are zero only up to rounding: observations left with one value can keep a small positive M2, so
+    /// `skewness` and `kurtosis` read arbitrary finite numbers where a fresh fold of those observations reads NaN.
     let unmerge (compensated: bool) (whole: HigherMoments) (part: HigherMoments) : HigherMoments =
         let n = whole.N - part.N
 
@@ -128,6 +131,7 @@ module HigherMoments =
     /// <summary>
     /// Raises InvalidOperationException when the count is zero. Returns <c>zero</c> when the count reaches zero. At a
     /// count of one the central moments are exactly zero and the mean equals the remaining observation within rounding.
+    /// Above it they are zero only up to rounding, as after <c>unmerge</c>.
     /// </summary>
     let remove (compensated: bool) (m: HigherMoments) (x: float) : HigherMoments =
         if m.N <= 0.0 then

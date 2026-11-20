@@ -62,7 +62,9 @@ module Vector =
             largest * sqrt sum
 
 /// A dense matrix, stored by rows. Immutable. `=` compares the shapes and then the entries, so two matrices built from
-/// equal rows are equal; it is the record's default equality, with float entry equality (a NaN entry equals nothing).
+/// equal rows are equal; it is the record's default equality, with float entry equality. On .NET a matrix with a NaN
+/// entry is not `=` to anything, itself included, as NaN is not; under Fable a record compared with itself is equal,
+/// NaN fields included (measured on `Interpolant`: `docs/FINDINGS.md`, §2, entry 11).
 type Matrix =
     internal
         { RowCount: int

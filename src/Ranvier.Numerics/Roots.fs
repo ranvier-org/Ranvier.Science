@@ -399,7 +399,7 @@ module Minimize =
     /// and shrink ½ (Lagarias et al. 1998, general knowledge). The simplex starts at x0 and at x0 plus
     /// `InitialStep` along each axis; a NaN value of f is ordered as +∞. It converges when, over all vertices, the
     /// largest |fᵢ − f_best| is at most Tolerance · max(1, |f_best|) and the largest ‖xᵢ − x_best‖∞ is at most
-    /// Tolerance · max(1, ‖x_best‖∞). An iteration is one reflection cycle (reflect, then expand, contract or shrink);
+    /// Tolerance · max(1, ‖x_best‖∞). An iteration is one reflection cycle (reflect, then expand, contract or shrink).
     /// When the best vertex is +∞ (every vertex NaN or +∞) it stops at once with `Converged = false`.
     /// `Evaluations` counts calls of f. At most `MaximumIterations` iterations, then `Converged = false` with the best
     /// vertex so far. The method is derivative-free and local: it may stall on a non-smooth function or stop on a

@@ -132,7 +132,10 @@ module Integrate =
     /// panel and after each bisection. At 200 panels without meeting it, the result has `Converged = false` with the
     /// current `Value` and `ErrorEstimate`. Singular endpoints are never evaluated; 1/√x and ln x at 0 converge by
     /// repeated bisection of the panel at 0, without extrapolation (66 and 34 panels at absolute 1e-12 and relative
-    /// 1e-10, measured here by `Calculus`' closed-form list).
+    /// 1e-10, measured here by `Calculus`' closed-form list). On the closed-form list of the "Calculus" test
+    /// "adaptive meets its tolerance on closed forms" (finite and infinite ranges, endpoint singularities, cos 50x),
+    /// every result converged and was within max(absolute, relative · |exact|) of the exact integral at absolute 1e-12
+    /// and relative 1e-10 (measured here).
     ///
     /// The error estimate is heuristic, not a bound: it sees only the 15 nodes of each panel. A feature narrower than a
     /// panel's node spacing, such as a peak of width 1e-3 inside [0, 1], can fall between the nodes and give a
@@ -364,7 +367,10 @@ module Integrate =
     /// Integral of the function over [a, b] by the n-point Gauss–Legendre rule, exact for polynomials up to degree
     /// 2n − 1. The nodes and weights are computed on each call by Newton's method on the Legendre polynomial Pₙ from
     /// cos(π(i − ¼)/(n + ½)), with the weights taken from a double-double evaluation of Pₙ₋₁; the cost is O(n²) for them
-    /// plus n evaluations. For b less than a the result is negated. A NaN bound or integrand gives NaN. Fewer than one point raises `ArgumentOutOfRangeException`.
+    /// plus n evaluations. Relative error at most 1e-14 on the "Calculus" test "Gauss–Legendre is exact to degree
+    /// 2n − 1" (x^(2n−1) on [0, 1] up to n = 100, and eˣ on [−1, 1] at n = 20; measured here). For b less than a the
+    /// result is negated. A NaN bound or integrand gives NaN. Fewer than one point raises
+    /// `ArgumentOutOfRangeException`.
     let gaussLegendre (points: int) (f: float -> float) (a: float) (b: float) : float =
         if points < 1 then
             raise (

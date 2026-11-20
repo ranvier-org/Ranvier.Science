@@ -353,6 +353,43 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
       (`| [| one |] -> let struct (id, c) = one`), comparing whole struct-tuple arrays and a lambda with a struct-tuple
       parameter compile correctly (*measured here*, 2026-11-20, same run).
     - Workaround here: project the array first, `Array.map (fun struct (id, _) -> id)`.
+11. **The Fable runtime: a record compared with itself is equal, NaN fields included (Fickl 0.10.1, Fable 5.27).**
+    - Observed: an `Interpolant` built from a NaN y is `=` to itself under Fable and not on .NET, where float equality
+      makes the NaN field unequal to itself (*measured here*, 2026-11-20: the assertion `withNaN = withNaN` is false on
+      .NET and failed under mocha in the first run of `InterpolateTests.fs`, Plan T2, Task 13). The equality appears to
+      return true on reference identity before it compares the fields; that cause in fable-library-js was not read.
+    - Where: every record or union with a float field under the default equality: `Interpolant`
+      (`src/Ranvier.Numerics/Interpolate.fs`) and `Matrix` (`src/Ranvier.Numerics/LinearAlgebra.fs`) here.
+    - Workaround here: the two doc comments state each target's result, and the test `equality with a non-finite y`
+      keeps its NaN assertion under `#if !FABLE_COMPILER`. No code relies on either result.
+    - Proposal: a note to Fable that its structural equality is reflexive where .NET's float equality is not, or an
+      equality that compares the fields of one instance with themselves, as .NET does.
+12. **The Fable compiler: `Double.IsFinite`, `Math.Cbrt` and the three-argument `ArgumentOutOfRangeException`
+    constructor are not supported (Fickl 0.10.1, Fable 5.27).**
+    - Observed: each stops the Fable compile with an error, not a warning (*measured here*, 2026-11-20: the Fable
+      compiles of Plan T2, Task 8, which failed first on the constructor `ArgumentOutOfRangeException(name, value,
+      message)` and on `Math.Cbrt`, then on `Double.IsFinite` in the test code).
+    - Where: library and test code meant for both targets.
+    - Workaround here: the two-string constructor `ArgumentOutOfRangeException(name, message)`; a cube root checked by
+      cubing it; `not (Double.IsNaN x || Double.IsInfinity x)`, now `Doubles.isFinite`
+      (`src/Ranvier.Numerics/Doubles.fs`).
+    - Proposal: Fable replacements that map `Double.IsFinite` to `Number.isFinite`, `Math.Cbrt` to `Math.cbrt`, and
+      the three-argument constructor to its message.
+13. **Core 0.2.1: `Projection.sortBy` leaves out a key whose sort key raises.**
+    - Observed: the sorted view holds the other keys and its `Keys` read raises nothing, so a reader of `Keys` alone
+      sees a complete-looking, shorter view. Rows {1, 2, 3, 4, 50} with a projection that raises on 50 gave a quantile
+      at p = 1 of 4.0 (*measured here*, 2026-11-21: the Plan T2 Task 19 review's probe of `Aggregate.quantileBy`). The
+      core documents it: "A throwing sort key excludes the key, and `Get` and `TryGet` of the key raise its exception"
+      (*from documentation*: core 0.2.1, `src/Ranvier/Combinators.fs`, the remarks of `sortBy`).
+    - Where: `Aggregate.quantileBy` (`src/Ranvier.Numerics/Aggregate.fs`), which reads the sorted view.
+    - Workaround here: `quantileBy` compares the view's key count with the upstream's and, while they differ, reads
+      the projection of each upstream row that is neither in the view nor pending, so the exception propagates; that
+      scan costs O(N) on every read while a row is failed (`AggregateTests.fs`, "quantileBy raises the exception its
+      projection raises").
+    - Proposal: `sortBy` either raises the excluded key's exception from `Keys`, as the folds behind `Aggregate.sumBy`,
+      `momentsBy` and `histogramBy` raise a projection's exception (the same review's probe), or exposes the failed
+      keys or their count beside `PendingKeys`, so a reader can tell a complete view from a partial one. Proofs and
+      counters were not read for this entry.
 
 ## 3. Interfaces to change before widening
 
