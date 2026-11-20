@@ -7,6 +7,8 @@
 //   python -I tests/reference/special.py dist-beta
 //   python -I tests/reference/special.py dist-student-t
 //   python -I tests/reference/special.py dist-fisher-f
+//   python -I tests/reference/special.py dist-regimes
+//   python -I tests/reference/special.py dist-edges
 // and the closed forms and identities written in each test.
 module Ranvier.Science.Tests.ContinuousTests
 
@@ -239,6 +241,204 @@ let private fisherFQuantileCases: struct (float * float * float * float)[] =
         struct (5.0, 10.0, 0.975, 4.2360856681886325)
         struct (2.0, 30.0, 0.05, 0.05138109450638156)
         struct (2.0, 30.0, 0.975, 4.182060590996112)
+    |]
+
+// python -I tests/reference/special.py dist-regimes
+// dof, t, cdf, survival, density: t(100), where 1/2 - I_y(1/2, 50)/2 would cancel, and either side of |t| = 1
+let private studentTRegimeCases: struct (float * float * float * float * float)[] =
+    [|
+        struct (100.0, -9.0, 7.680385257375208e-15, 0.9999999999999923, 3.8641708215471804e-14)
+        struct (100.0, -5.0, 1.2250867067519001e-06, 0.9999987749132933, 5.08005823472728e-06)
+        struct (100.0, -1.01, 0.1574664562228952, 0.8425335437771048, 0.23835855634544006)
+        struct (100.0, -0.99, 0.1622817757498058, 0.8377182242501943, 0.243173713838713)
+        struct (100.0, 0.99, 0.8377182242501943, 0.1622817757498058, 0.243173713838713)
+        struct (100.0, 1.01, 0.8425335437771048, 0.1574664562228952, 0.23835855634544006)
+    |]
+
+// a, b, x, cdf, survival, density: a shape below 1 at small x, where 1 - x rounds near 1
+let private betaRegimeCases: struct (float * float * float * float * float * float)[] =
+    [|
+        struct (0.5, 100.0, 1e-20, 1.1269695801851285e-09, 0.9999999988730304, 56348479009.256424)
+        struct (0.5, 100.0, 1e-10, 0.00011269695764661288, 0.9998873030423534, 563484.7845140648)
+        struct (0.5, 100.0, 1e-06, 0.01126932391282343, 0.9887306760871766, 5634.2900783172145)
+    |]
+
+// d1, d2, x, cdf, survival, density: far above d2/d1 at d2 = 0.5 and far below it at d1 = 0.5, where w or 1 - w
+// rounds near 1
+let private fisherFRegimeCases: struct (float * float * float * float * float * float)[] =
+    [|
+        struct (100.0, 0.5, 1000.0, 0.8615393241649868, 0.13846067583501323, 3.460821195063689e-05)
+        struct (100.0, 0.5, 1e+20, 0.9999922133927572, 7.786607242745579e-06, 1.946651810686395e-26)
+        struct (0.5, 100.0, 1e-20, 7.786607242745579e-06, 0.9999922133927572, 194665181068639.5)
+        struct (0.5, 100.0, 0.001, 0.13846067583501323, 0.8615393241649868, 34.608211950636885)
+    |]
+
+// python -I tests/reference/special.py dist-edges
+// shape, scale, x, cdf, survival, density: the ends of the gamma's measured domain
+let private gammaEdgeCases: struct (float * float * float * float * float * float)[] =
+    [|
+        struct (0.01, 1.0, 1e-100, 0.1005706528500385, 0.8994293471499615, 1.005706528500385e+97)
+        struct (0.01, 1.0, 1e-10, 0.7988610914336052, 0.2011389085663948, 79886109.135451)
+        struct (0.01, 1.0, 0.01, 0.9603474235215091, 0.039652576478490804, 0.9508857180865052)
+        struct (0.01, 1.0, 1.0, 0.997783765376772, 0.00221623462322799, 0.0036997875568719287)
+        struct (0.01, 1.0, 10.0, 0.9999999571829502, 4.281704977409939e-08, 4.672254062420182e-08)
+        struct (0.01, 1.0, 100.0, 1.0, 3.8795920588023443e-48, 3.9176269537213123e-48)
+        struct (1000.0, 1.0, 700.0, 1.0158583345333217e-26, 1.0, 4.386927123038404e-27)
+        struct (1000.0, 1.0, 900.0, 0.0005499022657117829, 0.9994500977342882, 6.585503650465444e-05)
+        struct (1000.0, 1.0, 1000.0, 0.5042052441802155, 0.4957947558197845, 0.012614611348721499)
+        struct (1000.0, 1.0, 1100.0, 0.99894067674607, 0.0010593232539299773, 0.00010537028564234359)
+        struct (1000.0, 1.0, 1400.0, 1.0, 8.04132540818483e-30, 2.3173346521091296e-30)
+    |]
+
+// dof, x, cdf, survival, density: dof 0.05 and 1e5, the ends of the measured domain, and 0.5 and 100
+let private chiSquaredEdgeCases: struct (float * float * float * float * float)[] =
+    [|
+        struct (0.05, 1e-100, 0.0031515247196459762, 0.996848475280354, 7.878811799114941e+95)
+        struct (0.05, 1e-10, 0.5604291519168295, 0.4395708480831705, 140107287.9723729)
+        struct (0.05, 0.01, 0.8881121650944745, 0.11188783490552544, 2.2094758256625777)
+        struct (0.05, 1.0, 0.9858272525307303, 0.014172747469269683, 0.015111705649574165)
+        struct (0.05, 20.0, 0.9999998881372488, 1.118627511446815e-07, 6.095532649505505e-08)
+        struct (0.05, 100.0, 1.0, 1.058123705841213e-25, 5.391835471009449e-26)
+        struct (0.5, 1e-10, 0.0029337386158567917, 0.9970662613841432, 7334346.539348605)
+        struct (0.5, 0.1, 0.5165553208304656, 0.4834446791695344, 1.2406426356271536)
+        struct (0.5, 1.0, 0.8464864041916775, 0.15351359580832247, 0.14067411288159115)
+        struct (0.5, 10.0, 0.9995079748755537, 0.00049202512444634, 0.00027790030058575597)
+        struct (0.5, 100.0, 1.0, 2.788194848158256e-24, 1.4146119773390615e-24)
+        struct (100.0, 50.0, 6.953305247616099e-06, 0.9999930466947524, 3.6021642652022015e-06)
+        struct (100.0, 80.0, 0.07033506665939496, 0.9296649333406051, 0.011066885970397655)
+        struct (100.0, 100.0, 0.5188083154720433, 0.48119168452795674, 0.02816250316259541)
+        struct (100.0, 130.0, 0.9764876021901914, 0.023512397809808676, 0.0032997291091396677)
+        struct (100.0, 200.0, 0.9999999882154993, 1.1784500720979422e-08, 3.0578554087971835e-09)
+        struct (100000.0, 98000.0, 3.3847542280794912e-06, 0.9999966152457719, 3.6093981921096624e-08)
+        struct (100000.0, 99500.0, 0.13169564297235348, 0.8683043570276465, 0.00047888256480812803)
+        struct (100000.0, 100000.0, 0.5005947081047933, 0.4994052918952067, 0.0008920605713075277)
+        struct (100000.0, 100500.0, 0.8681451883966163, 0.13185481160338378, 0.00047609720509648844)
+        struct (100000.0, 102000.0, 0.9999955880607448, 4.4119392551203065e-06, 4.527936889649121e-08)
+    |]
+
+// a, b, x, cdf, survival, density: the corners of shapes 0.5 to 100 and of the measured 0.2 to 500
+let private betaEdgeCases: struct (float * float * float * float * float * float)[] =
+    [|
+        struct (0.5, 0.5, 1e-100, 6.366197723675814e-51, 1.0, 3.1830988618379065e+49)
+        struct (0.5, 0.5, 1e-10, 6.366197723781917e-06, 0.9999936338022762, 31830.988619970616)
+        struct (0.5, 0.5, 0.3, 0.36901011956554536, 0.6309898804344546, 0.6946091180428566)
+        struct (0.5, 0.5, 0.9, 0.7951672353008665, 0.20483276469913342, 1.061032953945969)
+        struct (0.5, 0.5, 0.9999999999, 0.9999936338020129, 6.366197987152692e-06, 31830.987303116795)
+        struct (0.5, 100.0, 1e-100, 1.1269695801851285e-49, 1.0, 5.634847900925642e+50)
+        struct (0.5, 100.0, 1e-10, 0.00011269695764661288, 0.9998873030423534, 563484.7845140648)
+        struct (0.5, 100.0, 0.005, 0.6826910120299894, 0.31730898797001067, 48.515687440268124)
+        struct (0.5, 100.0, 0.05, 0.9986206140626394, 0.001379385937360692, 0.1570486180735802)
+        struct (0.5, 100.0, 0.3, 1.0, 3.290369956902061e-17, 4.753653605178042e-15)
+        struct (100.0, 0.5, 0.7, 3.290369956902035e-17, 1.0, 4.7536536051780045e-15)
+        struct (100.0, 0.5, 0.95, 0.0013793859373606855, 0.9986206140626394, 0.15704861807357945)
+        struct (100.0, 0.5, 0.995, 0.31730898797001045, 0.6826910120299896, 48.51568744026808)
+        struct (100.0, 0.5, 0.9999999999, 0.9998873030376911, 0.0001126969623089068, 563484.7612025958)
+        struct (100.0, 100.0, 0.3, 1.8411141115800529e-09, 0.9999999981588858, 3.5938629673509754e-07)
+        struct (100.0, 100.0, 0.45, 0.07838793271222053, 0.9216120672877794, 4.166740545241124)
+        struct (100.0, 100.0, 0.5, 0.5, 0.5, 11.269695801851285)
+        struct (100.0, 100.0, 0.55, 0.9216120672877797, 0.0783879327122203, 4.166740545241115)
+        struct (100.0, 100.0, 0.7, 0.9999999981588858, 1.841114111580073e-09, 3.593862967351013e-07)
+        struct (0.2, 0.2, 1e-100, 5.262326231224007e-21, 1.0, 1.0524652462448015e+79)
+        struct (0.2, 0.2, 1e-10, 0.005262326231294184, 0.9947376737687058, 10524652.463290012)
+        struct (0.2, 0.2, 0.5, 0.5, 0.5, 0.31904780188193904)
+        struct (0.2, 0.2, 0.9999999999, 0.9947376736816245, 0.005262326318375546, 10524651.766639145)
+        struct (0.2, 500.0, 1e-100, 3.7740008708825995e-20, 1.0, 7.5480017417652e+79)
+        struct (0.2, 500.0, 1e-10, 0.03774000839495501, 0.9622599916050449, 75480013.65119939)
+        struct (0.2, 500.0, 0.0001, 0.593231108341127, 0.40676889165887303, 1138.0454674212083)
+        struct (0.2, 500.0, 0.01, 0.999652689958298, 0.0003473100417019499, 0.19943165618946582)
+        struct (0.2, 500.0, 0.05, 0.9999999999998828, 1.172053330598706e-13, 6.349434206909282e-11)
+        struct (500.0, 0.2, 0.95, 1.1720533305986797e-13, 0.9999999999998828, 6.349434206909139e-11)
+        struct (500.0, 0.2, 0.99, 0.0003473100417019482, 0.999652689958298, 0.19943165618946482)
+        struct (500.0, 0.2, 0.9999, 0.4067688916588856, 0.5932311083411145, 1138.0454674213147)
+        struct (500.0, 0.2, 0.9999999999, 0.9622599909805206, 0.03774000901947943, 75480008.655004)
+        struct (500.0, 500.0, 0.45, 0.0007636789395265001, 0.9992363210604736, 0.16741470119749582)
+        struct (500.0, 500.0, 0.48, 0.10291752730699572, 0.8970824726930043, 11.345224253570203)
+        struct (500.0, 500.0, 0.5, 0.5, 0.5, 25.225018178360802)
+        struct (500.0, 500.0, 0.52, 0.8970824726930043, 0.10291752730699572, 11.345224253570203)
+        struct (500.0, 500.0, 0.55, 0.9992363210604736, 0.0007636789395264908, 0.16741470119749396)
+    |]
+
+// dof, t, cdf, survival, density: dof 0.05 and 1000, the ends of the measured domain, and 0.5 and 100
+let private studentTEdgeCases: struct (float * float * float * float * float)[] =
+    [|
+        struct (0.05, -1e+100, 4.485631048063485e-06, 0.999995514368952, 2.2428155240317428e-107)
+        struct (0.05, -10000000000.0, 0.1418481085504884, 0.8581518914495115, 7.092405427524421e-13)
+        struct (0.05, -10.0, 0.39977972888292707, 0.6002202711170729, 0.0019983869255644176)
+        struct (0.05, -1.0, 0.4482813060155917, 0.5517186939844083, 0.021860957074032412)
+        struct (0.05, 0.5, 0.53672496695746, 0.4632750330425401, 0.04219926577642753)
+        struct (0.05, 100.0, 0.6436936836089822, 0.35630631639101784, 0.00017815270195134769)
+        struct (0.5, -1e+100, 3.207009754142229e-51, 1.0, 1.6035048770711145e-151)
+        struct (0.5, -10000000000.0, 3.207009754142229e-06, 0.9999967929902459, 1.6035048770711146e-16)
+        struct (0.5, -2.0, 0.22275744509156561, 0.7772425549084344, 0.051899228247372614)
+        struct (0.5, -0.5, 0.3786590364647183, 0.6213409635352817, 0.19896392402617255)
+        struct (0.5, 1.5, 0.7460491046759458, 0.25395089532405424, 0.07508803940917724)
+        struct (0.5, 100000.0, 0.998985854469861, 0.0010141455301389997, 5.0707276505428766e-09)
+        struct (100.0, -30.0, 4.190166279344146e-52, 1.0, 1.2584163368965668e-51)
+        struct (100.0, -3.0, 0.0017039576716647248, 0.9982960423283352, 0.005126089702320253)
+        struct (100.0, -0.5, 0.3090867829154433, 0.6909132170845567, 0.3508028333923303)
+        struct (100.0, 1.0, 0.8401379221079384, 0.1598620778920617, 0.24076589692854597)
+        struct (100.0, 4.0, 0.9999392381778496, 6.076182215038084e-05, 0.00022115455654062906)
+        struct (100.0, 20.0, 1.0, 4.997133930668478e-37, 2.0037296688112087e-36)
+        struct (1000.0, -30.0, 7.687343722021741e-142, 1.0, 1.2151341190135477e-140)
+        struct (1000.0, -5.0, 3.3836281823243153e-07, 0.9999996616371818, 1.7120122333122448e-06)
+        struct (1000.0, -1.2, 0.11521177616223353, 0.8847882238377665, 0.194098384399826)
+        struct (1000.0, 0.3, 0.617880247916378, 0.38211975208362203, 0.38127609547338126)
+        struct (1000.0, 2.0, 0.9771148267533741, 0.02288517324662582, 0.05408517400975593)
+        struct (1000.0, 10.0, 1.0, 8.335351479300033e-23, 7.651781684387526e-22)
+    |]
+
+// d1, d2, x, cdf, survival, density: the corners of d1, d2 from 0.5 to 100, and one of them at 1000 with the other
+// at 0.5 or 100, the ends of the measured domain; a value below 1e-300 prints as 0.0 and is skipped
+let private fisherFEdgeCases: struct (float * float * float * float * float * float)[] =
+    [|
+        struct (0.5, 0.5, 1e-10, 0.0017055826816746616, 0.9982944173183254, 4263956.704016095)
+        struct (0.5, 0.5, 0.001, 0.09590237534219626, 0.9040976246578037, 23.966010625047605)
+        struct (0.5, 0.5, 0.3, 0.38847117333342446, 0.6115288266665755, 0.29174281497296606)
+        struct (0.5, 0.5, 3.0, 0.6022432216826442, 0.39775677831735584, 0.029576164260098153)
+        struct (0.5, 0.5, 1000.0, 0.9040976246578037, 0.09590237534219626, 2.3966010625047605e-05)
+        struct (0.5, 0.5, 10000000000.0, 0.9982944173183254, 0.0017055826816746616, 4.263956704016096e-14)
+        struct (0.5, 100.0, 1e-10, 0.0024623414132115915, 0.9975376585867884, 6155853.532905246)
+        struct (0.5, 100.0, 0.001, 0.13846067583501323, 0.8615393241649868, 34.608211950636885)
+        struct (0.5, 100.0, 0.3, 0.5677682967149376, 0.4322317032850624, 0.4453863646608471)
+        struct (0.5, 100.0, 3.0, 0.8981163587807167, 0.10188364121928323, 0.0404137093730966)
+        struct (0.5, 100.0, 1000.0, 1.0, 2.0707539746844117e-41, 8.653423253027115e-43)
+        struct (0.5, 100.0, 10000000000.0, 1.0, 0.0, 0.0)
+        struct (100.0, 0.5, 1e-10, 0.0, 1.0, 0.0)
+        struct (100.0, 0.5, 0.001, 2.0707539746844134e-41, 1.0, 8.653423253027123e-37)
+        struct (100.0, 0.5, 0.3, 0.08945249228123675, 0.9105475077187632, 0.3820875019199355)
+        struct (100.0, 0.5, 3.0, 0.41802551093829343, 0.5819744890617066, 0.045346609736022704)
+        struct (100.0, 0.5, 1000.0, 0.8615393241649868, 0.13846067583501323, 3.460821195063689e-05)
+        struct (100.0, 0.5, 10000000000.0, 0.9975376585867884, 0.0024623414132115915, 6.155853532905246e-14)
+        struct (100.0, 100.0, 1e-10, 0.0, 1.0, 0.0)
+        struct (100.0, 100.0, 0.001, 4.5737001791722887e-122, 1.0, 2.2823706321801054e-117)
+        struct (100.0, 100.0, 0.3, 2.651678634111673e-09, 0.9999999973483213, 2.4344461311567296e-07)
+        struct (100.0, 100.0, 3.0, 0.9999999561515296, 4.38484704593346e-08, 3.756092395905319e-07)
+        struct (100.0, 100.0, 1000.0, 1.0, 4.573700179172284e-122, 2.282370632180103e-123)
+        struct (100.0, 100.0, 10000000000.0, 1.0, 0.0, 0.0)
+        struct (1000.0, 0.5, 1e-10, 0.0, 1.0, 0.0)
+        struct (1000.0, 0.5, 0.001, 5.336151517825311e-91, 1.0, 8.920108577664774e-86)
+        struct (1000.0, 0.5, 0.3, 0.08781854337710908, 0.912181456622891, 0.38179417665248916)
+        struct (1000.0, 0.5, 3.0, 0.41700226858652406, 0.582997731413476, 0.04543752107361937)
+        struct (1000.0, 0.5, 1000.0, 0.8613050175117827, 0.1386949824882173, 3.466680802449251e-05)
+        struct (1000.0, 0.5, 10000000000.0, 0.9975334923052093, 0.002466507694790683, 6.16626923685332e-14)
+        struct (1000.0, 100.0, 1e-10, 0.0, 1.0, 0.0)
+        struct (1000.0, 100.0, 0.001, 0.0, 1.0, 0.0)
+        struct (1000.0, 100.0, 0.3, 4.7301489748916295e-22, 1.0, 1.3978354248921894e-19)
+        struct (1000.0, 100.0, 3.0, 0.999999999901986, 9.801403084967357e-11, 1.0703348444501304e-09)
+        struct (1000.0, 100.0, 1000.0, 1.0, 2.968648066041796e-129, 1.4827234816184902e-130)
+        struct (1000.0, 100.0, 10000000000.0, 1.0, 0.0, 0.0)
+        struct (0.5, 1000.0, 1e-10, 0.002466507694790683, 0.9975334923052093, 6166269.23685332)
+        struct (0.5, 1000.0, 0.001, 0.1386949824882173, 0.8613050175117827, 34.666808024492504)
+        struct (0.5, 1000.0, 0.3, 0.5687632415787973, 0.4312367584212027, 0.44626786382444456)
+        struct (0.5, 1000.0, 3.0, 0.8997546308549875, 0.1002453691450125, 0.04041494472006835)
+        struct (0.5, 1000.0, 1000.0, 1.0, 5.336151517825292e-91, 8.920108577664743e-92)
+        struct (0.5, 1000.0, 10000000000.0, 1.0, 0.0, 0.0)
+        struct (100.0, 1000.0, 1e-10, 0.0, 1.0, 0.0)
+        struct (100.0, 1000.0, 0.001, 2.968648066041799e-129, 1.0, 1.4827234816184917e-124)
+        struct (100.0, 1000.0, 0.3, 2.8430243087805377e-12, 0.9999999999971569, 3.261467544634024e-10)
+        struct (100.0, 1000.0, 3.0, 1.0, 3.084409024716647e-18, 8.036054625640496e-17)
+        struct (100.0, 1000.0, 1000.0, 1.0, 0.0, 0.0)
+        struct (100.0, 1000.0, 10000000000.0, 1.0, 0.0, 0.0)
     |]
 
 let private rel (a: float) (b: float) : float = abs (a - b) / abs b
@@ -961,4 +1161,121 @@ let tests =
                 let c = Continuous.chiSquared 3.0
                 near "chi-squared mean" (Continuous.mean c) 3.0
                 near "chi-squared variance" (Continuous.variance c) 6.0)
+
+            testCase "where a plain form would cancel or round 1 - x, against the reference" (fun () ->
+                for row in studentTRegimeCases do
+                    let struct (dof, t, c, s, f) = row
+                    let d = Continuous.studentT dof
+                    let name = Continuous.describe d + " at " + string t
+                    matches (name + " cdf") (Continuous.cdf d t) c
+                    matches (name + " survival") (Continuous.survival d t) s
+                    matches (name + " density") (Continuous.density d t) f
+
+                for row in betaRegimeCases do
+                    let struct (a, b, x, c, s, f) = row
+                    let d = Continuous.beta a b
+                    let name = Continuous.describe d + " at " + string x
+                    matches (name + " cdf") (Continuous.cdf d x) c
+                    matches (name + " survival") (Continuous.survival d x) s
+                    matches (name + " density") (Continuous.density d x) f
+
+                for row in fisherFRegimeCases do
+                    let struct (d1, d2, x, c, s, f) = row
+                    let d = Continuous.fisherF d1 d2
+                    let name = Continuous.describe d + " at " + string x
+                    matches (name + " cdf") (Continuous.cdf d x) c
+                    matches (name + " survival") (Continuous.survival d x) s
+                    matches (name + " density") (Continuous.density d x) f)
+
+            testCase "gamma and chi-squared quantile round trips within 1e-14 of 1" (fun () ->
+                // Near 1 the inverse of P resolves 1 - p only to the spacing of the doubles near 1 (measured here: at
+                // shape 2 and p = 1 - 1e-14 it starts at 39.47 against a root near 35).
+                for d in [ Continuous.gamma 2.0 1.0; Continuous.chiSquared 4.0 ] do
+                    for p in [ 1.0 - 1e-12; 1.0 - 1e-14; 1.0 - 1e-15 ] do
+                        roundTrip d p)
+
+            testCase "the stated domains at their edges against the reference" (fun () ->
+                // The density carries no stated bound; the module remarks give 1.2e-12 at gamma shape 1000 and 1.1e-10
+                // at chi-squared 1e5 degrees of freedom (measured here), pinned here with that much room.
+                for row in gammaEdgeCases do
+                    let struct (k, scale, x, c, s, f) = row
+                    let d = Continuous.gamma k scale
+                    let name = Continuous.describe d + " at " + string x
+                    matches (name + " cdf") (Continuous.cdf d x) c
+                    matches (name + " survival") (Continuous.survival d x) s
+                    matchesWithin (if k > 100.0 then 2e-12 else 1e-12) (name + " density") (Continuous.density d x) f
+
+                for row in chiSquaredEdgeCases do
+                    let struct (dof, x, c, s, f) = row
+                    let d = Continuous.chiSquared dof
+                    let name = Continuous.describe d + " at " + string x
+                    matches (name + " cdf") (Continuous.cdf d x) c
+                    matches (name + " survival") (Continuous.survival d x) s
+                    matchesWithin (if dof > 100.0 then 2e-10 else 1e-12) (name + " density") (Continuous.density d x) f
+
+                for row in betaEdgeCases do
+                    let struct (a, b, x, c, s, f) = row
+                    let d = Continuous.beta a b
+                    let name = Continuous.describe d + " at " + string x
+                    matches (name + " cdf") (Continuous.cdf d x) c
+                    matches (name + " survival") (Continuous.survival d x) s
+                    matches (name + " density") (Continuous.density d x) f
+
+                for row in studentTEdgeCases do
+                    let struct (dof, t, c, s, f) = row
+                    let d = Continuous.studentT dof
+                    let name = Continuous.describe d + " at " + string t
+                    matches (name + " cdf") (Continuous.cdf d t) c
+                    matches (name + " survival") (Continuous.survival d t) s
+                    matches (name + " density") (Continuous.density d t) f
+
+                for row in fisherFEdgeCases do
+                    let struct (d1, d2, x, c, s, f) = row
+                    let d = Continuous.fisherF d1 d2
+                    let name = Continuous.describe d + " at " + string x
+                    matches (name + " cdf") (Continuous.cdf d x) c
+                    matches (name + " survival") (Continuous.survival d x) s
+                    matches (name + " density") (Continuous.density d x) f)
+
+            testCase "quantile round trips at the edges of the stated domains" (fun () ->
+                let all = lowerGrid @ upperGrid @ [ 1.0 - 1e-12; 1.0 - 1e-14; 1.0 - 1e-15 ]
+                let without (excluded: float list) = all |> List.filter (fun p -> not (List.contains p excluded))
+                // Left out (measured here): the p whose root is below the least normal double (1e-100, and 1e-10 at
+                // shapes 0.025 and 0.01), and for the beta with b = 0.5 or 0.2 the p whose root lies so near 1 that
+                // adjacent doubles move the survival by more than a third of the bound (from 0.999 at (0.5, 0.5),
+                // 0.975 at (100, 0.5) and (0.2, 0.2), 0.5 at (500, 0.2)), or whose root rounds to 1.
+                let atLeastNormal = without [ 1e-100 ]
+                let upTo (largest: float) = all |> List.filter (fun p -> p <= largest)
+
+                for d, ps in
+                    [
+                        Continuous.gamma 0.01 1.0, without [ 1e-100; 1e-10 ]
+                        Continuous.gamma 1000.0 1.0, all
+                        Continuous.chiSquared 0.05, without [ 1e-100; 1e-10 ]
+                        Continuous.chiSquared 0.5, atLeastNormal
+                        Continuous.chiSquared 100.0, all
+                        Continuous.chiSquared 1e5, all
+                        Continuous.beta 0.5 0.5, upTo 0.975
+                        Continuous.beta 0.5 100.0, all
+                        Continuous.beta 100.0 0.5, upTo 0.6
+                        Continuous.beta 100.0 100.0, all
+                        Continuous.beta 0.2 0.2, upTo 0.6 |> List.filter (fun p -> p <> 1e-100)
+                        Continuous.beta 0.2 500.0, atLeastNormal
+                        Continuous.beta 500.0 0.2, upTo 0.3
+                        Continuous.beta 500.0 500.0, all
+                        Continuous.studentT 0.05, atLeastNormal
+                        Continuous.studentT 0.5, all
+                        Continuous.studentT 100.0, all
+                        Continuous.studentT 1000.0, all
+                        Continuous.fisherF 0.5 0.5, atLeastNormal
+                        Continuous.fisherF 0.5 100.0, atLeastNormal
+                        Continuous.fisherF 100.0 0.5, all
+                        Continuous.fisherF 100.0 100.0, all
+                        Continuous.fisherF 1000.0 0.5, all
+                        Continuous.fisherF 1000.0 100.0, all
+                        Continuous.fisherF 0.5 1000.0, atLeastNormal
+                        Continuous.fisherF 100.0 1000.0, all
+                    ] do
+                    for p in ps do
+                        roundTrip d p)
         ]

@@ -17,6 +17,11 @@ Sections:
     dist-gamma, dist-chi-squared, dist-beta, dist-student-t, dist-fisher-f
             the cdf, survival and density of the gamma, chi-squared, beta, Student t and F distributions at the
             points of ContinuousTests.fs, and their quantiles at p = 0.05 and 0.975
+    dist-regimes
+            the same for the t at 100 degrees of freedom, the beta at shape 0.5 near 0 and the F with a degree of
+            freedom of 0.5 far into either tail, where a single form would cancel or round 1 - x
+    dist-edges
+            the same at the ends of the parameter ranges that Continuous.fs states for the five families
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -96,6 +101,12 @@ Methods:
                 asserted by invert.
     Each of these sections first checks beta_inc against I_x(1, 1) = x at x = 0.3 and 0.8 and against
     I_0.3(2.5, 3.5) + I_0.7(3.5, 2.5) = 1, to 1e-50 at 60 digits.
+    Poisson sums
+                for the chi-squared at 1e5 degrees of freedom, whose shape 5e4 is whole, Q(n, t) is the finite sum over
+                k = 0..n-1 of e^-t t^k / k! and P(n, t) the sum over k >= n, from its first term by logarithms, until a
+                term leaves it unchanged past k = t (general knowledge: the Poisson identity for a whole shape). Both
+                sums are of positive terms. gamma_q forms 1 - P at x / ln 10 extra digits, out of reach at x near 1e5.
+                dist-edges first checks both sums against gamma_q and gamma_p at (3, 2.5) and (40, 37) to 1e-50.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -1190,6 +1201,179 @@ def section_dist_fisher_f() -> None:
     emit("fisherFQuantileCases", [(m, n, p, value(fisher_f_quantile, m, n, p)) for m, n in points for p in (0.05, 0.975)])
 
 
+def poisson_head(n: int, t: Decimal) -> Decimal:
+    """The sum over k = 0..n-1 of e^-t t^k / k!, which is Q(n, t) for a whole n >= 1, at the precision of the context."""
+    term = (-t).exp()
+    total = term
+    for k in range(1, n):
+        term = term * t / k
+        total += term
+    return total
+
+
+def poisson_tail(n: int, t: Decimal) -> Decimal:
+    """The sum over k >= n of e^-t t^k / k!, which is P(n, t) for a whole n >= 1, at the precision of the context:
+    the term at k = n from its logarithm, then terms until one leaves the sum unchanged with k > t, past which each
+    later term is below the one before."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD + len(str(n)) + 2
+        term = (n * t.ln() - t - ln_gamma_precise(n + 1)).exp()
+        total = term
+        k = n
+        while True:
+            k += 1
+            term = term * t / k
+            if total + term == total and k > t:
+                break
+            total += term
+    return +total
+
+
+def chi_squared_whole_cdf(n, x) -> Decimal:
+    """P(n/2, x/2) for a whole n/2, by poisson_tail; gamma_p's series would need about n terms as well."""
+    return poisson_tail(int(n) // 2, Decimal(x) / 2)
+
+
+def chi_squared_whole_sf(n, x) -> Decimal:
+    """Q(n/2, x/2) for a whole n/2, by poisson_head: gamma_q forms 1 - P at x / ln 10 extra digits, out of reach at
+    x near 1e5."""
+    with localcontext() as ctx:
+        ctx.prec += GUARD
+        result = poisson_head(int(n) // 2, Decimal(x) / 2)
+    return +result
+
+
+def check_poisson_sums() -> None:
+    """Exits 1 unless the Poisson sums equal gamma_q and gamma_p at a = 3, x = 2.5 and a = 40, x = 37 to 1e-50."""
+    with localcontext() as ctx:
+        ctx.prec = DIGITS
+        tolerance = Decimal("1e-50")
+        for n, x in ((3, 2.5), (40, 37.0)):
+            t = Decimal(x)
+            checks = [
+                (f"poisson_head({n}, {x}) = gamma_q", poisson_head(n, t) - gamma_q(n, x)),
+                (f"poisson_tail({n}, {x}) = gamma_p", poisson_tail(n, t) - gamma_p(n, x)),
+            ]
+            for label, difference in checks:
+                if abs(difference) > tolerance:
+                    sys.exit(f"check failed: {label}, off by {difference}")
+
+
+def section_dist_regimes() -> None:
+    print("// python -I tests/reference/special.py dist-regimes")
+    print()
+    check_distribution_helpers()
+    # t(100) where 1/2 - I_y(1/2, 50)/2 would cancel, and either side of |t| = 1.
+    emit(
+        "studentTRegimeCases",
+        [
+            (n, t, value(student_t_cdf, n, t), value(student_t_sf, n, t), value(student_t_density, n, t))
+            for n in [100.0]
+            for t in [-9.0, -5.0, -1.01, -0.99, 0.99, 1.01]
+        ],
+    )
+    # A shape below 1 at small x, where 1 - x rounds near 1.
+    emit(
+        "betaRegimeCases",
+        [
+            (a, b, x, value(beta_cdf, a, b, x), value(beta_sf, a, b, x), value(beta_density, a, b, x))
+            for a, b in [(0.5, 100.0)]
+            for x in [1e-20, 1e-10, 1e-6]
+        ],
+    )
+    # F(100, 0.5) far above d2/d1 and F(0.5, 100) far below it, where w or 1 - w rounds near 1.
+    points = {(100.0, 0.5): [1e3, 1e20], (0.5, 100.0): [1e-20, 1e-3]}
+    emit(
+        "fisherFRegimeCases",
+        [
+            (m, n, x, value(fisher_f_cdf, m, n, x), value(fisher_f_sf, m, n, x), value(fisher_f_density, m, n, x))
+            for (m, n), xs in points.items()
+            for x in xs
+        ],
+    )
+
+
+def section_dist_edges() -> None:
+    print("// python -I tests/reference/special.py dist-edges")
+    print()
+    check_distribution_helpers()
+    check_poisson_sums()
+    gamma_points = {
+        (0.01, 1.0): [1e-100, 1e-10, 0.01, 1.0, 10.0, 100.0],
+        (1000.0, 1.0): [700.0, 900.0, 1000.0, 1100.0, 1400.0],
+    }
+    emit(
+        "gammaEdgeCases",
+        [
+            (k, s, x, value(gamma_cdf, k, s, x), value(gamma_sf, k, s, x), value(gamma_density, k, s, x))
+            for (k, s), xs in gamma_points.items()
+            for x in xs
+        ],
+    )
+    chi_points = {
+        0.05: [1e-100, 1e-10, 0.01, 1.0, 20.0, 100.0],
+        0.5: [1e-10, 0.1, 1.0, 10.0, 100.0],
+        100.0: [50.0, 80.0, 100.0, 130.0, 200.0],
+    }
+    chi_rows = [
+        (n, x, value(gamma_cdf, n / 2, 2.0, x), value(gamma_sf, n / 2, 2.0, x), value(gamma_density, n / 2, 2.0, x))
+        for n, xs in chi_points.items()
+        for x in xs
+    ]
+    # 1e5 degrees of freedom: shape 5e4 is whole, so P and Q come from the Poisson sums.
+    chi_rows += [
+        (n, x, value(chi_squared_whole_cdf, n, x), value(chi_squared_whole_sf, n, x), value(gamma_density, n / 2, 2.0, x))
+        for n in [100000.0]
+        for x in [98000.0, 99500.0, 100000.0, 100500.0, 102000.0]
+    ]
+    emit("chiSquaredEdgeCases", chi_rows)
+    beta_points = {
+        (0.5, 0.5): [1e-100, 1e-10, 0.3, 0.9, 1 - 1e-10],
+        (0.5, 100.0): [1e-100, 1e-10, 0.005, 0.05, 0.3],
+        (100.0, 0.5): [0.7, 0.95, 0.995, 1 - 1e-10],
+        (100.0, 100.0): [0.3, 0.45, 0.5, 0.55, 0.7],
+        (0.2, 0.2): [1e-100, 1e-10, 0.5, 1 - 1e-10],
+        (0.2, 500.0): [1e-100, 1e-10, 1e-4, 0.01, 0.05],
+        (500.0, 0.2): [0.95, 0.99, 0.9999, 1 - 1e-10],
+        (500.0, 500.0): [0.45, 0.48, 0.5, 0.52, 0.55],
+    }
+    emit(
+        "betaEdgeCases",
+        [
+            (a, b, x, value(beta_cdf, a, b, x), value(beta_sf, a, b, x), value(beta_density, a, b, x))
+            for (a, b), xs in beta_points.items()
+            for x in xs
+        ],
+    )
+    t_points = {
+        0.05: [-1e100, -1e10, -10.0, -1.0, 0.5, 100.0],
+        0.5: [-1e100, -1e10, -2.0, -0.5, 1.5, 1e5],
+        100.0: [-30.0, -3.0, -0.5, 1.0, 4.0, 20.0],
+        1000.0: [-30.0, -5.0, -1.2, 0.3, 2.0, 10.0],
+    }
+    emit(
+        "studentTEdgeCases",
+        [
+            (n, t, value(student_t_cdf, n, t), value(student_t_sf, n, t), value(student_t_density, n, t))
+            for n, ts in t_points.items()
+            for t in ts
+        ],
+    )
+    f_xs = [1e-10, 1e-3, 0.3, 3.0, 1e3, 1e10]
+    f_pairs = [
+        (0.5, 0.5), (0.5, 100.0), (100.0, 0.5), (100.0, 100.0),
+        (1000.0, 0.5), (1000.0, 100.0), (0.5, 1000.0), (100.0, 1000.0),
+    ]
+    emit(
+        "fisherFEdgeCases",
+        [
+            (m, n, x, value(fisher_f_cdf, m, n, x), value(fisher_f_sf, m, n, x), value(fisher_f_density, m, n, x))
+            for m, n in f_pairs
+            for x in f_xs
+        ],
+    )
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -1204,6 +1388,8 @@ SECTIONS = {
     "dist-beta": section_dist_beta,
     "dist-student-t": section_dist_student_t,
     "dist-fisher-f": section_dist_fisher_f,
+    "dist-regimes": section_dist_regimes,
+    "dist-edges": section_dist_edges,
 }
 
 if __name__ == "__main__":

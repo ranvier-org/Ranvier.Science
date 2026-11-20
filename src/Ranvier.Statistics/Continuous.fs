@@ -34,7 +34,8 @@ type Continuous =
 /// <c>Special.gammaLn</c> or <c>Special.betaLn</c> and the cancellation of terms of the log density as large as
 /// shape · |ln x| (general knowledge). Measured here against mpmath 1.3.0, by the scan that <c>cdf</c> cites: at most
 /// 2e-13 relative for shapes and degrees of freedom from 0.5 to 100, 1.2e-12 for the gamma at shape 1000 and 1.1e-10
-/// for the chi-squared with 1e5 degrees of freedom.
+/// for the chi-squared with 1e5 degrees of freedom; the test "the stated domains at their edges against the reference"
+/// pins the density at the ends of each range, within 1e-12, 2e-12 at gamma shape 1000 and 2e-10 at chi-squared 1e5.
 /// </remarks>
 module Continuous =
     let private sqrt2 = sqrt 2.0
@@ -498,12 +499,17 @@ module Continuous =
     /// about shape · (x / scale)^shape · 1.1e-16 for the Weibull at a scale that is not a power of two, which pinned
     /// rows show as at most 1e-9 at shape 1000 (general knowledge: the rounding of x / scale, raised to the shape).
     /// For the gamma, chi-squared, beta, Student t and F the bound holds for shapes and degrees of freedom from 0.5 to
-    /// 100, pinned by the tests "gamma against the reference", "chi-squared against the reference", "beta against the
-    /// reference", "Student t against the reference" and "F against the reference", and measured here by a dense scan
-    /// against mpmath 1.3.0 on .NET and on JavaScript (10 792 points with arguments from 1e-300 to 1.7e308, worst
-    /// 1.5e-13). The same scan holds it for the gamma at shapes from 0.01 to 1000, the chi-squared from 0.05 to 1e5
-    /// degrees of freedom, the beta at shapes from 0.2 to 500, the t from 0.05 to 1000 degrees of freedom and the F
-    /// with one of d1 and d2 up to 1000 and the other from 0.5 to 100. Beyond that the error grows: for the t as about
+    /// 100, measured here by a dense scan against mpmath 1.3.0 on .NET and on JavaScript (10 792 points with arguments
+    /// from 1e-300 to 1.7e308, worst 1.5e-13) that is not kept in the repository. The same scan holds it for the gamma
+    /// at shapes from 0.01 to 1000, the chi-squared from 0.05 to 1e5 degrees of freedom, the beta at shapes from 0.2 to
+    /// 500, the t from 0.05 to 1000 degrees of freedom and the F with one of d1 and d2 up to 1000 and the other from 0.5
+    /// to 100. Pinned against <c>tests/reference/special.py</c>: rows inside the range by the tests "gamma against the
+    /// reference", "chi-squared against the reference", "beta against the reference", "Student t against the
+    /// reference" and "F against the reference"; rows at both ends of each range above by the test "the stated domains
+    /// at their edges against the reference"; and the t at 100 degrees of freedom either side of |t| = 1, the beta at
+    /// shape 0.5 near 0 and the F with a degree of freedom of 0.5 far into either tail, where a single form would
+    /// cancel or round 1 − x, by the test "where a plain form would cancel or round 1 - x, against the reference".
+    /// Beyond those ranges the error grows: for the t as about
     /// dof · 5.5e-17 (general knowledge: the rounding of dof / (dof + t²) near 1, raised to the power dof/2; measured
     /// here 6.6e-13 at 1e4 and 5.7e-12 at 1e5 degrees of freedom), and for the beta and the F with a shape or degrees
     /// of freedom below 0.5 as the density times 2^-54 over the value, from the rounding near 1 of 1 − x or of
@@ -602,11 +608,13 @@ module Continuous =
     /// error of the log-normal grows about as |mu| · |z| · 1.1e-16 / sigma, because exp (mu + sigma · z) rounds
     /// its argument to half an ulp of mu (general knowledge), and a pinned row shows at most 2e-11 at mu = 300,
     /// sigma = 0.1.
-    /// For the gamma, chi-squared, beta, Student t and F the round trip holds over the domain of <c>cdf</c>, measured
-    /// here by the test "quantile round trips for the incomplete-function families" and by a dense scan of the
-    /// quantiles at 96 values of p from 1e-300 to 1 − 2e-16 on .NET and on JavaScript (worst 9.8e-13 for a beta
-    /// quantile near 1 that the doubles barely resolve, 2e-13 for the other families), where the quantile is a normal
-    /// double and the doubles beside it resolve p. Where the quantile is below the least normal double the result is
+    /// For the gamma, chi-squared, beta, Student t and F the round trip holds over the domain of <c>cdf</c>, where the
+    /// quantile is a normal double and the doubles beside it resolve p, measured here by a dense scan of the quantiles
+    /// at 96 values of p from 1e-300 to 1 − 2e-16 on .NET and on JavaScript (worst 9.8e-13 for a beta quantile near 1
+    /// that the doubles barely resolve, 2e-13 for the other families). It is pinned inside the range by the test
+    /// "quantile round trips for the incomplete-function families", at both ends of each range by "quantile round
+    /// trips at the edges of the stated domains", and within 1e-14 of p = 1 for the gamma and chi-squared by "gamma
+    /// and chi-squared quantile round trips within 1e-14 of 1". Where the quantile is below the least normal double the result is
     /// 0, and beyond the largest double −∞ for the t at small dof; near 1 for the beta with a small b, where adjacent
     /// doubles move the survival by more than 1e-12 of itself (measured here: from p = 0.95 at b = 0.5 to
     /// p = 1 − 1e-10 at b = 4 for a up to 100, and at b = 12 with a = 500), the result is within one double of the
