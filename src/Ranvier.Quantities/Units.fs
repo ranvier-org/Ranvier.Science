@@ -25,6 +25,9 @@ type UnitInfo =
         Scale: float
     }
 
+/// An SI prefix: its symbol and the factor it multiplies a unit's scale by.
+type Prefix = { Symbol: string; Factor: float }
+
 module Dimension =
     let none: Dimension =
         {
@@ -60,6 +63,90 @@ module Dimension =
 
     let internal exponents (d: Dimension) =
         [ d.Length; d.Mass; d.Time; d.Current; d.Temperature; d.Amount; d.Luminosity ]
+
+/// The 24 SI prefixes (SI Brochure, 9th edition, Table 7, with the four prefixes adopted by the 27th CGPM, 2022,
+/// Resolution 3: quecto, ronto, ronna, quetta).
+module Prefix =
+    let quecto: Prefix = { Symbol = "q"; Factor = 1e-30 }
+    let ronto: Prefix = { Symbol = "r"; Factor = 1e-27 }
+    let yocto: Prefix = { Symbol = "y"; Factor = 1e-24 }
+    let zepto: Prefix = { Symbol = "z"; Factor = 1e-21 }
+    let atto: Prefix = { Symbol = "a"; Factor = 1e-18 }
+    let femto: Prefix = { Symbol = "f"; Factor = 1e-15 }
+    let pico: Prefix = { Symbol = "p"; Factor = 1e-12 }
+    let nano: Prefix = { Symbol = "n"; Factor = 1e-9 }
+    /// Symbol U+00B5 (micro sign).
+    let micro: Prefix = { Symbol = "\u00B5"; Factor = 1e-6 }
+    let milli: Prefix = { Symbol = "m"; Factor = 1e-3 }
+    let centi: Prefix = { Symbol = "c"; Factor = 1e-2 }
+    let deci: Prefix = { Symbol = "d"; Factor = 1e-1 }
+    let deca: Prefix = { Symbol = "da"; Factor = 1e1 }
+    let hecto: Prefix = { Symbol = "h"; Factor = 1e2 }
+    let kilo: Prefix = { Symbol = "k"; Factor = 1e3 }
+    let mega: Prefix = { Symbol = "M"; Factor = 1e6 }
+    let giga: Prefix = { Symbol = "G"; Factor = 1e9 }
+    let tera: Prefix = { Symbol = "T"; Factor = 1e12 }
+    let peta: Prefix = { Symbol = "P"; Factor = 1e15 }
+    let exa: Prefix = { Symbol = "E"; Factor = 1e18 }
+    let zetta: Prefix = { Symbol = "Z"; Factor = 1e21 }
+    let yotta: Prefix = { Symbol = "Y"; Factor = 1e24 }
+    let ronna: Prefix = { Symbol = "R"; Factor = 1e27 }
+    let quetta: Prefix = { Symbol = "Q"; Factor = 1e30 }
+
+    /// Every prefix, "da" first so that it is tried before "d".
+    let internal all: Prefix list =
+        [
+            deca; quecto; ronto; yocto; zepto; atto; femto; pico; nano; micro; milli; centi; deci
+            hecto; kilo; mega; giga; tera; peta; exa; zetta; yotta; ronna; quetta
+        ]
+
+    /// The unit with one factor named `p.Symbol + name` and scale `p.Factor * u.Scale`; ValueNone unless `u` is one
+    /// factor with exponent 1 or when that scale is not positive and finite.
+    let internal tryApply (p: Prefix) (u: UnitInfo) : UnitInfo voption =
+        match u.Factors with
+        | [ (name, 1) ] ->
+            let scale = p.Factor * u.Scale
+
+            if scale > 0.0 && not (Double.IsInfinity scale) then
+                ValueSome { Factors = [ (p.Symbol + name, 1) ]; Dimension = u.Dimension; Scale = scale }
+            else
+                ValueNone
+        | _ -> ValueNone
+
+    /// Replaces the Greek mu (U+03BC) by the micro sign (U+00B5) and the ohm sign (U+2126) by the Greek capital
+    /// omega (U+03A9), the forms the catalogue uses.
+    let internal normalise (symbol: string) : string =
+        symbol.Replace("\u03BC", "\u00B5").Replace("\u2126", "\u03A9")
+
+/// An immutable set of named units, each marked prefixable or not. Build one with `UnitCatalogue.add`, starting from
+/// `UnitCatalogue.si`.
+[<Sealed>]
+type UnitCatalogue internal (units: Map<string, struct (UnitInfo * bool)>) =
+    member internal _.Units = units
+
+    /// The unit registered under the exact symbol, else a prefix followed by a prefixable symbol ("da" before "d"),
+    /// whose factor is the prefix's symbol followed by the unit's and whose scale is the prefix's factor times the
+    /// unit's. The look-alikes U+03BC and U+2126 are read as U+00B5 and U+03A9 first.
+    member internal _.TryFind(symbol: string) : UnitInfo voption =
+        if isNull symbol then
+            ValueNone
+        else
+            let symbol = Prefix.normalise symbol
+
+            match Map.tryFind symbol units with
+            | Some(struct (info, _)) -> ValueSome info
+            | None ->
+                let mutable found = ValueNone
+
+                for p in Prefix.all do
+                    let n = p.Symbol.Length
+
+                    if found.IsNone && symbol.Length > n && symbol.Substring(0, n) = p.Symbol then
+                        match Map.tryFind (symbol.Substring n) units with
+                        | Some(struct (info, true)) -> found <- Prefix.tryApply p info
+                        | _ -> ()
+
+                found
 
 module UnitInfo =
     let dimensionless: UnitInfo = { Factors = []; Dimension = Dimension.none; Scale = 1.0 }
@@ -182,6 +269,30 @@ module UnitInfo =
     let sameUnit (a: UnitInfo) (b: UnitInfo) : bool =
         sameDimension a b && abs (a.Scale - b.Scale) <= 1e-12 * max (abs a.Scale) (abs b.Scale)
 
+    /// `u` with its one factor prefixed: the factor's name gains the prefix's symbol and the scale is multiplied by
+    /// the prefix's factor, so `prefixed Prefix.kilo` of the metre is "km" of scale 1000. Raises ArgumentException
+    /// unless `u` has exactly one factor with exponent 1, and ArithmeticException when the new scale is not finite or
+    /// is 0; the message states the symbol.
+    let prefixed (prefix: Prefix) (u: UnitInfo) : UnitInfo =
+        match u.Factors with
+        | [ (_, 1) ] ->
+            match Prefix.tryApply prefix u with
+            | ValueSome result -> result
+            | ValueNone ->
+                let name = prefix.Symbol + fst u.Factors.Head
+                let value = if prefix.Factor * u.Scale = 0.0 then "0" else "\u221E"
+
+                raise (
+                    ArithmeticException("The scale of " + name + " is " + value + "; a unit's scale must be positive and finite.")
+                )
+        | _ ->
+            raise (
+                ArgumentException(
+                    "Only a unit with one factor of exponent 1 takes a prefix, not " + symbol u + ".",
+                    nameof u
+                )
+            )
+
 /// A unit of measure with the description its values carry at run time.
 [<Sealed>]
 type UnitOf<[<Measure>] 'u> internal (info: UnitInfo) =
@@ -212,33 +323,7 @@ module UnitOf =
     /// finite or is 0.
     let squared (u: UnitOf<'u>) : UnitOf<'u ^ 2> = UnitOf<'u ^ 2>(UnitInfo.power u.Info 2)
 
-/// The metre: FSharp.Core's `UnitSymbols.m`, so a `float<m>` is a `float<UnitSymbols.m>`.
-[<Measure>]
-type m = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.m
-
-[<Measure>]
-type km
-
-/// The kilogram: FSharp.Core's `UnitSymbols.kg`.
-[<Measure>]
-type kg = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.kg
-
-/// The second: FSharp.Core's `UnitSymbols.s`.
-[<Measure>]
-type s = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.s
-
-/// The kelvin: FSharp.Core's `UnitSymbols.K`.
-[<Measure>]
-type K = Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols.K
-
-[<Measure>]
-type mK
-
-module Units =
-    let one: UnitOf<1> = UnitOf<1>(UnitInfo.dimensionless)
-    let metre: UnitOf<m> = UnitOf.define "m" Dimension.length 1.0
-    let kilometre: UnitOf<km> = UnitOf.define "km" Dimension.length 1000.0
-    let kilogram: UnitOf<kg> = UnitOf.define "kg" Dimension.mass 1.0
-    let second: UnitOf<s> = UnitOf.define "s" Dimension.time 1.0
-    let kelvin: UnitOf<K> = UnitOf.define "K" Dimension.temperature 1.0
-    let millikelvin: UnitOf<mK> = UnitOf.define "mK" Dimension.temperature 0.001
+    /// The unit with a prefix, as `UnitInfo.prefixed`. The caller's annotation fixes 'v. Raises ArgumentException
+    /// unless `u` has one factor with exponent 1, and ArithmeticException when the new scale is not finite or is 0.
+    let prefixed<[<Measure>] 'u, [<Measure>] 'v> (prefix: Prefix) (u: UnitOf<'u>) : UnitOf<'v> =
+        UnitOf<'v>(UnitInfo.prefixed prefix u.Info)

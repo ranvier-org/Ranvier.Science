@@ -8,6 +8,7 @@
 
     <ItemGroup>
         <Compile Include="Units.fs" />
+        <Compile Include="Catalogue.fs" />
         <Compile Include="Model.fs" />
         <Compile Include="Formula.fs" />
         <Compile Include="Quantity.fs" />
