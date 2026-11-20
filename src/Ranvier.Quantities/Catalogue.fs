@@ -306,29 +306,29 @@ module Units =
     let milliampere: UnitOf<mA> = UnitOf.define "mA" Dimension.current 1e-3
     let millivolt: UnitOf<mV> = UnitOf.define "mV" dimV 1e-3
     let kilovolt: UnitOf<kV> = UnitOf.define "kV" dimV 1e3
-    /// The minute, symbol "min": 60 s (from documentation: SI Brochure, 9th edition, 2019, Table 8).
+    /// The minute, symbol "min": 60 s (general knowledge: a definition, set by the SI Brochure, 9th edition, 2019, Table 8; not read here).
     let minute: UnitOf<minute> = UnitOf.define "min" Dimension.time 60.0
-    /// The hour: 3600 s (from documentation: SI Brochure, 9th edition, 2019, Table 8).
+    /// The hour: 3600 s (general knowledge: a definition, set by the SI Brochure, 9th edition, 2019, Table 8; not read here).
     let hour: UnitOf<h> = UnitOf.define "h" Dimension.time 3600.0
-    /// The day: 86 400 s (from documentation: SI Brochure, 9th edition, 2019, Table 8).
+    /// The day: 86 400 s (general knowledge: a definition, set by the SI Brochure, 9th edition, 2019, Table 8; not read here).
     let day: UnitOf<d> = UnitOf.define "d" Dimension.time 86400.0
-    /// The astronomical unit: exactly 149 597 870 700 m (from documentation: IAU 2012 Resolution B2, XXVIII General Assembly, Beijing, August 2012; SI Brochure, 9th edition, 2019, Table 8). The IAU PDF could not be fetched when this was written: the value was read from a page that quotes the resolution, https://en.wikipedia.org/wiki/Astronomical_unit, accessed 2026-11-20.
+    /// The astronomical unit: exactly 149 597 870 700 m (IAU 2012 Resolution B2; not read, iau.org returned 404 on 2026-11-20). Cross-checked against the parsec value in metres in IAU 2015 Resolution B2, endnote 4, which this value reproduces to ten digits (from documentation: https://arxiv.org/html/1510.06262v2, read 2026-11-20).
     let astronomicalUnit: UnitOf<au> = UnitOf.define "au" Dimension.length 149597870700.0
-    /// The litre: 10^-3 m^3 (from documentation: SI Brochure, 9th edition, 2019, Table 8).
+    /// The litre: 10^-3 m^3 (general knowledge: a definition, set by the SI Brochure, 9th edition, 2019, Table 8; not read here).
     let litre: UnitOf<L> = UnitOf.define "L" (dim 3 0 0 0 0 0 0) 1e-3
-    /// The tonne: 1000 kg (from documentation: SI Brochure, 9th edition, 2019, Table 8).
+    /// The tonne: 1000 kg (general knowledge: a definition, set by the SI Brochure, 9th edition, 2019, Table 8; not read here).
     let tonne: UnitOf<t> = UnitOf.define "t" Dimension.mass 1e3
-    /// The electronvolt: e times 1 V, with e = 1.602 176 634e-19 C exactly (from documentation: CODATA 2022, https://physics.nist.gov/cgi-bin/cuu/Value?e, accessed 2026-11-20; SI Brochure, 9th edition, 2019, Table 8).
+    /// The electronvolt: e times 1 V, with e = 1.602 176 634e-19 C exactly (from documentation: CODATA 2022, https://physics.nist.gov/cgi-bin/cuu/Value?e, accessed 2026-11-20).
     let electronvolt: UnitOf<eV> = UnitOf.define "eV" dimJ 1.602176634e-19
-    /// The dalton: the atomic mass constant m_u, 1.660 539 068 92e-27 kg with standard uncertainty 5.2e-37 kg, so the scale is not exact (from documentation: CODATA 2022, https://physics.nist.gov/cgi-bin/cuu/Value?u, accessed 2026-11-20; the dalton is listed in SI Brochure, 9th edition, 2019, Table 8).
+    /// The dalton: the atomic mass constant m_u, 1.660 539 068 92e-27 kg with standard uncertainty 5.2e-37 kg, so the scale is not exact (from documentation: CODATA 2022, https://physics.nist.gov/cgi-bin/cuu/Value?u, accessed 2026-11-20).
     let dalton: UnitOf<Da> = UnitOf.define "Da" Dimension.mass 1.66053906892e-27
-    /// The degree, symbol U+00B0: pi/180 rad (from documentation: SI Brochure, 9th edition, 2019, Table 8). `UnitCatalogue.si` also finds it as "deg".
+    /// The degree, symbol U+00B0: pi/180 rad (general knowledge: a definition, set by the SI Brochure, 9th edition, 2019, Table 8; not read here). `UnitCatalogue.si` also finds it as "deg".
     let degree: UnitOf<deg> = UnitOf.define "\u00B0" Dimension.none (Math.PI / 180.0)
     /// The Julian year: 365.25 days of 86 400 s, 31 557 600 s (general knowledge: the IAU convention; the IAU text could not be fetched).
     let julianYear: UnitOf<a> = UnitOf.define "a" Dimension.time 31557600.0
     /// The light-year: the distance light travels in one Julian year, c = 299 792 458 m/s exactly (from documentation: CODATA 2022, https://physics.nist.gov/cgi-bin/cuu/Value?c, accessed 2026-11-20) times 31 557 600 s. The IAU definition of the light-year could not be fetched; that definition is general knowledge.
     let lightYear: UnitOf<ly> = UnitOf.define "ly" Dimension.length (299792458.0 * 31557600.0)
-    /// The parsec: exactly 648 000/pi au (from documentation: IAU 2015 Resolution B2, Honolulu, August 2015; the IAU PDF could not be fetched, the formula was read from https://en.wikipedia.org/wiki/Parsec, accessed 2026-11-20).
+    /// The parsec: exactly 648 000/pi au (from documentation: IAU 2015 Resolution B2, endnote 4, read at https://arxiv.org/html/1510.06262v2 on 2026-11-20).
     let parsec: UnitOf<pc> = UnitOf.define "pc" Dimension.length (648000.0 / Math.PI * 149597870700.0)
     /// The bar: 10^5 Pa (general knowledge: not checked against a source).
     let bar: UnitOf<bar> = UnitOf.define "bar" dimPa 1e5

@@ -64,8 +64,8 @@ module Dimension =
     let internal exponents (d: Dimension) =
         [ d.Length; d.Mass; d.Time; d.Current; d.Temperature; d.Amount; d.Luminosity ]
 
-/// The 24 SI prefixes (SI Brochure, 9th edition, Table 7, with the four prefixes adopted by the 27th CGPM, 2022,
-/// Resolution 3: quecto, ronto, ronna, quetta).
+/// The 24 SI prefixes: general knowledge, definitions set by the SI Brochure, 9th edition, Table 7, and, for quecto,
+/// ronto, ronna and quetta, by the 27th CGPM (2022) Resolution 3; not read here.
 module Prefix =
     let quecto: Prefix = { Symbol = "q"; Factor = 1e-30 }
     let ronto: Prefix = { Symbol = "r"; Factor = 1e-27 }

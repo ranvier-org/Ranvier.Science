@@ -29,15 +29,17 @@ let private volt = dim 2 1 -3 -1 0 0 0
 
 /// One row per unit of the catalogue: the unit, its symbol, its dimension and its scale in SI base units.
 ///
-/// Sources of the scales: SI Brochure, 9th edition (2019), Table 2 (base units), Table 4 (derived units with special
-/// names; all of scale 1), Table 7 (prefixes, hence the scale of every prefixed row) and Table 8 (min 60 s, h 3600 s,
-/// d 86400 s, au, L = 10^-3 m^3, t = 10^3 kg, degree pi/180). The au is 149 597 870 700 m exactly (IAU 2012
-/// Resolution B2, also SI Brochure Table 8). eV and Da are from CODATA 2022 at NIST, accessed 2026-11-20: e =
-/// 1.602 176 634e-19 C exactly, https://physics.nist.gov/cgi-bin/cuu/Value?e, so 1 eV = 1.602 176 634e-19 J; m_u =
-/// 1.660 539 068 92e-27 kg, https://physics.nist.gov/cgi-bin/cuu/Value?u. The Julian year is 365.25 d of 86 400 s;
-/// the light-year is c = 299 792 458 m/s exactly (CODATA 2022, https://physics.nist.gov/cgi-bin/cuu/Value?c,
-/// accessed 2026-11-20) times a Julian year; the parsec is 648 000/pi au (IAU 2015 Resolution B2); the closed form
-/// 648 000 * 149 597 870 700 = 96 939 420 213 600 000. bar is 1e5 Pa and atm is 101 325 Pa (general knowledge).
+/// Sources of the scales. General knowledge (definitions set by the SI Brochure, 9th edition, 2019, Table 2 base
+/// units, Table 4 derived units, Table 7 prefixes and Table 8 min, h, d, L, t and the degree; the Brochure was not
+/// read here, its PDF text is font-encoded). au: 149 597 870 700 m exactly, IAU 2012 Resolution B2 (not read:
+/// iau.org returned 404); it is cross-checked by the parsec below. pc: 648 000/pi au, IAU 2015 Resolution B2,
+/// endnote 4, read at https://arxiv.org/html/1510.06262v2 on 2026-11-20, which gives 3.085 677 581 ... e16 m; the
+/// closed form 648 000 * 149 597 870 700 = 96 939 420 213 600 000. eV and Da: CODATA 2022 at NIST, accessed
+/// 2026-11-20: e = 1.602 176 634e-19 C exactly, https://physics.nist.gov/cgi-bin/cuu/Value?e, so 1 eV =
+/// 1.602 176 634e-19 J; m_u = 1.660 539 068 92e-27 kg, https://physics.nist.gov/cgi-bin/cuu/Value?u. The Julian year
+/// is 365.25 d of 86 400 s and the light-year is c = 299 792 458 m/s exactly (CODATA 2022,
+/// https://physics.nist.gov/cgi-bin/cuu/Value?c, accessed 2026-11-20) times a Julian year. bar is 1e5 Pa and atm is
+/// 101 325 Pa (general knowledge).
 let private table: (UnitInfo * string * Dimension * float) list =
     [
         Units.metre.Info, "m", Dimension.length, 1.0
@@ -126,8 +128,8 @@ let tests =
             }
 
             test "the 24 prefixes" {
-                // SI Brochure, 9th edition, Table 7, with quecto, ronto, ronna and quetta from the 27th CGPM (2022),
-                // Resolution 3.
+                // General knowledge: the definitions of SI Brochure, 9th edition, Table 7, with quecto, ronto, ronna and
+                // quetta from the 27th CGPM (2022) Resolution 3; not read here.
                 let expected =
                     [
                         Prefix.quecto, "q", 1e-30
@@ -268,6 +270,36 @@ let tests =
                 Expect.throwsT<ArgumentOutOfRangeException>
                     (fun () -> UnitCatalogue.add "w" { widget with Scale = 0.0 } false UnitCatalogue.si |> ignore)
                     "scale 0"
+            }
+
+            test "an exact symbol wins over a prefix and a prefixable symbol" {
+                // Made up so that both readings exist: "mx" is the exact, non-prefixable unit of scale 7, and also
+                // milli + "x" (prefixable, scale 3), which would be 0.003. Only the exact reading gives 7.
+                let unitOf name scale = { Factors = [ (name, 1) ]; Dimension = Dimension.length; Scale = scale }
+
+                let catalogue =
+                    UnitCatalogue.si
+                    |> UnitCatalogue.add "x" (unitOf "x" 3.0) true
+                    |> UnitCatalogue.add "mx" (unitOf "mx" 7.0) false
+
+                match UnitCatalogue.tryFind "mx" catalogue with
+                | ValueSome u -> Expect.equal u.Scale 7.0 "the exact mx, not milli-x"
+                | ValueNone -> failwith "mx"
+            }
+
+            test "da is tried before d" {
+                // Made up so that both readings exist: "am" is a prefixable unit of scale 5, so "dam" is deca +
+                // metre (scale 10) and also deci + am (scale 0.5). Only da first gives 10.
+                let catalogue =
+                    UnitCatalogue.add
+                        "am"
+                        { Factors = [ ("am", 1) ]; Dimension = Dimension.length; Scale = 5.0 }
+                        true
+                        UnitCatalogue.si
+
+                match UnitCatalogue.tryFind "dam" catalogue with
+                | ValueSome u -> Expect.isTrue (within 1e-15 10.0 u.Scale) $"the decametre, got scale {u.Scale}"
+                | ValueNone -> failwith "dam"
             }
 
             test "opening the namespace keeps FSharp.Core's min and max" {
