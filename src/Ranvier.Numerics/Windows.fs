@@ -110,13 +110,39 @@ module internal Queue =
     let toArray (q: Queue<'T>) : 'T[] =
         Array.append (List.toArray q.Front) (List.toArray (List.rev q.Back))
 
+module internal Refold =
+    /// The accumulator folded from the zero over the items, and the sequence number of the first item whose addition
+    /// leaves the value non-finite (-1 when none). The first item has the sequence number firstSeq.
+    let run (add: 'A -> 'T -> 'A) (finite: 'A -> bool) (zero: 'A) (firstSeq: float) (xs: 'T[]) : 'A * float =
+        let mutable v = zero
+        let mutable culprit = -1.0
+
+        for i in 0 .. xs.Length - 1 do
+            v <- add v xs[i]
+
+            if culprit < 0.0 && not (finite v) then
+                culprit <- firstSeq + float i
+
+        v, culprit
+
+    /// The finiteness test of a Moments value: the count is zero, or its mean and variance are finite.
+    let momentsFinite (m: Moments) : bool =
+        Moments.count m = 0.0
+        || (abs (Moments.mean m) < infinity && abs (Moments.variance m) < infinity)
+
 /// <summary>A sliding window of the last items pushed, folded through an accumulator. Immutable.</summary>
 /// <remarks>
 /// A push removes the oldest item from the accumulator when the window is full, then adds the new one. The value is
 /// re-folded from the zero over the items once the removals since the last re-fold reach the item count, which bounds
 /// the drift of a remove and costs O(1) amortised per push (general knowledge; the "Window" test list counts the calls
-/// over 1000 pushes). The window holds functions, so it has no equality: a memo of one cuts off only by returning the
-/// previous instance.
+/// over 1000 pushes). The held value carries up to one capacity of removals since the last re-fold. For
+/// <c>Window.moments</c> at capacity 50 over 1e9 + (i mod 7), measured here by the "Window" test list
+/// ("re-folds bound drift", at 100001, 100010 and 100049 pushes): the mean within relative 1e-12 of a fresh fold of the
+/// items, the compensated variance within relative 1e-8 and the uncompensated variance within relative 1e-6.
+/// A window built by <c>Window.create</c> keeps a non-finite value until the next re-fold. <c>Window.moments</c>
+/// re-folds when the item whose addition first made the value non-finite is removed, and again for the next such item
+/// in the re-folded window, so a NaN or infinite observation stops affecting the value once it has left. The window
+/// holds functions, so it has no equality: a memo of one cuts off only by returning the previous instance.
 /// </remarks>
 [<NoEquality; NoComparison>]
 type Window<'T, 'A> =
@@ -127,15 +153,24 @@ type Window<'T, 'A> =
             Remove: 'A -> 'T -> 'A
             Zero: 'A
             Value: 'A
+            Finite: 'A -> bool
             Items: Queue<'T>
+            /// The number of items pushed so far, as a float so it is exact to 2^53 on both targets.
+            Seq: float
+            /// The sequence number of the item whose addition first made the value non-finite; -1 when none.
+            Culprit: float
             Count: int
             Removals: int
         }
 
 module Window =
-    /// An empty window. Raises ArgumentOutOfRangeException unless the capacity is at least 1. An exception raised by
-    /// the accumulator functions propagates unchanged.
-    let create (capacity: int) (add: 'A -> 'T -> 'A) (remove: 'A -> 'T -> 'A) (zero: 'A) : Window<'T, 'A> =
+    let internal createChecked
+        (capacity: int)
+        (finite: 'A -> bool)
+        (add: 'A -> 'T -> 'A)
+        (remove: 'A -> 'T -> 'A)
+        (zero: 'A)
+        : Window<'T, 'A> =
         if capacity < 1 then
             raise (ArgumentOutOfRangeException("capacity", "The capacity must be at least 1."))
 
@@ -145,16 +180,27 @@ module Window =
             Remove = remove
             Zero = zero
             Value = zero
+            Finite = finite
             Items = Queue.empty
+            Seq = 0.0
+            Culprit = -1.0
             Count = 0
             Removals = 0
         }
 
+    /// An empty window. Raises ArgumentOutOfRangeException unless the capacity is at least 1. An exception raised by
+    /// the accumulator functions propagates unchanged. A non-finite value persists until the next re-fold.
+    let create (capacity: int) (add: 'A -> 'T -> 'A) (remove: 'A -> 'T -> 'A) (zero: 'A) : Window<'T, 'A> =
+        createChecked capacity (fun _ -> true) add remove zero
+
     /// A window over the last items, which drops the oldest when full. Re-folds as described on the type.
     let push (w: Window<'T, 'A>) (x: 'T) : Window<'T, 'A> =
+        let mutable forced = false
+
         let value, items, count, removals =
             if w.Count = w.Capacity then
                 let oldest, rest = Queue.dequeue w.Items
+                forced <- (w.Seq - float w.Count = w.Culprit)
                 w.Remove w.Value oldest, rest, w.Count - 1, w.Removals + 1
             else
                 w.Value, w.Items, w.Count, w.Removals
@@ -162,12 +208,18 @@ module Window =
         let value = w.Add value x
         let items = Queue.enqueue x items
         let count = count + 1
+        let seq = w.Seq + 1.0
 
-        if removals >= count then
-            let folded = Array.fold w.Add w.Zero (Queue.toArray items)
-            { w with Value = folded; Items = items; Count = count; Removals = 0 }
+        if forced || removals >= count then
+            let folded, culprit = Refold.run w.Add w.Finite w.Zero (seq - float count) (Queue.toArray items)
+            { w with Value = folded; Items = items; Seq = seq; Culprit = culprit; Count = count; Removals = 0 }
         else
-            { w with Value = value; Items = items; Count = count; Removals = removals }
+            let culprit =
+                if w.Culprit >= 0.0 then w.Culprit
+                elif w.Finite value then -1.0
+                else w.Seq
+
+            { w with Value = value; Items = items; Seq = seq; Culprit = culprit; Count = count; Removals = removals }
 
     /// The accumulator over the items in the window.
     let value (w: Window<'T, 'A>) : 'A = w.Value
@@ -180,13 +232,13 @@ module Window =
 
     /// A window of the last capacity observations over <c>Moments</c>.
     let moments (compensated: bool) (capacity: int) : Window<float, Moments> =
-        create capacity (Moments.add compensated) (Moments.remove compensated) Moments.zero
+        createChecked capacity Refold.momentsFinite (Moments.add compensated) (Moments.remove compensated) Moments.zero
 
 /// <summary>A sliding window of the items pushed within a time span, folded through an accumulator. Immutable.</summary>
 /// <remarks>
 /// A push at time t drops the items older than t - span (it keeps the items with time at least t - span), removing each
-/// from the accumulator, then adds the new one. Re-folds as <c>Window</c>: O(1) amortised per push (general
-/// knowledge). The window holds functions, so it has no equality: a memo of one cuts off only by returning the previous
+/// from the accumulator, then adds the new one. Re-folds, drift and the treatment of a non-finite value are those of
+/// <c>Window</c>: O(1) amortised per push (general knowledge), pinned by the "Window" test list. The window holds functions, so it has no equality: a memo of one cuts off only by returning the previous
 /// instance.
 /// </remarks>
 [<NoEquality; NoComparison>]
@@ -198,15 +250,23 @@ type TimeWindow<'T, 'A> =
             Remove: 'A -> 'T -> 'A
             Zero: 'A
             Value: 'A
+            Finite: 'A -> bool
             Items: Queue<float * 'T>
+            Seq: float
+            Culprit: float
             Latest: float
             Count: int
             Removals: int
         }
 
 module TimeWindow =
-    /// An empty window. Raises ArgumentOutOfRangeException unless the span is at least 0 (infinity keeps every item).
-    let create (span: float) (add: 'A -> 'T -> 'A) (remove: 'A -> 'T -> 'A) (zero: 'A) : TimeWindow<'T, 'A> =
+    let internal createChecked
+        (span: float)
+        (finite: 'A -> bool)
+        (add: 'A -> 'T -> 'A)
+        (remove: 'A -> 'T -> 'A)
+        (zero: 'A)
+        : TimeWindow<'T, 'A> =
         if not (span >= 0.0) then
             raise (ArgumentOutOfRangeException("span", "The span must be at least 0."))
 
@@ -216,11 +276,19 @@ module TimeWindow =
             Remove = remove
             Zero = zero
             Value = zero
+            Finite = finite
             Items = Queue.empty
+            Seq = 0.0
+            Culprit = -1.0
             Latest = -infinity
             Count = 0
             Removals = 0
         }
+
+    /// An empty window. Raises ArgumentOutOfRangeException unless the span is at least 0 (infinity keeps every item).
+    /// A non-finite value persists until the next re-fold.
+    let create (span: float) (add: 'A -> 'T -> 'A) (remove: 'A -> 'T -> 'A) (zero: 'A) : TimeWindow<'T, 'A> =
+        createChecked span (fun _ -> true) add remove zero
 
     /// Raises ArgumentOutOfRangeException for a NaN time or a time below the latest pushed; an equal time is accepted.
     let push (w: TimeWindow<'T, 'A>) (t: float) (x: 'T) : TimeWindow<'T, 'A> =
@@ -233,12 +301,16 @@ module TimeWindow =
         let mutable count = w.Count
         let mutable removals = w.Removals
         let mutable go = true
+        let mutable forced = false
 
         while go && count > 0 do
             items <- Queue.prime items
 
             match items.Front with
             | (ti, old) :: rest when ti < cutoff ->
+                if w.Seq - float count = w.Culprit then
+                    forced <- true
+
                 value <- w.Remove value old
                 items <- { items with Front = rest }
                 count <- count - 1
@@ -249,11 +321,19 @@ module TimeWindow =
         items <- Queue.enqueue (t, x) items
         count <- count + 1
 
-        if removals >= count then
-            let folded = Array.fold (fun a (_, y) -> w.Add a y) w.Zero (Queue.toArray items)
-            { w with Value = folded; Items = items; Latest = t; Count = count; Removals = 0 }
+        let seq = w.Seq + 1.0
+
+        if forced || removals >= count then
+            let xs = Queue.toArray items |> Array.map snd
+            let folded, culprit = Refold.run w.Add w.Finite w.Zero (seq - float count) xs
+            { w with Value = folded; Items = items; Seq = seq; Culprit = culprit; Latest = t; Count = count; Removals = 0 }
         else
-            { w with Value = value; Items = items; Latest = t; Count = count; Removals = removals }
+            let culprit =
+                if w.Culprit >= 0.0 then w.Culprit
+                elif w.Finite value then -1.0
+                else w.Seq
+
+            { w with Value = value; Items = items; Seq = seq; Culprit = culprit; Latest = t; Count = count; Removals = removals }
 
     /// The accumulator over the items in the window.
     let value (w: TimeWindow<'T, 'A>) : 'A = w.Value
@@ -267,4 +347,4 @@ module TimeWindow =
 
     /// A window of the observations within the span over <c>Moments</c>.
     let moments (compensated: bool) (span: float) : TimeWindow<float, Moments> =
-        create span (Moments.add compensated) (Moments.remove compensated) Moments.zero
+        createChecked span Refold.momentsFinite (Moments.add compensated) (Moments.remove compensated) Moments.zero

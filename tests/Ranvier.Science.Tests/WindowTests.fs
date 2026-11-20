@@ -64,46 +64,47 @@ let tests =
             }
 
             test "re-folds bound drift" {
-                let drive compensated =
+                // Measured at counts that do not end on a re-fold: the held value carries up to one capacity of removals.
+                for compensated, varianceBound in [ (true, 1e-8); (false, 1e-6) ] do
                     let mutable w = Window.moments compensated 50
+                    let mutable pushed = 0
 
-                    for i in 0..99999 do
-                        w <- Window.push w (1e9 + float (i % 7))
+                    for n in [ 100001; 100010; 100049 ] do
+                        while pushed < n do
+                            w <- Window.push w (1e9 + float (pushed % 7))
+                            pushed <- pushed + 1
 
-                    let fresh = Array.fold (Moments.add compensated) Moments.zero (Window.items w)
-                    Window.value w, fresh
-
-                let held, fresh = drive true
-                expectClose 1e-12 0.0 (Moments.mean fresh) (Moments.mean held) "compensated mean"
-                expectClose 1e-9 0.0 (Moments.variance fresh) (Moments.variance held) "compensated variance"
-                let heldPlain, freshPlain = drive false
-                expectClose 1e-5 0.0 (Moments.variance freshPlain) (Moments.variance heldPlain) "plain variance"
+                        let fresh = Array.fold (Moments.add compensated) Moments.zero (Window.items w)
+                        let held = Window.value w
+                        expectClose 1e-12 0.0 (Moments.mean fresh) (Moments.mean held) $"mean at {n}, compensated {compensated}"
+                        expectClose varianceBound 0.0 (Moments.variance fresh) (Moments.variance held) $"variance at {n}, compensated {compensated}"
             }
 
             test "work per push is amortised constant" {
-                let adds = ref 0
-                let removes = ref 0
+                let pushes = 5000
 
-                let w0 =
-                    Window.create
-                        10
-                        (fun (a: float) (x: float) ->
-                            adds.Value <- adds.Value + 1
-                            a + x)
-                        (fun a x ->
-                            removes.Value <- removes.Value + 1
-                            a - x)
-                        0.0
+                for capacity in [ 1; 3; 50; 1000 ] do
+                    let adds = ref 0
+                    let removes = ref 0
 
-                let mutable w = w0
+                    let mutable w =
+                        Window.create
+                            capacity
+                            (fun (a: float) (x: float) ->
+                                adds.Value <- adds.Value + 1
+                                a + x)
+                            (fun a x ->
+                                removes.Value <- removes.Value + 1
+                                a - x)
+                            0.0
 
-                for i in 1..1000 do
-                    w <- Window.push w (float i)
+                    for i in 1..pushes do
+                        w <- Window.push w (float i)
 
-                Expect.isLessThanOrEqual adds.Value (2 * 1000 + 10) "adds"
-                Expect.isLessThanOrEqual removes.Value 1000 "removes"
-                // Closed form: the last ten items are 991..1000, whose sum is 10 * (991 + 1000) / 2.
-                Expect.equal (Window.value w) 9955.0 "sum of the last ten"
+                    Expect.isLessThanOrEqual adds.Value (2 * pushes) $"adds at capacity {capacity}"
+                    Expect.isLessThanOrEqual removes.Value pushes $"removes at capacity {capacity}"
+                    // Closed form: the last items are pushes - capacity + 1 .. pushes, summing to capacity * (2 * pushes - capacity + 1) / 2.
+                    Expect.equal (Window.value w) (float capacity * float (2 * pushes - capacity + 1) / 2.0) $"sum at capacity {capacity}"
             }
 
             test "a window is persistent" {
@@ -159,5 +160,113 @@ let tests =
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> TimeWindow.moments true -1.0 |> ignore) "negative span"
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> TimeWindow.moments true nan |> ignore) "NaN span"
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Window.create 0 (fun a _ -> a) (fun a _ -> a) 0.0 |> ignore) "capacity 0"
+            }
+
+            test "a window is persistent over a branching tree" {
+                let root = pushAll (Window.moments true 3) [| 1.0; 2.0; 3.0 |]
+
+                let rec branch (depth: int) (parent: float list) (w: Window<float, Moments>) =
+                    if depth > 0 then
+                        for k in 1..3 do
+                            let x = float (depth * 100 + k)
+                            let expected = parent @ [ x ] |> List.rev |> List.truncate 3 |> List.rev
+                            let child = Window.push w x
+                            Expect.equal (Window.items child) (List.toArray expected) $"items of a child at depth {depth}"
+                            expectClose 1e-12 0.0 (List.average expected) (Moments.mean (Window.value child)) "child mean"
+                            branch (depth - 1) expected child
+                            Expect.equal (Window.items child) (List.toArray expected) "child unchanged by its own branches"
+
+                branch 3 [ 1.0; 2.0; 3.0 ] root
+                Expect.equal (Window.items root) [| 1.0; 2.0; 3.0 |] "root unchanged"
+            }
+
+            test "a non-finite item stops poisoning once it has left" {
+                let items = [| 1.0; 2.0; nan; 4.0; 5.0; 6.0; 7.0; 8.0; infinity; nan; 3.0; 4.0; 5.0; 6.0; 7.0; 8.0; 9.0 |]
+
+                let check (what: string) (i: int) (held: Moments) (current: float[]) =
+                    if Array.forall (fun (x: float) -> not (Double.IsNaN x || Double.IsInfinity x)) current then
+                        let fresh = Array.fold (Moments.add true) Moments.zero current
+                        expectClose 1e-12 0.0 (Moments.mean fresh) (Moments.mean held) $"{what} mean after push {i}"
+                        expectClose 1e-9 1e-12 (Moments.variance fresh) (Moments.variance held) $"{what} variance after push {i}"
+
+                for capacity in [ 1; 2; 5 ] do
+                    let mutable w = Window.moments true capacity
+                    let mutable tw = TimeWindow.moments true (float capacity - 1.0)
+
+                    for i in 0 .. items.Length - 1 do
+                        w <- Window.push w items[i]
+                        tw <- TimeWindow.push tw (float i) items[i]
+                        check $"window {capacity}" i (Window.value w) (Window.items w)
+                        check $"time window {capacity}" i (TimeWindow.value tw) (TimeWindow.items tw)
+
+                let w = pushAll (Window.moments true 5) [| 1.0; 2.0; nan; 4.0; 5.0; 6.0; 7.0; 8.0 |]
+                Expect.equal (Window.items w) [| 4.0; 5.0; 6.0; 7.0; 8.0 |] "items"
+                Expect.equal (Moments.mean (Window.value w)) 6.0 "mean after the NaN left"
+            }
+
+            test "a time window re-folds, bounds drift and does amortised work" {
+                let adds = ref 0
+                let removes = ref 0
+                let pushes = 100049
+                let compensated = true
+
+                let add (a: Moments) x =
+                    adds.Value <- adds.Value + 1
+                    Moments.add compensated a x
+
+                let remove (a: Moments) x =
+                    removes.Value <- removes.Value + 1
+                    Moments.remove compensated a x
+
+                let mutable w = TimeWindow.create 50.0 add remove Moments.zero
+
+                for i in 0 .. pushes - 1 do
+                    w <- TimeWindow.push w (float i) (1e9 + float (i % 7))
+
+                Expect.equal (TimeWindow.count w) 51 "t - span <= ti keeps 51 items"
+                Expect.isLessThanOrEqual adds.Value (2 * pushes) "adds"
+                Expect.isLessThanOrEqual removes.Value pushes "removes"
+                let fresh = Array.fold (Moments.add compensated) Moments.zero (TimeWindow.items w)
+                expectClose 1e-12 0.0 (Moments.mean fresh) (Moments.mean (TimeWindow.value w)) "mean"
+                expectClose 1e-8 0.0 (Moments.variance fresh) (Moments.variance (TimeWindow.value w)) "variance"
+            }
+
+            test "a time window boundary, zero span and infinite span" {
+                // 0.3 - 0.1 rounds to 0.19999999999999998, so the item at 0.2 is kept (0.2 >= the rounded cutoff).
+                let r = timed 0.1 [ (0.2, 1.0); (0.3, 2.0) ]
+                Expect.equal (TimeWindow.items r) [| 1.0; 2.0 |] "rounded cutoff keeps the item"
+                let z = timed 0.0 [ (1.0, 1.0); (1.0, 2.0) ]
+                Expect.equal (TimeWindow.items z) [| 1.0; 2.0 |] "span 0 keeps equal times"
+                Expect.equal (TimeWindow.items (TimeWindow.push z 2.0 3.0)) [| 3.0 |] "span 0 drops earlier times"
+                let i = timed infinity [ (-1e300, 1.0); (0.0, 2.0); (1e300, 3.0) ]
+                Expect.equal (TimeWindow.items i) [| 1.0; 2.0; 3.0 |] "infinite span keeps everything"
+            }
+
+            test "decayed moments match a direct weighted fold" {
+                // Direct fold: with the final time T, item i has weight 2^(-(T - t_i) / h); mean = sum w x / sum w,
+                // variance = sum w (x - mean)^2 / sum w.
+                let h = 3.0
+                let mutable state = 12345
+                let mutable t = 0.0
+                let mutable s = DecayedMoments.create h
+                let times = ResizeArray<float>()
+                let xs = ResizeArray<float>()
+
+                for _ in 1..300 do
+                    state <- (state * 75 + 74) % 65537
+                    t <- t + 0.05 + float (state % 100) / 40.0
+                    state <- (state * 75 + 74) % 65537
+                    let x = float (state % 1000) / 10.0
+                    times.Add t
+                    xs.Add x
+                    s <- DecayedMoments.addAt s t x
+
+                let w = times |> Seq.map (fun ti -> Math.Pow(2.0, -((t - ti) / h))) |> Seq.toArray
+                let sw = Array.sum w
+                let m = Seq.fold2 (fun acc wi x -> acc + wi * x) 0.0 w xs / sw
+                let v = Seq.fold2 (fun acc wi x -> acc + wi * (x - m) * (x - m)) 0.0 w xs / sw
+                expectClose 1e-13 0.0 sw (DecayedMoments.weight s) "weight"
+                expectClose 1e-13 0.0 m (DecayedMoments.mean s) "mean"
+                expectClose 1e-13 0.0 v (DecayedMoments.variance s) "variance"
             }
         ]
