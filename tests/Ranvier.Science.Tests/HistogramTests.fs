@@ -34,6 +34,15 @@ let tests =
                 Expect.equal e[0] -1e308 "first edge"
                 Expect.equal e[4] 1e308 "last edge"
                 Expect.isTrue (Array.forall2 (fun (a: float) b -> a < b) e[0..3] e[1..4]) "strictly increasing"
+                // Finite widths whose product with the bin index would overflow.
+                for (lo, hi) in [ (0.0, 1e308); (-1e308, 1e307); (1e308, 1.7e308) ] do
+                    let w = Histogram.edges (Histogram.uniform lo hi 10)
+                    Expect.equal w.Length 11 $"eleven edges over {lo}..{hi}"
+                    Expect.equal w[0] lo "first edge exact"
+                    Expect.equal w[10] hi "last edge exact"
+                    Expect.isTrue (Array.forall2 (fun (a: float) b -> a < b) w[0..9] w[1..10]) "strictly increasing"
+                    Expect.isTrue (Array.forall (fun (x: float) -> not (Double.IsInfinity x)) w) "finite"
+
                 // An interval three doubles wide (3 * 2^-52 above 1.0) cannot hold ten bins.
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Histogram.uniform 1.0 (1.0 + 3.0 * 2.220446049250313e-16) 10 |> ignore) "too many bins"
             }

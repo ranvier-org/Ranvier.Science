@@ -40,10 +40,10 @@ module Histogram =
             Missing = 0
         }
 
-    /// An empty histogram of equal-width bins from lower to upper: edge i is lower + (upper - lower) * i / bins, or
-    /// 2 * (lower / 2 + (upper / 2 - lower / 2) * (i / bins)) where upper - lower overflows, and the last edge is exactly
-    /// upper. Raises `ArgumentOutOfRangeException` unless lower and upper are finite with lower < upper and bins is at
-    /// least 1, and when the interval holds too few doubles for the edges to be strictly increasing.
+    /// An empty histogram of equal-width bins from lower to upper: edge i is lower + (upper - lower) * (i / bins), or
+    /// 2 * (lower / 2 + (upper / 2 - lower / 2) * (i / bins)) where upper - lower overflows, and the last edge is
+    /// exactly upper. Raises `ArgumentOutOfRangeException` unless lower and upper are finite with lower < upper and
+    /// bins is at least 1, and when the interval holds too few doubles for the edges to be strictly increasing.
     let uniform (lower: float) (upper: float) (bins: int) : Histogram =
         if Double.IsNaN lower || Double.IsInfinity lower || Double.IsNaN upper || Double.IsInfinity upper || not (lower < upper) then
             raise (ArgumentOutOfRangeException("lower", "The bounds must be finite with lower below upper."))
@@ -56,7 +56,7 @@ module Histogram =
         let edge i =
             if i = bins then upper
             elif Double.IsInfinity width then 2.0 * (lower / 2.0 + (upper / 2.0 - lower / 2.0) * (float i / float bins))
-            else lower + width * float i / float bins
+            else lower + width * (float i / float bins)
 
         let edges = Array.init (bins + 1) edge
 
@@ -212,8 +212,8 @@ module QuantileEstimate =
 
     let private sign (d: float) = if d >= 0.0 then 1.0 else -1.0
 
-    /// The estimate with one more observation. A NaN or infinite observation makes `value` NaN from then on. O(1): the state of
-    /// 15 numbers is copied.
+    /// The estimate with one more observation. A NaN or infinite observation makes `value` NaN from then on. O(1): the
+    /// state of 15 numbers is copied.
     let add (e: QuantileEstimate) (x: float) : QuantileEstimate =
         if e.Poisoned || Double.IsNaN x || Double.IsInfinity x then
             { e with N = e.N + 1; Poisoned = true }
