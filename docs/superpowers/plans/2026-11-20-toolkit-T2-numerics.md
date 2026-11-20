@@ -918,7 +918,7 @@ module QuantileEstimate =
 | `copies in and out` | mutating the edges array after `create`, and mutating the arrays returned by `edges` and `counts`, leave the histogram unchanged (Review Focus 2) |
 | `the quantile estimate is exact below five` | p = 0.25 over 3, 1, 2: `value` 1.5 (type 7: h = 2 · 0.25 = 0.5 between 1 and 2); `count 3.0`; empty is NaN |
 | `the quantile estimate at five` | p = 0.5 over 5, 1, 4, 2, 3: `value = 3.0` (the markers are the sorted observations) |
-| `the quantile estimate converges` | 100 000 `Generator.uniform` values (seed 11): p = 0.5 within 0.01 of 0.5 and p = 0.9 within 0.01 of 0.9; 100 000 `Generator.normal` values (seed 12), p = 0.975 within 0.03 of 1.959963984540054 (the normal's 0.975 quantile: the literal printed by `python -I tests/reference/normal_quantile.py`, Plan T1, Task 14, a 60-digit decimal bisection on the exact double 0.975; the command is written beside the literal) |
+| `the quantile estimate converges` | 100 000 `Generator.uniform` values (seed 11): p = 0.5 within 0.01 of 0.5 and p = 0.9 within 0.01 of 0.9; 100 000 `Generator.normal` values (seed 12), p = 0.975 within 0.03 of 1.9599639845400538 (the normal's 0.975 quantile; the shorter 1.959963984540054 reads as the double one ulp above, so paste the script's literal as printed: the literal printed by `python -I tests/reference/normal_quantile.py`, Plan T1, Task 14, a 60-digit decimal bisection on the exact double 0.975; the command is written beside the literal) |
 | `the quantile estimate's domain` | p = 0, 1 and NaN raise `ArgumentOutOfRangeException`; a NaN observation makes `value` NaN after 10 later finite ones |
 
 - [ ] **Step 2: Run** the `"Histogram"` filter. Expected: the build fails, `Histogram` is not defined.
