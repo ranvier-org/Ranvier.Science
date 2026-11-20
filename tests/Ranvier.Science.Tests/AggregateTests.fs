@@ -770,7 +770,10 @@ let tests =
                 let m = rows.Rows |> Aggregate.momentsBy FloatPolicy.standard project
                 m.Value.Value |> ignore
                 rows.Remove 0 |> ignore
-                let bound = 4.0 * 2.220446049250313e-16 * 1e16
+                // 2^-52, Double machine epsilon
+                let epsilon = 2.220446049250313e-16
+                let bound = 4.0 * epsilon * 1e16
+                Expect.equal (Moments.mean m.Value.Value) 1.75 "the mean straight after the removal"
                 Expect.isLessThanOrEqual (abs (Moments.mean m.Value.Value - 2.0)) bound "the mean is within n * epsilon * the largest magnitude")
         }
 
@@ -802,6 +805,21 @@ let tests =
                 rows.AddOrUpdate (struct (3, (6.0, 1.0)))
                 let expected = [ (2.0, 1.0); (4.0, 1.0); (6.0, 1.0) ] |> List.fold (fun s (x, w) -> WeightedMoments.add false s x w) WeightedMoments.zero
                 expectClose 1e-12 0.0 (WeightedMoments.mean expected) (WeightedMoments.mean m.Value.Value) "mean after the insert")
+        }
+
+        test "removing a dominant weight leaves the weighted mean wrong" {
+            withGraph (fun () ->
+                let rows = rowsOf [| (1.0, 1e20); (1.0, 1.0); (2.0, 1.0); (3.0, 1.0) |]
+                let project row = let x, w = valueOf row in WeightedMoments.add true WeightedMoments.zero x w
+                let m = rows.Rows |> Aggregate.weightedMomentsBy FloatPolicy.standard project
+                m.Value.Value |> ignore
+                rows.Remove 0 |> ignore
+                let scratch =
+                    rows.Rows
+                    |> Projection.fold (fun s row -> let x, w = valueOf row in WeightedMoments.add true s x w) WeightedMoments.zero
+
+                expectClose 1e-12 0.0 2.0 (WeightedMoments.mean scratch.Value) "the from-scratch fold of the remaining rows"
+                Expect.isGreaterThan (abs (WeightedMoments.mean m.Value.Value - 2.0)) 0.5 "the maintained mean differs from it")
         }
 
     ]

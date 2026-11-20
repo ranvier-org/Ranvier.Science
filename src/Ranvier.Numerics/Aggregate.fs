@@ -9,8 +9,8 @@ type Maintained<'T> =
     {
         Value: Memo<'T>
         /// The re-folds since creation: each time a row's removal raised, by the policy's request on a non-finite state
-        /// or on removals reaching the larger of the row count and the policy's `RefoldFloor`, or by an exception out
-        /// of the accumulator's removal. Read it after `Value`.
+        /// or on removals reaching the larger of the row count and the policy's `RefoldFloor`, by an exception out
+        /// of the accumulator's removal, or because the removal's result is not finite. Read it after `Value`.
         Refolds: unit -> int
     }
 
@@ -44,8 +44,10 @@ module Aggregate =
     /// checked for cancellation: between re-folds a removal subtracts from totals that may have held a larger
     /// magnitude, so each running total carries an absolute error of order n·ε times the largest magnitude it has held
     /// since the last re-fold (general knowledge), and the re-fold rule bounds how long the error persists. A caller
-    /// whose rows can be many orders of magnitude larger than the rest uses <c>FloatPolicy.withRefoldFloor 0</c>, which
-    /// re-folds once the removals reach the row count, or the from-scratch fold. <c>Refolds</c> counts the re-folds.
+    /// whose rows can be many orders of magnitude larger than the rest uses a from-scratch fold, <c>Projection.fold</c>
+    /// with the same <c>add</c>, which is exact after such a removal. <c>FloatPolicy.withRefoldFloor 0</c> ends the
+    /// error only after as many further removals as there are rows, and behaves as <c>FloatPolicy.standard</c> from 64
+    /// rows. <c>Refolds</c> counts the re-folds.
     /// The memo cuts off a <c>result</c> equal under the graph's equality, which compares a struct by value on .NET
     /// and by reference under Fable, and a record or a class by reference: a caller must not rely on a cut-off of a
     /// non-<c>float</c> result. The memo is one fold node, and a projection from <c>createProjectionOnce</c> raises
@@ -134,8 +136,9 @@ module Aggregate =
     /// returns the <c>Moments</c> instance it returned before. Accuracy follows <c>maintainedBy</c>: after the removal of
     /// a row far larger than the rest the mean and variance can be wrong (a mean of 1.75 for the rows 1, 2 and 3 after
     /// removing 1e16 under <c>FloatPolicy.standard</c>, measured here by the test
-    /// <c>removing a dominant row leaves an error within the stated bound</c>) until the next re-fold;
-    /// <c>FloatPolicy.withRefoldFloor 0</c> or <c>momentsFromScratchBy</c> avoids it.
+    /// <c>removing a dominant row leaves an error within the stated bound</c>) until the next re-fold.
+    /// <c>momentsFromScratchBy</c> is exact after such a removal. <c>FloatPolicy.withRefoldFloor 0</c> ends the error
+    /// only after as many further removals as there are rows, and behaves as <c>FloatPolicy.standard</c> from 64 rows.
     /// </remarks>
     let momentsBy
         (policy: FloatPolicy)
@@ -205,8 +208,13 @@ module Aggregate =
     /// <remarks>
     /// A row edit is one <c>WeightedMoments.unmerge</c> and one <c>WeightedMoments.merge</c>. A NaN weight in a row
     /// poisons the state for as long as any row remains, and every edit then re-folds from the current rows. Re-folds
-    /// otherwise follow <c>maintainedBy</c>, and so does the accuracy: after the removal of a row whose weight is far
-    /// larger than the rest the mean and variance can be wrong until the next re-fold. The result is a struct: on .NET
+    /// otherwise follow <c>maintainedBy</c>. After the removal of a row whose weight is far larger than the rest, the
+    /// weighted mean and variance are not bounded by the per-total figure of <c>maintainedBy</c> and can be off by
+    /// the whole spread of the values (a mean of 1 for the values 1, 2 and 3 of unit weight after removing a weight of
+    /// 1e20, measured here by the test <c>removing a dominant weight leaves the weighted mean wrong</c>) until the next
+    /// re-fold. A from-scratch fold, <c>Projection.fold</c> with <c>WeightedMoments.add</c>, is exact after such a
+    /// removal; <c>FloatPolicy.withRefoldFloor 0</c> ends the error only after as many further removals as there are
+    /// rows. The result is a struct: on .NET
     /// the core's default policy compares it by value, so an equal result cuts off; under Fable it compares by
     /// reference, so every recomputation publishes. A caller must not rely on a cut-off. One fold node. A projection
     /// from <c>createProjectionOnce</c> raises <c>NotSupportedException</c>.
@@ -244,9 +252,9 @@ module Aggregate =
     /// <remarks>
     /// Equal to <c>OrderStatistic.quantileSorted</c> over the sorted projected values. NaN when there are no rows or
     /// when a projected value is NaN. Raises <c>ArgumentOutOfRangeException</c> unless 0 ≤ p ≤ 1. A read raises the
-    /// exception <c>projection</c> raises for a row, found by an O(N) scan on that path only. A pending row is left out.
-    /// Otherwise the read costs O(1):
-    /// the last sorted row, then the two rows around the rank, with <c>projection</c> called on each. A row change
+    /// exception <c>projection</c> raises for a row, found by an O(N) scan on every read while a row is failed or
+    /// pending. A pending row is left out. Otherwise the read costs O(1): the last sorted row, then the two rows
+    /// around the rank, with <c>projection</c> called on each. A row change
     /// costs O(1) neighbour checks and a binary search and shift per touched position, and O(N log N) on dense bursts
     /// (from documentation: <c>Projection.sortBy</c> in core 0.2.1, <c>Combinators.fs</c>). The memo is a sort view
     /// and one memo, and cuts off an unchanged <c>float</c> on both targets. A projection from
