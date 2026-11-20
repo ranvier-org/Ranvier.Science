@@ -36,6 +36,16 @@ let tests =
                 check "ln x" log 0.0 1.0 -1.0
                 check "cos 50x" (fun x -> cos (50.0 * x)) 0.0 1.0 (sin 50.0 / 50.0)
                 check "eˣ on (−∞, 0]" exp Double.NegativeInfinity 0.0 1.0
+                check "(1 + x)^−1.5 on [0, ∞)" (fun x -> 1.0 / ((1.0 + x) * sqrt (1.0 + x))) 0.0 Double.PositiveInfinity 2.0
+                // ∫ (1 + x²)^−0.75 over ℝ = √π Γ(1/4) / Γ(3/4), the Beta integral B(1/2, 1/4).
+                let tail = sqrt Math.PI * exp (Special.gammaLn 0.25 - Special.gammaLn 0.75)
+
+                check
+                    "(1 + x²)^−0.75"
+                    (fun x -> 1.0 / sqrt (sqrt (1.0 + x * x) * (1.0 + x * x)))
+                    Double.NegativeInfinity
+                    Double.PositiveInfinity
+                    tail
             }
 
             test "a polynomial of degree 13 converges on one panel" {
@@ -82,6 +92,13 @@ let tests =
                     (fun e -> Expect.equal e.Message "boom" "propagated unchanged")
             }
 
+            test "a NaN in a later panel stops the integration" {
+                let r = Integrate.adaptive absolute relative (fun x -> if x < 1e-3 then nan else 1.0 / sqrt x) 0.0 1.0
+                Expect.isTrue (Double.IsNaN r.Value) "NaN value"
+                Expect.isFalse r.Converged "not converged"
+                Expect.isGreaterThan r.Evaluations 15 "after the first panel"
+            }
+
             test "a negative or NaN tolerance raises" {
                 let f (x: float) = x
 
@@ -100,6 +117,7 @@ let tests =
                     let value = Integrate.gaussLegendre n (fun x -> pown x degree) 0.0 1.0
                     expectClose 1e-14 0.0 (1.0 / float (2 * n)) value (sprintf "n = %d, x^%d" n degree)
 
+                expectClose 1e-14 0.0 (1.0 / 200.0) (Integrate.gaussLegendre 100 (fun x -> pown x 199) 0.0 1.0) "n = 100, x^199"
                 let value = Integrate.gaussLegendre 20 exp -1.0 1.0
                 expectClose 1e-14 0.0 (Math.E - 1.0 / Math.E) value "n = 20, eˣ on [−1, 1]"
 
@@ -121,6 +139,11 @@ let tests =
                 let cube (x: float) = x * x * x
                 expectClose 1e-14 0.0 4.0 (Integrate.simpson uniform (Array.map cube uniform)) "simpson of x³"
                 Expect.equal (Integrate.simpson [| 0.0; 2.0 |] [| 1.0; 3.0 |]) 4.0 "two points give the trapezoid"
+            }
+
+            test "simpson with a repeated abscissa is not finite" {
+                let r = Integrate.simpson [| 0.0; 1.0; 1.0; 2.0 |] [| 1.0; 1.0; 1.0; 1.0 |]
+                Expect.isTrue (Double.IsNaN r || Double.IsInfinity r) "non-finite"
             }
 
             test "sample rules at the edges" {

@@ -4,8 +4,8 @@ open System
 
 /// The result of `Integrate.adaptive`. `Value` is the sum of the panel integrals and `ErrorEstimate` the sum of the
 /// panel error estimates. `Evaluations` counts calls of the integrand: 15 per panel evaluated. `Converged` is true when
-/// the estimate met the requested tolerance; it is false at the panel limit and for a NaN bound or integrand, whose
-/// `Value` is NaN.
+/// the estimate met the requested tolerance, a heuristic and not a guarantee about `Value`; it is false at the panel
+/// limit and for a NaN bound or integrand, whose `Value` is NaN.
 type Integral =
     {
         /// The integral over the requested interval.
@@ -121,6 +121,10 @@ module Integrate =
 
         struct (result, err)
 
+    // f x, or 0 where x is infinite (a node of an infinite-range transform that reached the infinite end).
+    let private finiteOrZero (f: float -> float) (x: float) : float =
+        if Double.IsInfinity x then 0.0 else f x
+
     /// Integral of the function over [a, b] by the adaptive Gauss–Kronrod (7, 15) rule of QUADPACK's `dqk15`, with its
     /// error estimate. The panel of largest error estimate (found by a linear scan) is bisected, up to 200 panels; the
     /// rule evaluates 15 interior points per panel, so the cost is at most 15 + 30 · 199 calls and O(panels²) further
@@ -128,11 +132,18 @@ module Integrate =
     /// max(absolute, relative · |Value|), with Value the sum of the panels' values; this is tested after the first
     /// panel and after each bisection. At 200 panels without meeting it, the result has `Converged = false` with the
     /// current `Value` and `ErrorEstimate`. Singular endpoints are never evaluated; 1/√x and ln x at 0 converge by
-    /// repeated bisection of the panel at 0, without extrapolation.
+    /// repeated bisection of the panel at 0, without extrapolation (66 and 34 panels at absolute 1e-12 and relative
+    /// 1e-10, measured here by `Calculus`' closed-form list).
     ///
-    /// An infinite bound maps to a finite interval: [a, ∞) to (0, 1) by x = a + t/(1 − t), (−∞, b] to (0, 1) by
-    /// x = b − (1 − t)/t, and (−∞, ∞) to (−1, 1) by x = t/(1 − t²). For b &lt; a the result is the negated integral over
-    /// [b, a]. For a = b the result is 0, converged, with no evaluation. A NaN bound, or a NaN from the function, stops
+    /// The error estimate is heuristic, not a bound: it sees only the 15 nodes of each panel. A feature narrower than a
+    /// panel's node spacing, such as a peak of width 1e-3 inside [0, 1], can fall between the nodes and give a
+    /// converged result that is wrong by the whole integral; callers split the interval at such features. With both
+    /// tolerances 0, or below about 50 · 2⁻⁵² · (the integral of |f|), the panel limit is always reached.
+    ///
+    /// An infinite bound maps to (0, 1] with the infinite end at t = 0 (QUADPACK `dqagi`): [a, ∞) by x = a + (1 − t)/t,
+    /// (−∞, b] by x = b − (1 − t)/t, and (−∞, ∞) as f(x) + f(−x) with x = (1 − t)/t, each integrand multiplied by 1/t².
+    /// A node whose x is infinite contributes 0, so algebraic tails such as (1 + x)^−1.5 converge by bisecting at
+    /// t = 0. For b less than a the result is the negated integral over [b, a]. For a = b the result is 0, converged, with no evaluation. A NaN bound, or a NaN from the function, stops
     /// the integration at once with a NaN `Value` and `Converged = false`. A negative or NaN tolerance raises
     /// `ArgumentOutOfRangeException`.
     let adaptive (absolute: float) (relative: float) (f: float -> float) (a: float) (b: float) : Integral =
@@ -174,15 +185,17 @@ module Integrate =
             let g, ta, tb =
                 if not (Double.IsInfinity lo) && not (Double.IsInfinity hi) then
                     f, lo, hi
+                // From documentation: the transforms of QUADPACK dqagi, which put the infinite end at t = 0, where
+                // bisection can narrow a panel without limit. A node whose x is infinite contributes 0.
                 elif not (Double.IsInfinity lo) then
-                    (fun (t: float) -> f (lo + t / (1.0 - t)) / ((1.0 - t) * (1.0 - t))), 0.0, 1.0
+                    (fun (t: float) -> finiteOrZero f (lo + (1.0 - t) / t) / (t * t)), 0.0, 1.0
                 elif not (Double.IsInfinity hi) then
-                    (fun (t: float) -> f (hi - (1.0 - t) / t) / (t * t)), 0.0, 1.0
+                    (fun (t: float) -> finiteOrZero f (hi - (1.0 - t) / t) / (t * t)), 0.0, 1.0
                 else
                     (fun (t: float) ->
-                        let d = 1.0 - t * t
-                        f (t / d) * (1.0 + t * t) / (d * d)),
-                    -1.0,
+                        let x = (1.0 - t) / t
+                        (finiteOrZero f x + finiteOrZero f -x) / (t * t)),
+                    0.0,
                     1.0
 
             let pa = Array.zeroCreate<float> maximumPanels
@@ -351,7 +364,7 @@ module Integrate =
     /// Integral of the function over [a, b] by the n-point Gauss–Legendre rule, exact for polynomials up to degree
     /// 2n − 1. The nodes and weights are computed on each call by Newton's method on the Legendre polynomial Pₙ from
     /// cos(π(i − ¼)/(n + ½)), with the weights taken from a double-double evaluation of Pₙ₋₁; the cost is O(n²) for them
-    /// plus n evaluations. For b &lt; a the result is negated. A NaN
+    /// plus n evaluations. For b less than a the result is negated. A NaN
     /// bound or integrand gives NaN. Fewer than one point raises `ArgumentOutOfRangeException`.
     let gaussLegendre (points: int) (f: float -> float) (a: float) (b: float) : float =
         if points < 1 then
@@ -457,7 +470,9 @@ module Differentiate =
     /// Derivative of the function at the point by Ridders' extrapolation of central differences (Numerical Recipes, 3rd
     /// edition, section 5.7, `dfridr`; from documentation): initial step 0.1 · max(1, |x|), shrunk by the factor 1.4 up
     /// to 10 times, stopping early when the error grows past twice the best estimate. The function is called at most 20
-    /// times. A NaN or infinite point, or a NaN function value, gives NaN in both fields.
+    /// times. A NaN or infinite point, or a NaN function value, gives NaN in both fields; a function undefined within the
+    /// initial step of the point therefore gives NaN. `ErrorEstimate` is not a bound: when the function varies on a
+    /// scale shorter than the initial step (sin at 1e3, for example) both fields can be wrong by orders of magnitude.
     let derivative (f: float -> float) (x: float) : Derivative =
         let failed = { Value = nan; ErrorEstimate = nan }
 
