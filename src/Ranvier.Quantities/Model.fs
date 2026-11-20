@@ -39,6 +39,17 @@ type Entry =
         Formula: string
     }
 
+/// The tree of a formula entry, with the entries its identifiers resolved to at the entry's declaration.
+[<NoEquality; NoComparison>]
+type internal FormulaRecord =
+    {
+        Expr: Expr
+        /// Each identifier of the tree that resolved to an entry, with that entry and, for a formula entry, its record.
+        Names: Map<string, Entry * FormulaRecord voption>
+        /// The catalogue the tree's unit literals are read against.
+        Catalogue: UnitCatalogue
+    }
+
 /// <summary>Quantities by identifier, with an optional parent searched after it.</summary>
 /// <remarks>
 /// <para>
@@ -72,8 +83,10 @@ type Entry =
 /// to the graph, not to an owner, and stay settable and tracked.
 /// </para>
 /// <para>
-/// Names resolve once, when an entry or evaluator is created. A formula entry or evaluator that outlives the owner of
-/// an entry it reads keeps reading that entry's last value and does not follow a later declaration of the identifier.
+/// Names resolve once, when an entry, an evaluator or a <c>Formula.monteCarlo</c> reader is created. A formula entry,
+/// evaluator or reader that outlives the owner of an entry it reads keeps reading that entry's last value and does not
+/// follow a later declaration of the identifier. A reader inlines a formula entry with the names the entry resolved at
+/// its declaration.
 /// </para>
 /// <para>A removal costs O(n) in the model's number of entries.</para>
 /// </remarks>
@@ -81,6 +94,7 @@ type Entry =
 type Model internal (name: string, parent: Model voption, catalogue: UnitCatalogue) =
     let entries = ResizeArray<Entry>()
     let byId = Dictionary<string, Entry>()
+    let formulas = Dictionary<string, FormulaRecord>()
     let declared = HashSet<string>()
 
     static let isLetter (c: char) =
@@ -135,12 +149,30 @@ type Model internal (name: string, parent: Model voption, catalogue: UnitCatalog
         entries.Add entry
         byId[entry.Id] <- entry
 
-    /// Removes the entry, when it is this model's entry of its identifier, from the entries, the index and the reserved
-    /// identifiers. O(n) in the number of entries.
+    /// Adds a formula entry with its record.
+    member internal this.AddFormula(entry: Entry, record: FormulaRecord) : unit =
+        this.Add entry
+        formulas[entry.Id] <- record
+
+    /// The entry `TryFind` finds, with its record when it is a formula entry.
+    member internal _.TryResolve(id: string) : (Entry * FormulaRecord voption) voption =
+        match byId.TryGetValue id with
+        | true, entry ->
+            match formulas.TryGetValue id with
+            | true, record -> ValueSome(entry, ValueSome record)
+            | _ -> ValueSome(entry, ValueNone)
+        | _ ->
+            match parent with
+            | ValueSome p -> p.TryResolve id
+            | ValueNone -> ValueNone
+
+    /// Removes the entry, when it is this model's entry of its identifier, from the entries, the index, the formula
+    /// records and the reserved identifiers. O(n) in the number of entries.
     member internal _.Remove(entry: Entry) : unit =
         match byId.TryGetValue entry.Id with
         | true, held when obj.ReferenceEquals(held, entry) ->
             byId.Remove entry.Id |> ignore
+            formulas.Remove entry.Id |> ignore
             declared.Remove entry.Id |> ignore
             entries.RemoveAt(entries.FindIndex(fun e -> obj.ReferenceEquals(e, entry)))
         | _ -> ()

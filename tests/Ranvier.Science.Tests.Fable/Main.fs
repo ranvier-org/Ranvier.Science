@@ -18,6 +18,8 @@ let all =
             testList "UnitTextTests.fs" [ Ranvier.Science.Tests.UnitTextTests.tests ]
             testList "NotationTests.fs" [ Ranvier.Science.Tests.NotationTests.tests ]
             testList "ConstantsTests.fs" [ Ranvier.Science.Tests.ConstantsTests.tests ]
+            testList "OrderStatisticTests.fs" [ Ranvier.Science.Tests.OrderStatisticTests.tests ]
+            testList "MonteCarloTests.fs" [ Ranvier.Science.Tests.MonteCarloTests.tests ]
             testList "AggregateTests.fs" [ Ranvier.Science.Tests.AggregateTests.tests ]
             testList "ToleranceTests.fs" [ Ranvier.Science.Tests.ToleranceTests.tests ]
             testList "UnitsTests.fs" [ Ranvier.Science.Tests.UnitsTests.tests ]

@@ -294,7 +294,8 @@ module Quantity =
     /// clean through a change of an uncertainty alone; `Entry.Uncertainty` and `Entry.Measured` read the measured value
     /// and are notified on every recomputation. Names resolve once, when the entry is created: an entry that outlives
     /// the owner of an entry it reads keeps reading that entry's last value and does not follow a later declaration of
-    /// the identifier. Raises `ArgumentException` as `input` does, before `text` is parsed. `Error` with the message of
+    /// the identifier, and `Formula.monteCarlo` inlines the entry's formula with those names. Raises
+    /// `ArgumentException` as `input` does, before `text` is parsed. `Error` with the message of
     /// `Formula.parse` or `Formula.check` for text that does not parse or check, and then the model is unchanged.
     let formula (model: Model) (id: string) (name: string) (text: string) : Result<Entry, string> =
         model.Check id
@@ -302,6 +303,7 @@ module Quantity =
         Formula.parse text
         |> Result.bind (fun expr -> Formula.check model expr |> Result.map (fun unitInfo -> expr, unitInfo))
         |> Result.map (fun (expr, unitInfo) ->
+            let record = Formula.recordOf model expr
             let evaluate = Formula.evaluator model expr
             let evaluateMeasured = Formula.measuredEvaluator model expr
             let value = createMemo (fun _ -> evaluate ())
@@ -320,7 +322,7 @@ module Quantity =
                     (fun () -> measuredValue.Value)
                     text
 
-            add model e
+            declareOwned (fun () -> model.AddFormula(e, record)) (fun () -> model.Remove e)
             e)
 
     /// The entry as a quantity in `unit`. `Error` stating both units unless `UnitInfo.sameUnit` holds for the unit and

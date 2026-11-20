@@ -14,6 +14,8 @@
         <Compile Include="$(MSBuildThisFileDirectory)UnitTextTests.fs" Link="UnitTextTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)NotationTests.fs" Link="NotationTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)ConstantsTests.fs" Link="ConstantsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)OrderStatisticTests.fs" Link="OrderStatisticTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)MonteCarloTests.fs" Link="MonteCarloTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)AggregateTests.fs" Link="AggregateTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)ToleranceTests.fs" Link="ToleranceTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)UnitsTests.fs" Link="UnitsTests.fs" />

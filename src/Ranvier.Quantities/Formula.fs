@@ -1,26 +1,23 @@
 namespace Ranvier.Quantities
 
 open System
+open System.Collections.Generic
 open Ranvier.Numerics
 
-/// One line of the formula notation, parsed.
-type Expr =
-    | Number of float
-    | Name of string
-    | Negate of Expr
-    | Add of Expr * Expr
-    | Subtract of Expr * Expr
-    | Multiply of Expr * Expr
-    | Divide of Expr * Expr
-    /// The base to an integer exponent from -1000 to 1000.
-    | Power of Expr * int
-    | Call of string * Expr list
-    /// `[unit text]`: one of the unit written, read by `UnitInfo.parse` against the model's catalogue when checked.
-    | UnitLiteral of string
-    /// `convert(expr, [unit text])`: the expression's value in the unit written.
-    | Convert of Expr * string
-
 exception internal FormulaSyntax of string
+
+/// The statistics of `Formula.monteCarlo` over its draws of an expression.
+type MonteCarloResult =
+    {
+        Mean: float
+        /// The sample standard deviation, divisor n − 1.
+        StandardDeviation: float
+        /// The type-7 quantile of the draws at (1 − coverage)/2.
+        Lower: float
+        /// The type-7 quantile of the draws at (1 + coverage)/2.
+        Upper: float
+        Draws: int
+    }
 
 /// A one-line arithmetic notation over the identifiers of a `Model`: `+ - * /`, an integer power `^`, parentheses,
 /// the one-argument functions `sqrt abs exp ln log10 sin cos tan asin acos atan sinh cosh tanh`, the two-argument
@@ -280,7 +277,7 @@ module Formula =
                 malformed ()
 
             advance ()
-            Convert(operand, unitText)
+            Expr.Convert(operand, unitText)
 
         and close () : unit =
             match peek () with
@@ -367,16 +364,66 @@ module Formula =
         with e ->
             Result.Error e.Message
 
-    /// The entries by identifier, and the catalogue that unit literals are read against.
+    /// The entries by identifier, the formula records of those that are formula entries, and the catalogue that unit
+    /// literals are read against.
     type private Context =
         {
             Find: string -> Entry voption
+            Record: string -> FormulaRecord voption
             Catalogue: UnitCatalogue
         }
 
     let private contextOf (model: Model) : Context =
         {
             Find = fun id -> model.TryFind id
+            Record =
+                fun id ->
+                    match model.TryResolve id with
+                    | ValueSome(_, record) -> record
+                    | ValueNone -> ValueNone
+            Catalogue = model.Catalogue
+        }
+
+    /// The identifiers and catalogue of a formula entry as they resolved at its declaration.
+    let private contextOfRecord (record: FormulaRecord) : Context =
+        {
+            Find =
+                fun id ->
+                    match record.Names.TryFind id with
+                    | Some(entry, _) -> ValueSome entry
+                    | None -> ValueNone
+            Record =
+                fun id ->
+                    match record.Names.TryFind id with
+                    | Some(_, inner) -> inner
+                    | None -> ValueNone
+            Catalogue = record.Catalogue
+        }
+
+    /// The record of a formula entry of `expr` declared now in `model`: each identifier of the tree with the entry and
+    /// record `Model.TryResolve` gives for it.
+    let internal recordOf (model: Model) (expr: Expr) : FormulaRecord =
+        let rec collect (names: Map<string, Entry * FormulaRecord voption>) (e: Expr) =
+            match e with
+            | Name id when not (names.ContainsKey id) ->
+                match model.TryResolve id with
+                | ValueSome resolved -> names.Add(id, resolved)
+                | ValueNone -> names
+            | Number _
+            | Name _
+            | UnitLiteral _ -> names
+            | Negate a
+            | Power(a, _)
+            | Convert(a, _) -> collect names a
+            | Add(a, b)
+            | Subtract(a, b)
+            | Multiply(a, b)
+            | Divide(a, b) -> collect (collect names a) b
+            | Call(_, arguments) -> List.fold collect names arguments
+
+        {
+            Expr = expr
+            Names = collect Map.empty expr
             Catalogue = model.Catalogue
         }
 
@@ -496,15 +543,19 @@ module Formula =
 
         if n < 0 then 1.0 / product else product
 
-    let private evaluatorIn (context: Context) (expr: Expr) : unit -> float =
-        checkIn context expr |> orRaise |> ignore
-
+    /// The evaluator's function of `expr` in `context`, with `reader` giving the function of each identifier that
+    /// resolves to an entry, from the context, the identifier and the entry. `expr` is assumed to check.
+    let private compile
+        (reader: Context -> string -> Entry -> (unit -> float))
+        (context: Context)
+        (expr: Expr)
+        : unit -> float =
         let rec build (e: Expr) : unit -> float =
             match e with
             | Number x -> fun () -> x
             | Name id ->
                 match context.Find id with
-                | ValueSome entry -> entry.Read
+                | ValueSome entry -> reader context id entry
                 | ValueNone when id = "pi" -> fun () -> Math.PI
                 | ValueNone -> orRaise (Result.Error(missingName id))
             | UnitLiteral _ -> fun () -> 1.0
@@ -558,6 +609,10 @@ module Formula =
                 | _ -> orRaise (Result.Error(outsideNotation name arguments))
 
         build expr
+
+    let private evaluatorIn (context: Context) (expr: Expr) : unit -> float =
+        checkIn context expr |> orRaise |> ignore
+        compile (fun _ _ entry -> entry.Read) context expr
 
     /// A function that evaluates `expr` with tracked reads of the entries of `model`. A unit literal evaluates to 1,
     /// and `convert` multiplies its operand's value by `UnitInfo.conversionFactor` from the operand's unit to the
@@ -671,3 +726,142 @@ module Formula =
     /// owner of an entry it reads keeps reading that entry's last value and does not follow a later declaration of the
     /// identifier. Raises `ArgumentException` as `evaluator` does, and building costs what it does there.
     let measuredEvaluator (model: Model) (expr: Expr) : unit -> Uncertain = measuredEvaluatorIn (contextOf model) expr
+
+    let private undefined (draws: int) : MonteCarloResult =
+        {
+            Mean = nan
+            StandardDeviation = nan
+            Lower = nan
+            Upper = nan
+            Draws = draws
+        }
+
+    /// A reader of the distribution of `expr` over the entries of `model`, by propagation of distributions (the GUM's
+    /// Supplement 1, general knowledge). The formula entries `expr` reaches are inlined, each with the names it
+    /// resolved at its declaration, down to leaves that are not formula entries; a leaf reached twice is one leaf.
+    /// Each read takes a tracked read of every leaf's `Entry.Measured`, and with a NaN value or contribution among them
+    /// gives NaN in every float field. Otherwise each of the `draws` draws takes one standard normal deviate zᵢ per
+    /// source the leaves hold, in ascending id order, from `Generator.create seed` threaded through the draws; sets
+    /// each leaf to its value plus Σᵢ cᵢzᵢ over its contributions cᵢ; and evaluates the inlined expression as
+    /// `evaluator` does, with its conversion factors and scales. An input or constant leaf is then normal at its value
+    /// and standard uncertainty, and leaves that share a source move together, linearly in it. `Mean` and
+    /// `StandardDeviation` (divisor n − 1) are those of the compensated `Moments` of the draws; `Lower` and `Upper`
+    /// are `OrderStatistic.quantileSorted` of the sorted draws at (1 − coverage)/2 and (1 + coverage)/2, the
+    /// probabilistically symmetric coverage interval. A draw that evaluates to NaN gives NaN in every float field.
+    /// `Draws` is `draws`. Two reads with equal leaf values and contributions give equal records.
+    ///
+    /// The reader creates no node and evaluates inside the node that reads it. A memo over it publishes its record on
+    /// every recomputation, since the core's default equality compares a record by reference. The reader holds its
+    /// leaves' values of the current draw, so reads of one reader run one at a time. Names resolve once, when
+    /// the reader is created: a reader that outlives the owner of an entry it reads keeps reading that entry's last
+    /// value and does not follow a later declaration of the identifier. A read costs O(draws · (sources + Σ leaf
+    /// contributions + size of the inlined expression)) plus a sort of the draws, and allocates an array of the draws.
+    /// Creating the reader costs what building `evaluator` does for `expr` and for each inlined formula, and O(l²) in
+    /// the number l of leaves. Raises `ArgumentOutOfRangeException` for fewer than 2 draws and for a coverage outside
+    /// (0, 1), NaN included; then `ArgumentException` as `evaluator` does. A read raises as a leaf's `Entry.Measured`
+    /// does.
+    let monteCarlo (draws: int) (seed: int) (coverage: float) (model: Model) (expr: Expr) : unit -> MonteCarloResult =
+        if draws < 2 then
+            raise (ArgumentOutOfRangeException("draws", "A Monte Carlo propagation takes at least 2 draws."))
+
+        if not (coverage > 0.0 && coverage < 1.0) then
+            raise (ArgumentOutOfRangeException("coverage", "A coverage must be strictly between 0 and 1, and not NaN."))
+
+        let context = contextOf model
+        checkIn context expr |> orRaise |> ignore
+        let leaves = ResizeArray<Entry>()
+        // The value of each leaf in the current draw, at the leaf's index in `leaves`.
+        let slots = ResizeArray<float>()
+
+        let slotOf (entry: Entry) : int =
+            let mutable k = 0
+
+            while k < leaves.Count && not (obj.ReferenceEquals(leaves[k], entry)) do
+                k <- k + 1
+
+            if k = leaves.Count then
+                leaves.Add entry
+                slots.Add 0.0
+
+            k
+
+        let rec leafOrInlined (c: Context) (id: string) (entry: Entry) : unit -> float =
+            match c.Record id with
+            | ValueSome record -> compile leafOrInlined (contextOfRecord record) record.Expr
+            | ValueNone ->
+                let k = slotOf entry
+                fun () -> slots[k]
+
+        let evaluate = compile leafOrInlined context expr
+        let leafEntries = leaves.ToArray()
+        let count = leafEntries.Length
+
+        fun () ->
+            let values: float[] = Array.zeroCreate count
+            let contributions: struct (int * float)[][] = Array.zeroCreate count
+            let mutable known = true
+
+            for k in 0 .. count - 1 do
+                let u = leafEntries[k].Measured()
+                let cs = Uncertain.contributions u
+                values[k] <- Uncertain.value u
+                contributions[k] <- cs
+
+                if Double.IsNaN values[k] || cs |> Array.exists (fun struct (_, c) -> Double.IsNaN c) then
+                    known <- false
+
+            if not known then
+                undefined draws
+            else
+                let ids =
+                    contributions
+                    |> Array.collect (Array.map (fun struct (id, _) -> id))
+                    |> Array.distinct
+                    |> Array.sort
+
+                let position = Dictionary<int, int>()
+                ids |> Array.iteri (fun i id -> position[id] <- i)
+                let positions = contributions |> Array.map (Array.map (fun struct (id, _) -> position[id]))
+                let weights = contributions |> Array.map (Array.map (fun struct (_, c) -> c))
+                let z: float[] = Array.zeroCreate ids.Length
+                let results: float[] = Array.zeroCreate draws
+                let mutable generator = Generator.create seed
+                let mutable moments = Moments.zero
+                let mutable defined = true
+
+                for d in 0 .. draws - 1 do
+                    for i in 0 .. z.Length - 1 do
+                        let struct (deviate, next) = Generator.normal generator
+                        z[i] <- deviate
+                        generator <- next
+
+                    for k in 0 .. count - 1 do
+                        let p = positions[k]
+                        let w = weights[k]
+                        let mutable shift = 0.0
+
+                        for j in 0 .. p.Length - 1 do
+                            shift <- shift + w[j] * z[p[j]]
+
+                        slots[k] <- values[k] + shift
+
+                    let y = evaluate ()
+
+                    if Double.IsNaN y then
+                        defined <- false
+
+                    results[d] <- y
+                    moments <- Moments.add true moments y
+
+                if not defined then
+                    undefined draws
+                else
+                    Array.sortInPlace results
+
+                    {
+                        Mean = Moments.mean moments
+                        StandardDeviation = Moments.sampleStandardDeviation moments
+                        Lower = OrderStatistic.quantileSorted ((1.0 - coverage) / 2.0) results
+                        Upper = OrderStatistic.quantileSorted ((1.0 + coverage) / 2.0) results
+                        Draws = draws
+                    }
