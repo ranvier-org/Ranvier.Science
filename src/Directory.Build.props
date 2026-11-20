@@ -4,7 +4,7 @@
     <PropertyGroup>
         <IsPackable>true</IsPackable>
         <Version>0.1.0</Version>
-        <!-- The minimum FSharp.Core of the packages, the one Ranvier 0.2.0 depends on. -->
+        <!-- The minimum FSharp.Core of the packages, the one Ranvier 0.2.1 depends on. -->
         <FSharpCoreImplicitPackageVersion>8.0.100</FSharpCoreImplicitPackageVersion>
         <FablePackageType>library</FablePackageType>
         <PackageReadmeFile>README.md</PackageReadmeFile>
