@@ -334,3 +334,126 @@ module Special =
 
         let m = float (min k (n - k))
         -(Math.Log (float n + 1.0)) - betaLn (float n - m + 1.0) (m + 1.0)
+
+    // 2/√π and 1/√π: python -I tests/reference/special.py erf
+    let private twoOverSqrtPi = 1.1283791670955126
+    let private oneOverSqrtPi = 0.5641895835477563
+
+    /// a + b = s + e exactly, with s the rounded sum (Knuth's TwoSum).
+    let private twoSum (a: float) (b: float) : struct (float * float) =
+        let s = a + b
+        let v = s - a
+        struct (s, (a - (s - v)) + (b - v))
+
+    /// Veltkamp's split of a into high + low, each half of the significand.
+    let private split (a: float) : struct (float * float) =
+        let c = 134217729.0 * a // 2²⁷ + 1
+        let high = c - (c - a)
+        struct (high, a - high)
+
+    /// a · b = p + e exactly, with p the rounded product (Dekker's product), where no partial product overflows or
+    /// underflows.
+    let private twoProduct (a: float) (b: float) : struct (float * float) =
+        let p = a * b
+        let struct (ah, al) = split a
+        let struct (bh, bl) = split b
+        struct (p, ((ah * bh - p) + ah * bl + al * bh) + al * bl)
+
+    /// erf(x) for 0 ≤ x < 2 as a double-double high + low: (2/√π) e^(−y) Σₙ x (2y)ⁿ / (1 · 3 · … · (2n + 1)) with y the
+    /// rounded x², summed until a term leaves the sum unchanged, with the terms, the sum and the products in
+    /// double-double. NaN when a term still changes the sum after 500 terms.
+    let private erfSeries (x: float) : struct (float * float) =
+        // The same rounded y in both factors: the errors its rounding causes in e^(−y) and in the sum largely cancel.
+        let y = x * x
+        let z = 2.0 * y
+        let mutable term = x
+        let mutable termLow = 0.0
+        let mutable sum = x
+        let mutable sumLow = 0.0
+        let mutable n = 0
+        let mutable converged = false
+
+        while not converged && n < 500 do
+            n <- n + 1
+            let d = float (2 * n + 1)
+            // term · z / d: the product split exactly, then the quotient and its remainder.
+            let struct (p, pe) = twoProduct term z
+            let q = p / d
+            let struct (qd, qde) = twoProduct q d
+            termLow <- ((p - qd) - qde + pe + termLow * z) / d
+            term <- q
+            let struct (s, se) = twoSum sum term
+            sumLow <- sumLow + se + termLow
+            converged <- s = sum
+            sum <- s
+
+        if converged then
+            let e = Math.Exp (-y)
+            let struct (p, pe) = twoProduct e sum
+            let struct (q, qe) = twoProduct twoOverSqrtPi p
+            twoSum q (qe + twoOverSqrtPi * (pe + e * sumLow))
+        else
+            struct (nan, nan)
+
+    /// erfc(x) for 2 ≤ x < 27.3: e^(−x²)/√π · 1/(x + ½/(x + 1/(x + (3/2)/(x + …)))), Laplace's continued fraction by
+    /// the modified Lentz method, with e^(−x²) = e^(−h) e^(−l) for x² = h + l exactly. NaN when the continued fraction
+    /// has not converged after 500 terms.
+    let private erfcContinuedFraction (x: float) : float =
+        let mutable f = x
+        let mutable c = x
+        let mutable d = 0.0
+        let mutable n = 0
+        let mutable converged = false
+
+        while not converged && n < 500 do
+            n <- n + 1
+            let a = 0.5 * float n
+            d <- 1.0 / (x + a * d)
+            c <- x + a / c
+            let delta = c * d
+            f <- f * delta
+            converged <- abs (delta - 1.0) <= 2.220446049250313e-16 // 2⁻⁵²
+
+        if converged then
+            let struct (h, l) = twoProduct x x
+            Math.Exp (-h) * Math.Exp (-l) * oneOverSqrtPi / f
+        else
+            nan
+
+    /// erfc(x) for x ≥ 0.
+    let private erfcPositive (x: float) : float =
+        if x < 2.0 then
+            let struct (high, low) = erfSeries x
+            (1.0 - high) - low
+        elif x < 27.3 then
+            erfcContinuedFraction x
+        else
+            // erfc(x) < e^(−x²) / (x√π) (general knowledge), which is below 2⁻¹⁰⁷⁵, half the least subnormal, from
+            // x = 27.3.
+            0.0
+
+    /// erf(x) for x ≥ 0.
+    let private erfPositive (x: float) : float =
+        if x < 2.0 then
+            let struct (high, _) = erfSeries x
+            high
+        else
+            1.0 - erfcPositive x
+
+    /// The error function erf(x) = (2/√π) ∫₀ˣ e^(−t²) dt for every x: ±1 at ±∞ and NaN at NaN, with
+    /// erf(−x) = −erf(x) exactly. Relative error at most 1e-13 over every x where |erf(x)| ≥ 1e-300, pinned by the
+    /// `Special` tests against `tests/reference/special.py` (measured here).
+    let erf (x: float) : float =
+        if Double.IsNaN x then nan
+        elif x < 0.0 then -(erfPositive (-x))
+        elif x = 0.0 then x
+        else erfPositive x
+
+    /// The complementary error function erfc(x) = 1 − erf(x) for every x, accurate where erf(x) is near 1: 0 from
+    /// x = 27.3 on and at +∞, 2 at −∞ and NaN at NaN, with erfc(−x) = 2 − erfc(x) exactly. Relative error at most
+    /// 1e-13 over every x where erfc(x) ≥ 1e-300, that is x up to about 26.2, pinned by the `Special` tests against
+    /// `tests/reference/special.py` (measured here).
+    let erfc (x: float) : float =
+        if Double.IsNaN x then nan
+        elif x < 0.0 then 2.0 - erfcPositive (-x)
+        else erfcPositive x

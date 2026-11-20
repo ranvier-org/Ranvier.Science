@@ -5,6 +5,7 @@ Run: python -I tests/reference/special.py <section>
 Sections:
     gamma   ln|Gamma|, Gamma, psi, B and ln B (with pairs where |ln B| >= 256), ln n!, ln C(n, k), ln(1 + x) and
             e^x - 1 at negative x; the constants and series coefficients of Special.fs
+    erf     erf and erfc; the constants 2 / sqrt(pi) and 1 / sqrt(pi) of Special.fs
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -30,6 +31,12 @@ Methods:
     ln n!       ln of math.factorial(n) for n <= 10^5, ln Gamma(n + 1) above.
     ln C(n, k)  ln of math.comb(n, k).
     ln(1 + x)   Decimal's ln of 1 + x; e^x - 1 by Decimal's exp.
+    erf         the Maclaurin series (2 / sqrt(pi)) sum over n >= 0 of (-1)^n x^(2n + 1) / (n! (2n + 1)), summed until a
+                term leaves the sum unchanged; past its largest term the terms fall in magnitude and alternate in sign,
+                so the remainder is below that term. The terms reach about e^(x^2) while erf(x) stays below 1, so erf is
+                summed at the context precision plus ceil(x^2 / ln 10) plus GUARD digits.
+    erfc        1 - erf(x), summed at the context precision plus ceil(2 x^2 / ln 10) plus GUARD digits: erfc(x) falls
+                like e^(-x^2), and the subtraction cancels another x^2 / ln 10 digits.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -272,6 +279,46 @@ def expm1_value(x) -> Decimal:
     return +result
 
 
+def erf_series(x: Decimal) -> Decimal:
+    """erf(x) by its Maclaurin series, at the precision of the current context."""
+    x2 = x * x
+    power = x  # (-1)^n x^(2n + 1) / n!
+    total = x
+    n = 0
+    while True:
+        n += 1
+        power = -power * x2 / n
+        term = power / (2 * n + 1)
+        if total + term == total:
+            break
+        total += term
+    return 2 * total / pi().sqrt()
+
+
+def erf_value(x) -> Decimal:
+    """erf(x)."""
+    with localcontext() as ctx:
+        ctx.prec += math.ceil(x * x / math.log(10)) + GUARD
+        result = erf_series(Decimal(x))
+    return +result
+
+
+def erfc_value(x) -> Decimal:
+    """erfc(x) = 1 - erf(x)."""
+    with localcontext() as ctx:
+        ctx.prec += math.ceil(2 * x * x / math.log(10)) + GUARD
+        result = 1 - erf_series(Decimal(x))
+    return +result
+
+
+def two_over_sqrt_pi() -> Decimal:
+    return 2 / pi().sqrt()
+
+
+def one_over_sqrt_pi() -> Decimal:
+    return 1 / pi().sqrt()
+
+
 def sqrt_two_pi() -> Decimal:
     return (2 * pi()).sqrt()
 
@@ -386,7 +433,37 @@ def section_gamma() -> None:
     print_cases("expm1Cases", "(float * float)[]", [(x, value(expm1_value, x)) for x in [-0.5, -5.0]])
 
 
-SECTIONS = {"gamma": section_gamma}
+def section_erf() -> None:
+    print("// python -I tests/reference/special.py erf")
+    print()
+    print("// 2 / sqrt(pi) and 1 / sqrt(pi):")
+    for f in (two_over_sqrt_pi, one_over_sqrt_pi):
+        print(f"//   {f.__name__} = {value(f)!r}")
+    print()
+
+    erf_xs = [
+        1e-300, 1e-20, 1e-8, 0.1, 0.4, 0.5, 0.9, 1.0, 1.5, 1.99, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, -0.7, -3.0,
+        # The worst points of a dense seeded scan of 21,425 cases on .NET and JavaScript.
+        1.4155672647003859, 1.3842121810791699, -0.5754788416632675,
+    ]
+    print_cases("erfCases", "(float * float)[]", [(x, value(erf_value, x)) for x in erf_xs])
+
+    erfc_xs = [
+        -6.0, -3.0, -1.0, -0.5, 1e-10, 0.3, 0.5, 0.9, 1.0, 1.5, 1.99, 2.0, 2.01, 2.5, 3.0, 4.5, 6.0, 10.0, 15.0, 20.0,
+        26.0, 26.2,
+        # The worst points of the same scan: below 2, where 1 - erf(x) multiplies the relative error of erf(x) by
+        # erf(x) / erfc(x), 213 at x = 2; in [1, 1.8); in the continued fraction's range; and near the edge of 1e-300
+        # (26.209397193028817, the largest scanned x where erfc(x) is at least 1e-300).
+        1.9900586191485314, 1.9965492769326505, 1.993136684222406, 1.9984920195828624, 1.9999999999999993,
+        1.7971114942683344, 1.799206427704676, 2.097369509069908, 13.556885625435964, 26.079080580576477,
+        26.209397193028817,
+        # The worst points of a second seeded scan, of 30,000 points in [1.9, 2), on .NET and JavaScript.
+        1.9984023829417783, 1.9952152428717123,
+    ]
+    print_cases("erfcCases", "(float * float)[]", [(x, value(erfc_value, x)) for x in erfc_xs])
+
+
+SECTIONS = {"gamma": section_gamma, "erf": section_erf}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in SECTIONS:

@@ -1,5 +1,6 @@
 // Reference values: the case tables below, printed by
 //   python -I tests/reference/special.py gamma
+//   python -I tests/reference/special.py erf
 // and the identities and series written in each test.
 module Ranvier.Science.Tests.SpecialTests
 
@@ -163,6 +164,71 @@ let private expm1Cases: (float * float)[] =
         -5.0, -0.9932620530009145
     |]
 
+// python -I tests/reference/special.py erf
+let private erfCases: (float * float)[] =
+    [|
+        1e-300, 1.1283791670955126e-300
+        1e-20, 1.1283791670955125e-20
+        1e-08, 1.1283791670955126e-08
+        0.1, 0.1124629160182849
+        0.4, 0.42839235504666845
+        0.5, 0.5204998778130465
+        0.9, 0.7969082124228322
+        1.0, 0.8427007929497149
+        1.5, 0.9661051464753108
+        1.99, 0.995111413199617
+        2.0, 0.9953222650189527
+        2.5, 0.999593047982555
+        3.0, 0.9999779095030014
+        4.0, 0.9999999845827421
+        5.0, 0.9999999999984626
+        6.0, 1.0
+        -0.7, -0.6778011938374184
+        -3.0, -0.9999779095030014
+        1.4155672647003859, 0.9547060639511419
+        1.3842121810791699, 0.9497197021106583
+        -0.5754788416632675, -0.5842691027884962
+    |]
+
+let private erfcCases: (float * float)[] =
+    [|
+        -6.0, 2.0
+        -3.0, 1.9999779095030015
+        -1.0, 1.8427007929497148
+        -0.5, 1.5204998778130465
+        1e-10, 0.999999999887162
+        0.3, 0.6713732405408726
+        0.5, 0.4795001221869535
+        0.9, 0.20309178757716786
+        1.0, 0.15729920705028513
+        1.5, 0.033894853524689274
+        1.99, 0.004888586800383003
+        2.0, 0.004677734981047266
+        2.01, 0.004475150644751763
+        2.5, 0.0004069520174449589
+        3.0, 2.209049699858544e-05
+        4.5, 1.9661604415428876e-10
+        6.0, 2.1519736712498913e-17
+        10.0, 2.088487583762545e-45
+        15.0, 7.212994172451207e-100
+        20.0, 5.395865611607901e-176
+        26.0, 5.663192408856143e-296
+        26.2, 1.643250792438946e-300
+        1.9900586191485314, 0.004887326150968393
+        1.9965492769326505, 0.004749545194316568
+        1.993136684222406, 0.004821541735648791
+        1.9984920195828624, 0.004708994549438264
+        1.9999999999999993, 0.004677734981047279
+        1.7971114942683344, 0.01103781204087212
+        1.799206427704676, 0.010944617826032545
+        2.097369509069908, 0.0030157455022655753
+        13.556885625435964, 6.302005962203107e-82
+        26.079080580576477, 9.186008752467783e-298
+        26.209397193028817, 1.0038244562485365e-300
+        1.9984023829417783, 0.004710858606266666
+        1.9952152428717123, 0.004777573082879369
+    |]
+
 let private raises (name: string) (f: unit -> float) : unit =
     Expect.throwsT<ArgumentOutOfRangeException> (fun () -> f () |> ignore) name
 
@@ -295,6 +361,47 @@ let tests =
                 Expect.isTrue (Double.IsNaN (Special.log1p nan)) "log1p nan"
                 Expect.isTrue (Double.IsNaN (Special.expm1 nan)) "expm1 nan"
                 raises "log1p -1.5" (fun () -> Special.log1p -1.5)
+            }
+
+            test "erf matches the reference" {
+                for x, expected in erfCases do
+                    expectClose 1e-13 0.0 expected (Special.erf x) (sprintf "erf %.17g" x)
+            }
+
+            test "erfc matches the reference" {
+                for x, expected in erfcCases do
+                    Expect.isTrue (expected >= 1e-300) (sprintf "erfc %.17g is at least 1e-300" x)
+                    expectClose 1e-13 0.0 expected (Special.erfc x) (sprintf "erfc %.17g" x)
+            }
+
+            test "erf is odd and erfc reflects" {
+                let xs = Array.append (Array.map fst erfCases) (Array.map fst erfcCases)
+
+                for x in xs do
+                    Expect.equal (Special.erf (-x)) (-(Special.erf x)) (sprintf "erf %.17g" (-x))
+
+                for x in xs |> Array.filter (fun x -> x >= 0.0) do
+                    Expect.equal (Special.erfc (-x)) (2.0 - Special.erfc x) (sprintf "erfc %.17g" (-x))
+            }
+
+            test "erf and erfc sum to one" {
+                // erf x + erfc x = 1.
+                for k in -100 .. 100 do
+                    let x = float k / 100.0
+                    expectClose 0.0 3e-16 1.0 (Special.erf x + Special.erfc x) (sprintf "x = %g" x)
+            }
+
+            test "limits" {
+                Expect.equal (Special.erf 0.0) 0.0 "erf 0"
+                Expect.equal (1.0 / Special.erf -0.0) (-infinity) "erf -0 is -0"
+                Expect.equal (Special.erfc 0.0) 1.0 "erfc 0"
+                Expect.equal (Special.erf infinity) 1.0 "erf infinity"
+                Expect.equal (Special.erf (-infinity)) -1.0 "erf -infinity"
+                Expect.equal (Special.erfc infinity) 0.0 "erfc infinity"
+                Expect.equal (Special.erfc (-infinity)) 2.0 "erfc -infinity"
+                Expect.equal (Special.erfc 40.0) 0.0 "erfc 40"
+                Expect.isTrue (Double.IsNaN (Special.erf nan)) "erf nan"
+                Expect.isTrue (Double.IsNaN (Special.erfc nan)) "erfc nan"
             }
 
             test "infinity and NaN" {
