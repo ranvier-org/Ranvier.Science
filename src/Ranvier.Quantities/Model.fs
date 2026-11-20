@@ -78,7 +78,7 @@ type Entry =
 /// <para>A removal costs O(n) in the model's number of entries.</para>
 /// </remarks>
 [<Sealed>]
-type Model internal (name: string, parent: Model voption) =
+type Model internal (name: string, parent: Model voption, catalogue: UnitCatalogue) =
     let entries = ResizeArray<Entry>()
     let byId = Dictionary<string, Entry>()
     let declared = HashSet<string>()
@@ -102,6 +102,10 @@ type Model internal (name: string, parent: Model voption) =
 
     member _.Name: string = name
     member _.Parent: Model voption = parent
+
+    /// The catalogue for the unit literals of the formula notation: `UnitCatalogue.si` for `Model.create`, the
+    /// catalogue given to `Model.createWith`, and the parent's for `Model.child`.
+    member _.Catalogue: UnitCatalogue = catalogue
 
     /// This model's own entries, in declaration order.
     member _.Entries: Entry list = List.ofSeq entries
@@ -147,6 +151,11 @@ type Model internal (name: string, parent: Model voption) =
             declared.Remove id |> ignore
 
 module Model =
-    let create (name: string) : Model = Model(name, ValueNone)
+    /// A model without a parent, over `UnitCatalogue.si`.
+    let create (name: string) : Model = Model(name, ValueNone, UnitCatalogue.si)
 
-    let child (parent: Model) (name: string) : Model = Model(name, ValueSome parent)
+    /// A model without a parent, over the given catalogue.
+    let createWith (catalogue: UnitCatalogue) (name: string) : Model = Model(name, ValueNone, catalogue)
+
+    /// A model whose `TryFind` falls back to the parent, over the parent's catalogue.
+    let child (parent: Model) (name: string) : Model = Model(name, ValueSome parent, parent.Catalogue)
