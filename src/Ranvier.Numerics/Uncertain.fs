@@ -58,7 +58,8 @@ module internal UncertainSources =
 ///
 /// The operators `+ - * /` combine two values, or a value and a float on either side. Each function member applies the
 /// float function to the value and multiplies every contribution by the derivative at the value, so F#'s `sqrt`,
-/// `exp`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `abs` and `**` apply.
+/// `exp`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `abs` and `**` apply
+/// (`abs` on .NET; `Uncertain.abs` on both targets).
 /// An operation on two values costs O(m + n) in their numbers of sources; one on a single value costs at most O(n).
 [<NoComparison>]
 type Uncertain =
@@ -192,18 +193,24 @@ type Uncertain =
         let sign = if x < 0.0 then -1.0 elif x >= 0.0 then 1.0 else nan
         Uncertain.Lift(abs x, sign, a)
 
-    /// x ** y for a float exponent; derivative y·x^(y−1).
+    /// x ** y for a float exponent; derivative y·x^(y−1), and 0 for y = 0 at every x, 0 included.
     static member Pow(a: Uncertain, y: float) : Uncertain =
-        Uncertain.Lift(a.Value ** y, y * a.Value ** (y - 1.0), a)
+        Uncertain.Lift(a.Value ** y, Uncertain.PowerDerivative(a.Value, y), a)
 
-    /// x ** y for an uncertain exponent; derivatives y·x^(y−1) in the base and x^y·ln x in the exponent. The
-    /// exponent's contributions are NaN for a base of 0 or less.
+    /// x ** y for an uncertain exponent; derivatives y·x^(y−1) in the base, 0 for y = 0 at every x, and x^y·ln x in
+    /// the exponent. The exponent's derivative is NaN for a negative base; at a base of 0 it is NaN for y > 0 and −∞
+    /// for y ≤ 0 (+∞ at −0 for a negative odd integer y).
     static member Pow(a: Uncertain, b: Uncertain) : Uncertain =
         let x = a.Value
         let y = b.Value
         let v = x ** y
-        Uncertain.Combine(v, y * x ** (y - 1.0), a, v * log x, b)
+        Uncertain.Combine(v, Uncertain.PowerDerivative(x, y), a, v * log x, b)
 
+    /// y·x^(y−1), and 0 for y = 0, where x^0 = 1 at every x and the product would be 0 · ∞ at x = 0.
+    static member private PowerDerivative(x: float, y: float) : float =
+        if y = 0.0 then 0.0 else y * x ** (y - 1.0)
+
+[<RequireQualifiedAccess>]
 module Uncertain =
 #if FABLE_COMPILER
     let private lastSource = ref 0
@@ -261,17 +268,34 @@ module Uncertain =
 
     let value (u: Uncertain) : float = u.Value
 
-    /// The root of the sum of the squared contributions, summed in id order: 0 for an exact value, NaN when a
-    /// contribution is NaN. It overflows to +∞ when a contribution exceeds about 1e154 in magnitude (general
-    /// knowledge). O(n) in the number of sources.
+    /// The root of the sum of the squared contributions, as m·√(Σᵢ (cᵢ/m)²) summed in id order with m the largest
+    /// |cᵢ|, so that no square underflows or overflows: the result is +∞ only when the root exceeds the largest double.
+    /// 0 for an exact value and when every contribution is 0, NaN when a contribution is NaN, otherwise +∞ when one is
+    /// infinite. For n contributions the relative error is at most about (n/2 + 3)·2⁻⁵³ (general knowledge: a
+    /// first-order rounding bound of the scaled sum; not measured). O(n) in the number of sources.
     let standardUncertainty (u: Uncertain) : float =
         let c = u.Contributions
-        let mutable s = 0.0
+        let mutable largest = 0.0
+        let mutable unknown = false
 
         for i in 0 .. c.Length - 1 do
-            s <- s + c[i] * c[i]
+            let magnitude = Math.Abs c[i]
 
-        sqrt s
+            if Double.IsNaN magnitude then unknown <- true
+            elif magnitude > largest then largest <- magnitude
+
+        if unknown then
+            nan
+        elif largest = 0.0 || Double.IsInfinity largest then
+            largest
+        else
+            let mutable s = 0.0
+
+            for i in 0 .. c.Length - 1 do
+                let r = c[i] / largest
+                s <- s + r * r
+
+            largest * sqrt s
 
     /// The sum of the products of the two values' contributions over the sources both hold: 0 for disjoint sources.
     /// O(m + n).
