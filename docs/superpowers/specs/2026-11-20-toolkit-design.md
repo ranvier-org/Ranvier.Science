@@ -670,7 +670,10 @@ UnitOf.convert : from: UnitOf<'u> -> target: UnitOf<'v> -> float<'u> -> float<'v
 The grammar: factors separated by `·`, `*`, `.` or a space, `/` for division (left-associative, so `J/kg/K` is
 J·kg⁻¹·K⁻¹), parentheses, `1` as a numerator, and an integer exponent written `^n`, `^-n` or in Unicode superscripts
 (`m²`, `s⁻¹`). The parsed unit's factors carry the symbols as written, so `UnitInfo.symbol` of the parse of "km/h" is
-"km/h". An error message names the character position, as `Formula.parse` does.
+"km/h". `UnitCatalogue.add` stores a unit as one factor, its symbol, whatever factors the `UnitInfo` given has, as the
+built-in named units are stored: the parse of "kWh" added as `(kilowatt * hour).Info` has the symbol "kWh", and a
+custom unit is atomic, so its square root needs an even exponent of the symbol itself (changed in the T1 final review).
+An error message names the character position, as `Formula.parse` does.
 
 ### 8.3 The model's catalogue and the formula notation
 

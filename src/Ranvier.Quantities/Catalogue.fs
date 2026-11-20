@@ -340,12 +340,15 @@ module Units =
 module UnitCatalogue =
     let private forbidden = " \u00B7*./()^[],-\u2212\u00D7\u00F7\u207B\u2070\u00B9\u00B2\u00B3\u2074\u2075\u2076\u2077\u2078\u2079"
 
-    /// The catalogue with `unit` registered under `symbol`, prefixable or not. Raises ArgumentException for a null
-    /// or empty symbol, one the catalogue already holds, one containing a space, any of `\u00B7*./()^[],-\u2212\u00D7\u00F7`,
-    /// an ASCII digit, a superscript digit or `\u207B`, and for `prefixable` on a unit that is not one factor with
-    /// exponent 1; raises ArgumentOutOfRangeException unless the unit's scale is positive and finite. The look-alikes
-    /// U+03BC and U+2126 are replaced by U+00B5 and U+03A9 before the symbol is checked and stored. The catalogue
-    /// given is not changed.
+    /// The catalogue with `unit` registered under `symbol`, prefixable or not, as one factor, `symbol` with exponent 1,
+    /// of the unit's dimension and scale, whatever factors `unit` has. A unit the catalogue holds is atomic, as the
+    /// built-in named units are: `UnitInfo.parse` gives it the symbol as written ("kWh", not "kW\u00B7h"), and its square
+    /// root needs an even exponent of that symbol (`sqrt` of "kWh^2" is "kWh"; of a hectare added as m^2, "ha" is an
+    /// Error). Raises ArgumentException for a null or empty symbol, one the catalogue already holds, one containing a
+    /// space, any of `\u00B7*./()^[],-\u2212\u00D7\u00F7`, an ASCII digit, a superscript digit or `\u207B`, and for
+    /// `prefixable` on a unit that is not one factor with exponent 1; raises ArgumentOutOfRangeException unless the
+    /// unit's scale is positive and finite. The look-alikes U+03BC and U+2126 are replaced by U+00B5 and U+03A9 before
+    /// the symbol is checked and stored. The catalogue given is not changed.
     let add (symbol: string) (unit: UnitInfo) (prefixable: bool) (catalogue: UnitCatalogue) : UnitCatalogue =
         if String.IsNullOrEmpty symbol then
             raise (ArgumentException("A unit's symbol must have at least one character.", nameof symbol))
@@ -374,7 +377,8 @@ module UnitCatalogue =
         if prefixable && not oneFactor then
             raise (ArgumentException("Only a unit with one factor of exponent 1 can take prefixes.", nameof prefixable))
 
-        UnitCatalogue(Map.add symbol (struct (unit, prefixable)) catalogue.Units)
+        let atomic = { Factors = [ (symbol, 1) ]; Dimension = unit.Dimension; Scale = unit.Scale }
+        UnitCatalogue(Map.add symbol (struct (atomic, prefixable)) catalogue.Units)
 
     /// The unit registered under the symbol, or that of a prefix and a prefixable symbol ("da" tried before "d");
     /// a prefixed unit's factor is the prefix's symbol followed by the unit's. ValueNone when there is none.
@@ -449,7 +453,7 @@ module UnitCatalogue =
                 "pc", Units.parsec.Info, false
                 "bar", Units.bar.Info, false
                 "atm", Units.atmosphere.Info, false
-                "deg", { Units.degree.Info with Factors = [ ("deg", 1) ] }, false
+                "deg", Units.degree.Info, false
             ]
 
         entries
