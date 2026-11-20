@@ -13,6 +13,7 @@
         <Compile Include="Aggregate.fs" />
         <Compile Include="Tolerance.fs" />
         <Compile Include="Generator.fs" />
+        <Compile Include="Uncertain.fs" />
     </ItemGroup>
 
     <ItemGroup>
