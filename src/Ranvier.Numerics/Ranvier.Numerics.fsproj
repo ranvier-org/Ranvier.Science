@@ -14,6 +14,7 @@
         <Compile Include="Roots.fs" />
         <Compile Include="LeastSquares.fs" />
         <Compile Include="Calculus.fs" />
+        <Compile Include="Ode.fs" />
         <Compile Include="FloatPolicy.fs" />
         <Compile Include="Aggregate.fs" />
         <Compile Include="Tolerance.fs" />

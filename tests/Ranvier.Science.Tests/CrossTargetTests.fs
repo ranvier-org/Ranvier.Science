@@ -66,6 +66,13 @@ let tests =
                 Expect.equal x.[2] (0.6381743641838691) "x2"
             }
 
+            // Literals: Ode.rungeKutta4 printed with ToString("R") on .NET; JavaScript must match.
+            test "RK4 gives the same bits on both targets" {
+                let y = Ode.rungeKutta4 (fun _ y -> [| y[1]; -y[0] |]) 0.0 [| 1.0; 0.0 |] 1.0 100
+                Expect.equal y[0] 0.5403023059378852 "y0"
+                Expect.equal y[1] -0.8414709847622888 "y1"
+            }
+
 #if !FABLE_COMPILER
             // The stream was recorded on Windows. `log` and `cos` come from the platform's math
             // library, so another platform may differ in the last places.
