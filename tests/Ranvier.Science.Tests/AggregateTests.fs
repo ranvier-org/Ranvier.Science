@@ -773,6 +773,7 @@ let tests =
                 // 2^-52, Double machine epsilon
                 let epsilon = 2.220446049250313e-16
                 let bound = 4.0 * epsilon * 1e16
+                // 1.75: the value both targets produce, quoted in the momentsBy doc; the rows' mean is 2.
                 Expect.equal (Moments.mean m.Value.Value) 1.75 "the mean straight after the removal"
                 Expect.isLessThanOrEqual (abs (Moments.mean m.Value.Value - 2.0)) bound "the mean is within n * epsilon * the largest magnitude")
         }
@@ -819,7 +820,8 @@ let tests =
                     |> Projection.fold (fun s row -> let x, w = valueOf row in WeightedMoments.add true s x w) WeightedMoments.zero
 
                 expectClose 1e-12 0.0 2.0 (WeightedMoments.mean scratch.Value) "the from-scratch fold of the remaining rows"
-                Expect.isGreaterThan (abs (WeightedMoments.mean m.Value.Value - 2.0)) 0.5 "the maintained mean differs from it")
+                // 1: the value both targets produce, quoted in the weightedMomentsBy doc; the rows' mean is 2.
+                Expect.equal (WeightedMoments.mean m.Value.Value) 1.0 "the maintained mean straight after the removal")
         }
 
     ]
