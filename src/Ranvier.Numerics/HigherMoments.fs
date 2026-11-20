@@ -158,26 +158,34 @@ module HigherMoments =
             let v = Sum.value m.M2 / (m.N - 1.0)
             if v < 0.0 then 0.0 else v
 
+    // 2^-970 = 2^-1022 * 2^52, written as the decimal that rounds to exactly that double: below it a moment bounded by
+    // M2^(3/2) or M2^2 has left the normal range and keeps fewer than 52 bits.
+    let private normalFloor: float = 1.0020841800044864e-292
+
     /// <summary>
-    /// The population skewness, sqrt n * (M3 / M2) / sqrt M2; NaN when M2 is 0 or the count is zero. The divisions are
-    /// ordered so that no intermediate overflows or underflows while the moments are finite and normal.
+    /// The population skewness, sqrt n * (M3 / M2) / sqrt M2; NaN when M2 is 0, when the count is zero, or when
+    /// M2 * sqrt M2 is below 2^-970 (deviations below about 1e-97, where M3 may have left the normal range: rescale the
+    /// data). The divisions are ordered so that no intermediate overflows or underflows while the moments are finite and
+    /// normal.
     /// </summary>
     let skewness (m: HigherMoments) : float =
         let m2 = Sum.value m.M2
 
-        if not (m2 > 0.0) then
+        if not (m2 > 0.0) || m2 * sqrt m2 < normalFloor then
             nan
         else
             sqrt m.N * (Sum.value m.M3 / m2) / sqrt m2
 
     /// <summary>
-    /// The population excess kurtosis, n * (M4 / M2) / M2 - 3; NaN when M2 is 0 or the count is zero. The divisions are
-    /// ordered so that no intermediate overflows or underflows while the moments are finite and normal.
+    /// The population excess kurtosis, n * (M4 / M2) / M2 - 3; NaN when M2 is 0, when the count is zero, or when
+    /// M2 * M2 is below 2^-970 (deviations below about 1e-73, where M4 may have underflowed to a plausible -3: rescale
+    /// the data). The divisions are ordered so that no intermediate overflows or underflows while the moments are finite
+    /// and normal.
     /// </summary>
     let kurtosis (m: HigherMoments) : float =
         let m2 = Sum.value m.M2
 
-        if not (m2 > 0.0) then
+        if not (m2 > 0.0) || m2 * m2 < normalFloor then
             nan
         else
             m.N * (Sum.value m.M4 / m2) / m2 - 3.0

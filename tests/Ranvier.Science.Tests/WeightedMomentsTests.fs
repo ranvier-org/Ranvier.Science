@@ -75,8 +75,7 @@ let tests =
                 Expect.equal (WeightedMoments.count z) 0.0 "count"
 
                 for (name, v) in
-                    [ "totalWeight", WeightedMoments.totalWeight z
-                      "mean", WeightedMoments.mean z
+                    [ "mean", WeightedMoments.mean z
                       "variance", WeightedMoments.variance z
                       "frequencyVariance", WeightedMoments.frequencyVariance z
                       "reliabilityVariance", WeightedMoments.reliabilityVariance z
@@ -96,5 +95,99 @@ let tests =
                 Expect.equal (WeightedMoments.variance one) 0.0 "variance"
                 Expect.isTrue (Double.IsNaN(WeightedMoments.frequencyVariance one)) "frequencyVariance"
                 Expect.isTrue (Double.IsNaN(WeightedMoments.reliabilityVariance one)) "reliabilityVariance"
+            }
+
+            test "the total weight of nothing is 0" {
+                Expect.equal (WeightedMoments.totalWeight WeightedMoments.zero) 0.0 "totalWeight zero"
+            }
+
+            test "a NaN weight through merge, unmerge and remove gives NaN reads" {
+                let clean = ofPairs true [| 1.0; 2.0 |] [| 1.0; 1.0 |]
+                let bad = WeightedMoments.add true WeightedMoments.zero 5.0 nan
+
+                let allNaN (name: string) (m: WeightedMoments) =
+                    Expect.equal (WeightedMoments.count m) 3.0 (name + " count")
+                    Expect.isTrue (Double.IsNaN(WeightedMoments.mean m)) (name + " mean")
+                    Expect.isTrue (Double.IsNaN(WeightedMoments.variance m)) (name + " variance")
+                    Expect.isTrue (Double.IsNaN(WeightedMoments.effectiveCount m)) (name + " effectiveCount")
+
+                allNaN "merge" (WeightedMoments.merge true clean bad)
+                allNaN "merge reversed" (WeightedMoments.merge true bad clean)
+                let whole = WeightedMoments.add true clean 5.0 nan
+                let rest = WeightedMoments.unmerge true (WeightedMoments.merge true clean (ofPairs true [| 9.0 |] [| 1.0 |])) (ofPairs true [| 9.0 |] [| 1.0 |])
+                Expect.equal (WeightedMoments.count rest) 2.0 "clean unmerge"
+                allNaN "add" whole
+                let poisonedWhole = WeightedMoments.merge true (WeightedMoments.merge true clean bad) (ofPairs true [| 7.0 |] [| 1.0 |])
+                let afterUnmerge = WeightedMoments.unmerge true poisonedWhole (ofPairs true [| 7.0 |] [| 1.0 |])
+                allNaN "unmerge" afterUnmerge
+                let afterRemove = WeightedMoments.remove true (WeightedMoments.add true whole 8.0 1.0) 8.0 1.0
+                allNaN "remove another pair" afterRemove
+                let bigger = WeightedMoments.add true whole 8.0 1.0
+                Expect.isTrue (Double.IsNaN(WeightedMoments.mean (WeightedMoments.remove true bigger 5.0 nan))) "remove the NaN pair"
+            }
+
+            test "weights added then removed leave exactly nothing, with or without compensation" {
+                for c in [ true; false ] do
+                    let xs = [| 1.0; 2.0; 3.0 |]
+                    let ws = [| 0.1; 0.2; 0.3 |]
+                    let m = ofPairs c xs ws
+                    let back = Array.fold2 (fun s x w -> WeightedMoments.remove c s x w) m xs ws
+                    Expect.equal (WeightedMoments.totalWeight back) 0.0 (sprintf "total weight, compensated %b" c)
+
+                    // Remove two of the three, then the third pair twice over: the positive-weight count is exhausted.
+                    let one = ofPairs c [| 4.0; 5.0 |] [| 0.1; 0.2 |]
+                    let keepZero = WeightedMoments.add c one 6.0 0.0
+                    let gone = WeightedMoments.remove c (WeightedMoments.remove c keepZero 4.0 0.1) 5.0 0.2
+                    Expect.equal (WeightedMoments.count gone) 1.0 "the zero-weight observation remains"
+                    Expect.equal (WeightedMoments.totalWeight gone) 0.0 "exact zero weight"
+
+                    for (name, v) in
+                        [ "mean", WeightedMoments.mean gone
+                          "variance", WeightedMoments.variance gone
+                          "effectiveCount", WeightedMoments.effectiveCount gone ] do
+                        Expect.isTrue (Double.IsNaN v) (name + " is NaN")
+            }
+
+            test "removing more positive-weight observations than were added raises" {
+                let m = WeightedMoments.add true (ofPairs true [| 1.0 |] [| 1.0 |]) 2.0 0.0
+                Expect.throwsT<InvalidOperationException> (fun () -> WeightedMoments.remove true (WeightedMoments.remove true m 1.0 1.0) 3.0 1.0 |> ignore) "remove"
+                let part = ofPairs true [| 1.0; 2.0 |] [| 1.0; 1.0 |]
+                let whole = WeightedMoments.add true (ofPairs true [| 1.0 |] [| 1.0 |]) 2.0 0.0
+                Expect.throwsT<InvalidOperationException> (fun () -> WeightedMoments.unmerge true whole part |> ignore) "unmerge"
+            }
+
+            test "positive weights remaining with the total at or below 0 give NaN reads" {
+                let m = ofPairs true [| 1.0; 2.0; 3.0 |] [| 1.0; 1.0; 1.0 |]
+                let broken = WeightedMoments.remove true m 3.0 5.0
+                Expect.equal (WeightedMoments.count broken) 2.0 "count"
+
+                for (name, v) in
+                    [ "mean", WeightedMoments.mean broken
+                      "variance", WeightedMoments.variance broken
+                      "frequencyVariance", WeightedMoments.frequencyVariance broken
+                      "effectiveCount", WeightedMoments.effectiveCount broken ] do
+                    Expect.isTrue (Double.IsNaN v) (name + " is NaN")
+
+                let whole = ofPairs true [| 1.0; 2.0; 3.0; 4.0 |] [| 1.0; 1.0; 1.0; 1.0 |]
+                let part = ofPairs true [| 9.0 |] [| 6.0 |]
+                let over = WeightedMoments.unmerge true (WeightedMoments.merge true whole (WeightedMoments.add true WeightedMoments.zero 9.0 1.0)) part
+                Expect.isTrue (Double.IsNaN(WeightedMoments.mean over)) "unmerge of a larger weight"
+            }
+
+            test "the zero-weight branches of remove, merge and unmerge keep the count" {
+                let a = ofPairs true [| 1.0; 3.0 |] [| 1.0; 1.0 |]
+                let zeros = WeightedMoments.add true (WeightedMoments.add true WeightedMoments.zero 7.0 0.0) 8.0 0.0
+                let both = WeightedMoments.merge true a zeros
+                Expect.equal (WeightedMoments.count both) 4.0 "merge count"
+                Expect.equal (WeightedMoments.mean both) (WeightedMoments.mean a) "merge mean"
+                Expect.equal (WeightedMoments.count (WeightedMoments.merge true zeros a)) 4.0 "merge, zero weights first"
+                Expect.equal (WeightedMoments.mean (WeightedMoments.merge true zeros a)) (WeightedMoments.mean a) "merge mean, zero weights first"
+                Expect.equal (WeightedMoments.count (WeightedMoments.merge true zeros zeros)) 4.0 "two zero-weight sets"
+                Expect.equal (WeightedMoments.unmerge true both zeros) a "unmerge the zero-weight part"
+                let onlyZeros = WeightedMoments.unmerge true both a
+                Expect.equal (WeightedMoments.count onlyZeros) 2.0 "zero-weight leftover count"
+                Expect.equal (WeightedMoments.totalWeight onlyZeros) 0.0 "zero-weight leftover weight"
+                Expect.isTrue (Double.IsNaN(WeightedMoments.mean onlyZeros)) "zero-weight leftover mean"
+                Expect.equal (WeightedMoments.remove true both 7.0 0.0 |> WeightedMoments.count) 3.0 "remove a zero weight"
             }
         ]

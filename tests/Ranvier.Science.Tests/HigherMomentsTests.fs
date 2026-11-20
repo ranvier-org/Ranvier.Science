@@ -118,4 +118,16 @@ let tests =
                 Expect.equal (HigherMoments.merge true HigherMoments.zero one) one "merge with empty"
                 Expect.equal (HigherMoments.unmerge true one HigherMoments.zero) one "unmerge of empty"
             }
+
+            test "the reads are NaN below the floors where the fourth or third moment leaves the normal range" {
+                // Floors: kurtosis needs M2 * M2 >= 2^-970, skewness M2 * sqrt M2 >= 2^-970. At scale 1e-100 the
+                // fourth moment underflows to 0 while M2 is normal, which would read an excess kurtosis of exactly -3.
+                let tiny = ofValues true (Array.map ((*) 1e-100) xs1000)
+                Expect.isTrue (Double.IsNaN(HigherMoments.kurtosis tiny)) "kurtosis at 1e-100"
+                Expect.isTrue (Double.IsNaN(HigherMoments.skewness (ofValues true (Array.map ((*) 1e-110) xs1000)))) "skewness at 1e-110"
+                let unit = ofValues true xs1000
+                let ok = ofValues true (Array.map ((*) 1e-70) xs1000)
+                expectClose 1e-12 0.0 (HigherMoments.kurtosis unit) (HigherMoments.kurtosis ok) "kurtosis at 1e-70"
+                expectClose 1e-12 0.0 (HigherMoments.skewness unit) (HigherMoments.skewness ok) "skewness at 1e-70"
+            }
         ]
