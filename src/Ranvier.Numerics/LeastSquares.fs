@@ -154,9 +154,12 @@ module LeastSquares =
                         scale[c] <- norm
 
                 let mutable accepted = false
+                let mutable firstTrial = true
 
                 while not finished && not accepted do
                     let root = sqrt lambda
+                    let isFirst = firstTrial
+                    firstTrial <- false
 
                     let augmented =
                         Matrix.init (m + n) n (fun row c ->
@@ -173,7 +176,9 @@ module LeastSquares =
                         if lambda > lambdaLimit then
                             finished <- true
                     | Ok delta ->
-                        if Vector.norm delta <= tolerance * (Vector.norm p + tolerance) then
+                        let stepSmall = Vector.norm delta <= tolerance * (Vector.norm p + tolerance)
+
+                        if isFirst && stepSmall then
                             converged <- true
                             finished <- true
                         else
@@ -192,7 +197,7 @@ module LeastSquares =
                                 lambda <- max (lambda / 10.0) lambdaFloor
                                 j <- evaluateJacobian p r
 
-                                if cost = 0.0 || decrease <= tolerance * previous then
+                                if cost = 0.0 || stepSmall || decrease <= tolerance * previous then
                                     converged <- true
                                     finished <- true
                             else
@@ -228,10 +233,15 @@ module LeastSquares =
     /// lower, so a NaN cost rejects it; a rank-deficient solve counts as a rejected trial. The Jacobian is evaluated
     /// once per iteration, at the accepted parameters.
     ///
-    /// `Converged` is true when a computed step, accepted or not, has ‖δ‖ ≤ Tolerance·(‖p‖ + Tolerance) (the result
-    /// is the best accepted parameters), when an accepted step lowers the cost by at most Tolerance times the old
-    /// cost, or when the cost is 0. It is false at `MaximumIterations`, when λ passes 1e16 with no accepted step, and
-    /// when the initial residuals are not all finite (then `Iterations` is 0 and the Jacobian is NaN).
+    /// `Converged` is true when the step has ‖δ‖ ≤ Tolerance·(‖p‖ + Tolerance) and is either accepted or is the first
+    /// trial of an iteration (the step at the λ the iteration starts with, near the Gauss–Newton step); a trial after
+    /// a rejection in the same iteration never ends the fit by this test, because rejection raises λ and shrinks the
+    /// step wherever no descent exists. It is also true when an accepted step lowers the cost by at most Tolerance
+    /// times the old cost, or when the cost is 0. The result is the best accepted parameters. It is false at
+    /// `MaximumIterations`, when λ passes 1e16 without an accepted step, and when the initial residuals are not all
+    /// finite (then `Iterations` is 0 and the Jacobian is NaN). Tolerance bounds the relative change of the cost and
+    /// of the parameters between iterations, not the error of the parameters: a flat valley can stop the fit well
+    /// short of the minimum (on NIST MGH09, measured by the reviewer, about 1e-5 from the certified values).
     ///
     /// Raises `ArgumentOutOfRangeException` for a negative or NaN tolerance or a cap below 1, and `ArgumentException`
     /// for an empty initial vector, for a residual vector whose length differs from the first, or for a Jacobian that

@@ -127,6 +127,28 @@ let tests =
                 Expect.equal r.Cost 2.5 "cost at the start"
             }
 
+            test "a Jacobian of the wrong sign finds no descent and does not converge" {
+                // Residual p - 3 from p = 5 (cost 2, minimum 0 at 3), with the Jacobian -1 in place of +1.
+                let r =
+                    LeastSquares.levenbergMarquardtWith
+                        LeastSquaresOptions.standard
+                        (fun p -> [| p[0] - 3.0 |])
+                        (fun _ -> Matrix.init 1 1 (fun _ _ -> -1.0))
+                        [| 5.0 |]
+
+                Expect.isFalse r.Converged "no descent was found"
+                Expect.equal r.Parameters [| 5.0 |] "parameters stay at the start"
+                Expect.equal r.Cost 2.0 "cost at the start"
+            }
+
+            test "a cliff at the start finds no descent and does not converge" {
+                // Every point but the start has residual 10 (cost 50); the start has residual 2 (cost 2).
+                let f (p: float[]) = if p[0] = 5.0 then [| 2.0 |] else [| 10.0 |]
+                let r = LeastSquares.levenbergMarquardt LeastSquaresOptions.standard f [| 5.0 |]
+                Expect.isFalse r.Converged "no descent was found"
+                Expect.equal r.Parameters [| 5.0 |] "parameters stay at the start"
+            }
+
             test "a raising residual function propagates" {
                 let mutable calls = 0
 
