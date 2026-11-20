@@ -40,6 +40,7 @@ let all =
             testList "ComomentsTests.fs" [ Ranvier.Science.Tests.ComomentsTests.tests ]
             testList "HigherMomentsTests.fs" [ Ranvier.Science.Tests.HigherMomentsTests.tests ]
             testList "WeightedMomentsTests.fs" [ Ranvier.Science.Tests.WeightedMomentsTests.tests ]
+            testList "HistogramTests.fs" [ Ranvier.Science.Tests.HistogramTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]

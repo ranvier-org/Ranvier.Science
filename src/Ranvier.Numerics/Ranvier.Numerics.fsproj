@@ -25,6 +25,7 @@
         <Compile Include="Tolerance.fs" />
         <Compile Include="Generator.fs" />
         <Compile Include="OrderStatistic.fs" />
+        <Compile Include="Histogram.fs" />
         <Compile Include="Uncertain.fs" />
     </ItemGroup>
 
