@@ -184,6 +184,14 @@ let tests =
                         |> ignore)
                     "overflow"
 
+                // kilo times -2 is -2000 (closed form); NaN times 1000 is NaN.
+                for scale, shown in [ -2.0, "-2000"; nan, "NaN" ] do
+                    Expect.throwsC
+                        (fun () ->
+                            UnitInfo.prefixed Prefix.kilo { Factors = [ ("x", 1) ]; Dimension = Dimension.length; Scale = scale }
+                            |> ignore)
+                        (fun e -> Expect.stringContains e.Message ("The scale of kx is " + shown + ";") $"a scale of {shown}")
+
                 let us: UnitOf<us> = UnitOf.prefixed Prefix.micro Units.second
                 Expect.isTrue (UnitInfo.sameUnit us.Info Units.microsecond.Info) "the microsecond"
                 Expect.equal (UnitInfo.symbol us.Info) (micro + "s") "its symbol"
