@@ -118,7 +118,8 @@ module HypothesisTest =
 
     /// <summary>
     /// The one-sample z test of the mean for a known standard deviation: z = (x̄ − μ₀)/(σ/√n), standard normal under
-    /// the null. Raises ArgumentOutOfRangeException unless σ is finite and greater than 0 and the null value is finite. A count of 0 gives every field NaN. Both degrees-of-freedom fields are NaN. Relative error of the
+    /// the null. Raises ArgumentOutOfRangeException unless σ is finite and greater than 0 and the null value is
+    /// finite. A count of 0 gives every field NaN. Both degrees-of-freedom fields are NaN. Relative error of the
     /// p-value at most 1e-12 over the sample of the test "one-sample z against the reference", which pins it.
     /// </summary>
     let oneSampleZ (alternative: Alternative) (mu0: float) (sigma: float) (m: Moments) : TestResult =
