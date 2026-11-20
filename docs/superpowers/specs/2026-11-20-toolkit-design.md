@@ -703,7 +703,10 @@ Formula: string                 // the formula text of an entry declared by Quan
 ```
 
 Each input and constant entry owns one `Uncertain` source, allocated at declaration, so every formula that reads it
-shares the source and correlations follow.
+shares the source and correlations follow. While its standard uncertainty is 0, its `Measured` is `Uncertain.exact` of
+the value and holds no contribution, so a function with an infinite derivative there (`sqrt` at 0, `asin` at 1) gives
+uncertainty 0, not 0 · ∞ = NaN; the source's id stays allocated, and a later `SetUncertainty` brings the contribution
+back under it (changed in the T1 final review).
 
 ```fsharp
 Quantity.input model id name unit initial                           // as today; uncertainty 0

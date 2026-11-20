@@ -55,9 +55,13 @@ module Quantity =
 
     let private unknown () = nan
 
-    /// `value`, holding the one source of `unitSource` (a source of contribution 1) with contribution `uncertainty`.
+    /// `Uncertain.exact value` when `uncertainty` is 0; otherwise `value`, holding the one source of `unitSource` (a
+    /// source of contribution 1) with contribution `uncertainty`.
     let private measured (unitSource: Uncertain) (value: float) (uncertainty: float) : Uncertain =
-        Uncertain.map (fun _ -> value) (fun _ -> uncertainty) unitSource
+        if uncertainty = 0.0 then
+            Uncertain.exact value
+        else
+            Uncertain.map (fun _ -> value) (fun _ -> uncertainty) unitSource
 
     let private entry
         (id: string)
@@ -181,8 +185,11 @@ module Quantity =
         Quantity<'u>(e)
 
     /// An input of value `initial` and uncertainty 0, over two signals, one for the value and one for the standard
-    /// uncertainty, and an uncertainty source of its own. Raises `ArgumentException` for an
-    /// identifier outside `[A-Za-z_][A-Za-z0-9_]*` and for one the model already declares.
+    /// uncertainty, and an uncertainty source of its own, allocated at declaration. While the uncertainty is 0,
+    /// `Entry.Measured` is `Uncertain.exact` of the value and holds no contribution, so a function with an infinite
+    /// derivative there gives uncertainty 0; otherwise it holds the source with the uncertainty as its contribution,
+    /// under the same id after every `SetUncertainty`. Raises `ArgumentException` for an identifier outside
+    /// `[A-Za-z_][A-Za-z0-9_]*` and for one the model already declares.
     let input (model: Model) (id: string) (name: string) (unit: UnitOf<'u>) (initial: float<'u>) : Input<'u> =
         model.Check id
         declareInput model id name unit initial (LanguagePrimitives.FloatWithMeasure 0.0)
@@ -201,15 +208,17 @@ module Quantity =
         StandardUncertainty.check (float uncertainty)
         declareInput model id name unit initial uncertainty
 
-    /// A fixed value taken from `source`, of uncertainty 0. Raises `ArgumentException` as `input` does.
+    /// A fixed value taken from `source`, of uncertainty 0: its `Entry.Measured` is `Uncertain.exact` of the value.
+    /// Raises `ArgumentException` as `input` does.
     let constant (model: Model) (id: string) (name: string) (unit: UnitOf<'u>) (value: float<'u>) (source: string) : Quantity<'u> =
         model.Check id
         declareConstant model id name unit value (LanguagePrimitives.FloatWithMeasure 0.0) source
 
     /// A fixed value taken from `source`, of standard uncertainty `uncertainty` from an uncertainty source of its own,
     /// with `QuantityKind.Constant`. Values computed from its `Entry.Measured` hold that source and are correlated
-    /// through it. Raises `ArgumentException` as `input` does, and `ArgumentOutOfRangeException` for a negative
-    /// uncertainty; NaN is accepted and reads NaN.
+    /// through it; for an uncertainty of 0 `Entry.Measured` is `Uncertain.exact` of the value, as `constant`'s is.
+    /// Raises `ArgumentException` as `input` does, and `ArgumentOutOfRangeException` for a negative uncertainty; NaN
+    /// is accepted and reads NaN.
     let measuredConstant
         (model: Model)
         (id: string)

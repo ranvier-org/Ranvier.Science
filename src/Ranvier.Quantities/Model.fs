@@ -33,7 +33,8 @@ type Entry =
         /// A tracked read of the standard uncertainty in `Unit`: 0 for an exact value, NaN when unknown. The read of an
         /// entry of `Quantity.deriveMeasured` or `Quantity.formula` raises as `Read` does.
         Uncertainty: unit -> float
-        /// A tracked read of the value with its contributions by source. Raises as `Read` does.
+        /// A tracked read of the value with its contributions by source: `Uncertain.exact` of the value for an input
+        /// or a constant while its standard uncertainty is 0. Raises as `Read` does.
         Measured: unit -> Uncertain
         /// The formula text of an entry declared by `Quantity.formula`; "" otherwise.
         Formula: string
