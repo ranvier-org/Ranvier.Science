@@ -29,10 +29,21 @@ module Aggregate =
         Moments.count m = 0.0
         || (isFinite (Moments.mean m) && isFinite (Moments.variance m))
 
-    /// A `foldGroupBy` whose `subtract` raises, and so requests a re-fold from the cached row values, when the
-    /// accumulator is not finite or, under `RefoldAfterRemovals`, when the removals including this one reach the larger
-    /// of the row count before it and the policy's `RefoldFloor`.
-    let private maintain
+    /// <summary>
+    /// A memo of <c>result</c> over an accumulator that adds and removes the <c>projection</c> of each row of
+    /// <c>upstream</c> through <c>add</c> and <c>remove</c> from <c>zero</c>, kept current per row change.
+    /// </summary>
+    /// <remarks>
+    /// A row edit is one <c>remove</c> and one <c>add</c> and one call of <c>projection</c>. A removal raises, and so
+    /// requests a re-fold that adds every cached projected value to <c>zero</c> in <c>Keys</c> order at O(N), when
+    /// <c>finite</c> is false for the accumulator, when <c>remove</c> raises, or, under <c>RefoldAfterRemovals</c>, when
+    /// the removals including this one reach the larger of the row count before it and the policy's <c>RefoldFloor</c>.
+    /// <c>finite</c> must be false for a state that <c>remove</c> cannot correct, such as one poisoned by a NaN.
+    /// <c>Refolds</c> counts the re-folds. The memo publishes <c>result</c> on every recomputation, and cuts off only
+    /// when the graph's equality finds the result equal. The memo is one fold node, and a projection from
+    /// <c>createProjectionOnce</c> raises <c>NotSupportedException</c>.
+    /// </remarks>
+    let maintainedBy
         (policy: FloatPolicy)
         (finite: 'A -> bool)
         (add: 'A -> 'U -> 'A)
@@ -98,7 +109,7 @@ module Aggregate =
     /// </remarks>
     let sumBy (policy: FloatPolicy) (projection: 'V -> float) (upstream: Projection<'K, 'V>) : Maintained<float> =
         let c = policy.Compensated
-        maintain policy (Sum.value >> isFinite) (Sum.add c) (Sum.remove c) Sum.zero Sum.value projection upstream
+        maintainedBy policy (Sum.value >> isFinite) (Sum.add c) (Sum.remove c) Sum.zero Sum.value projection upstream
 
     /// <summary>The <c>Moments.merge</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
     /// <remarks>
@@ -115,7 +126,7 @@ module Aggregate =
         (upstream: Projection<'K, 'V>)
         : Maintained<Moments> =
         let c = policy.Compensated
-        maintain policy momentsFinite (Moments.merge c) (Moments.unmerge c) Moments.zero id projection upstream
+        maintainedBy policy momentsFinite (Moments.merge c) (Moments.unmerge c) Moments.zero id projection upstream
 
     /// The same value folded from every row on each change.
     let momentsFromScratchBy
@@ -127,3 +138,118 @@ module Aggregate =
 
         upstream
         |> Projection.fold (fun s v -> Moments.merge c s (projection v)) Moments.zero
+
+    /// <summary>The <c>Comoments.merge</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
+    /// <remarks>
+    /// A row edit is one <c>Comoments.unmerge</c> and one <c>Comoments.merge</c>. A NaN in a row poisons the state for as
+    /// long as any row remains, and every edit then re-folds from the current rows, so the reads are clean once the row
+    /// is removed or edited. Re-folds otherwise follow <c>maintainedBy</c>. The memo publishes on every recomputation: a
+    /// <c>Comoments</c> compares by reference under the default equality. One fold node. A projection from
+    /// <c>createProjectionOnce</c> raises <c>NotSupportedException</c>.
+    /// </remarks>
+    let comomentsBy
+        (policy: FloatPolicy)
+        (projection: 'V -> Comoments)
+        (upstream: Projection<'K, 'V>)
+        : Maintained<Comoments> =
+        let c = policy.Compensated
+        maintainedBy policy Comoments.isFinite (Comoments.merge c) (Comoments.unmerge c) Comoments.zero id projection upstream
+
+    /// <summary>The <c>HigherMoments.merge</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
+    /// <remarks>
+    /// A row edit is one <c>HigherMoments.unmerge</c> and one <c>HigherMoments.merge</c>. A NaN in a row poisons the
+    /// state for as long as any row remains, and every edit then re-folds from the current rows. Re-folds otherwise
+    /// follow <c>maintainedBy</c>. The memo publishes on every recomputation: a <c>HigherMoments</c> compares by
+    /// reference under the default equality. One fold node. A projection from <c>createProjectionOnce</c> raises
+    /// <c>NotSupportedException</c>.
+    /// </remarks>
+    let higherMomentsBy
+        (policy: FloatPolicy)
+        (projection: 'V -> HigherMoments)
+        (upstream: Projection<'K, 'V>)
+        : Maintained<HigherMoments> =
+        let c = policy.Compensated
+
+        maintainedBy
+            policy
+            HigherMoments.isFinite
+            (HigherMoments.merge c)
+            (HigherMoments.unmerge c)
+            HigherMoments.zero
+            id
+            projection
+            upstream
+
+    /// <summary>The <c>WeightedMoments.merge</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
+    /// <remarks>
+    /// A row edit is one <c>WeightedMoments.unmerge</c> and one <c>WeightedMoments.merge</c>. A NaN weight in a row
+    /// poisons the state for as long as any row remains, and every edit then re-folds from the current rows. Re-folds
+    /// otherwise follow <c>maintainedBy</c>. The memo publishes on every recomputation: a <c>WeightedMoments</c>
+    /// compares by reference under the default equality. One fold node. A projection from <c>createProjectionOnce</c>
+    /// raises <c>NotSupportedException</c>.
+    /// </remarks>
+    let weightedMomentsBy
+        (policy: FloatPolicy)
+        (projection: 'V -> WeightedMoments)
+        (upstream: Projection<'K, 'V>)
+        : Maintained<WeightedMoments> =
+        let c = policy.Compensated
+
+        maintainedBy
+            policy
+            WeightedMoments.isFinite
+            (WeightedMoments.merge c)
+            (WeightedMoments.unmerge c)
+            WeightedMoments.zero
+            id
+            projection
+            upstream
+
+    /// <summary>The <c>Histogram</c> over <c>edges</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
+    /// <remarks>
+    /// A row edit is one <c>Histogram.remove</c> and one <c>Histogram.add</c>, each O(B) over B bins
+    /// (from documentation: <c>Histogram.add</c>). Counts are integers, so removal is exact and the fold never re-folds. A NaN counts as
+    /// missing. Raises what <c>Histogram.create</c> raises for invalid edges. The memo publishes on every
+    /// recomputation: a <c>Histogram</c> compares by reference under the default equality. One fold node. A projection
+    /// from <c>createProjectionOnce</c> raises <c>NotSupportedException</c>.
+    /// </remarks>
+    let histogramBy (edges: float[]) (projection: 'V -> float) (upstream: Projection<'K, 'V>) : Memo<Histogram> =
+        upstream
+        |> Projection.foldGroupBy projection Histogram.add Histogram.remove (Histogram.create edges) id
+
+    /// <summary>The type-7 quantile at the probability <c>p</c> of <c>projection</c> over the rows of <c>upstream</c>, kept current per row change.</summary>
+    /// <remarks>
+    /// Equal to <c>OrderStatistic.quantileSorted</c> over the sorted projected values. NaN when there are no rows or
+    /// when a projected value is NaN. Raises <c>ArgumentOutOfRangeException</c> unless 0 ≤ p ≤ 1. The read costs O(1):
+    /// the last sorted row, then the two rows around the rank, with <c>projection</c> called on each. A row change
+    /// costs O(1) neighbour checks and a binary search and shift per touched position, and O(N log N) on dense bursts
+    /// (from documentation: <c>Projection.sortBy</c> in core 0.2.1, <c>Combinators.fs</c>). The memo is a sort view
+    /// and one memo, and cuts off an unchanged <c>float</c> on both targets. A projection from
+    /// <c>createProjectionOnce</c> raises <c>NotSupportedException</c>.
+    /// </remarks>
+    let quantileBy (p: float) (projection: 'V -> float) (upstream: Projection<'K, 'V>) : Memo<float> =
+        if not (p >= 0.0 && p <= 1.0) then
+            raise (ArgumentOutOfRangeException("p", "A quantile probability must lie in [0, 1]."))
+
+        let sorted = upstream |> Projection.sortBy projection
+
+        createMemo (fun _ ->
+            let keys = sorted.Keys
+            let n = keys.Length
+            let at (i: int) = projection (sorted.Get keys[i])
+
+            if n = 0 then
+                nan
+            else
+                let last = at (n - 1)
+
+                if Double.IsNaN last then
+                    nan
+                else
+                    let h = float (n - 1) * p
+                    let l = int (Math.Floor h)
+
+                    if l >= n - 1 then
+                        OrderStatistic.quantileSorted 0.0 [| last |]
+                    else
+                        OrderStatistic.quantileSorted (h - float l) [| at l; at (l + 1) |])
