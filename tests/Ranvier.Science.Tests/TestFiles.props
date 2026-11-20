@@ -41,6 +41,7 @@
         <Compile Include="$(MSBuildThisFileDirectory)WindowTests.fs" Link="WindowTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)ContinuousTests.fs" Link="ContinuousTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)DiscreteTests.fs" Link="DiscreteTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)DescribeTests.fs" Link="DescribeTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />
