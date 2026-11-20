@@ -9,6 +9,7 @@
     <ItemGroup>
         <Compile Include="Sum.fs" />
         <Compile Include="Moments.fs" />
+        <Compile Include="Special.fs" />
         <Compile Include="FloatPolicy.fs" />
         <Compile Include="Aggregate.fs" />
         <Compile Include="Tolerance.fs" />

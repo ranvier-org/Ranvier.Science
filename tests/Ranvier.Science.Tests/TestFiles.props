@@ -3,6 +3,7 @@
     <ItemGroup>
         <Compile Include="$(MSBuildThisFileDirectory)Exact.fs" Link="Exact.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Support.fs" Link="Support.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)Bounds.fs" Link="Bounds.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Smoke.fs" Link="Smoke.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Probes.fs" Link="Probes.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)SumTests.fs" Link="SumTests.fs" />
@@ -25,6 +26,7 @@
         <Compile Include="$(MSBuildThisFileDirectory)GeneratorTests.fs" Link="GeneratorTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)RunTests.fs" Link="RunTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)ConfidenceSequenceTests.fs" Link="ConfidenceSequenceTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)SpecialTests.fs" Link="SpecialTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />

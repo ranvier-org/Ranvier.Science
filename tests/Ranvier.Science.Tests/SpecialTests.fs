@@ -1,0 +1,293 @@
+// Reference values: the case tables below, printed by
+//   python -I tests/reference/special.py gamma
+// and the identities and series written in each test.
+module Ranvier.Science.Tests.SpecialTests
+
+open System
+open Expecto
+open Ranvier.Numerics
+
+// python -I tests/reference/special.py gamma
+let private gammaLnCases: (float * float)[] =
+    [|
+        1e-300, 690.7755278982137
+        1e-08, 18.42068073818021
+        0.001, 6.907178885383853
+        0.1, 2.252712651734206
+        0.5, 0.5723649429247001
+        0.9, 0.06637623973474295
+        1.0, 0.0
+        1.1, -0.049872441259839764
+        1.5, -0.12078223763524522
+        1.9, -0.03898427592308336
+        2.0, 0.0
+        2.5, 0.2846828704729192
+        3.7, 1.428072326665388
+        7.9, 8.32426586800881
+        8.0, 8.525161361065415
+        10.1, 13.027526738633236
+        33.3, 82.60372358165495
+        100.5, 361.4355404677776
+        171.5, 709.1431630309282
+        1000.25, 5906.9472682711175
+        100000.5, 1051293.4654351394
+        10000000000.0, 220258509288.81058
+        1e+300, 6.897755278982137e+302
+        -0.5, 1.2655121234846454
+        -1.5, 0.860047015376481
+        -2.75, 0.004487897535955773
+        -10.3, -14.457515440024208
+        -100.7, -365.61225576180533
+        -170.4, -707.434114102398
+        -1000.5, -5914.437701116852
+    |]
+
+let private gammaCases: (float * float)[] =
+    [|
+        1e-300, 9.999999999999999e+299
+        1e-08, 99999999.42278434
+        0.001, 999.4237724845955
+        0.1, 9.51350769866873
+        0.5, 1.772453850905516
+        1.5, 0.886226925452758
+        2.5, 1.329340388179137
+        3.7, 4.170651783796604
+        7.9, 4122.709484285445
+        10.1, 454760.7514415856
+        33.3, 7.487577596522633e+35
+        100.5, 9.320963104082716e+156
+        170.5, 5.56209241456e+305
+        171.6, 1.5858969096672565e+308
+        -0.5, -3.544907701811032
+        -1.5, 2.363271801207355
+        -2.75, -1.0044979832303123
+        -10.3, -5.26236323953561e-07
+        -100.7, -1.6467012169218231e-159
+        -150.3, -1.5097598047749159e-263
+    |]
+
+let private digammaCases: (float * float)[] =
+    [|
+        1e-08, -100000000.57721564
+        0.01, -100.56088545786868
+        0.5, -1.9635100260214235
+        1.0, -0.5772156649015329
+        1.4616321449683622, -9.241265521729427e-17
+        1.5, 0.03648997397857652
+        2.0, 0.42278433509846713
+        2.5, 0.7031566406452432
+        7.9, 2.002238487563571
+        10.0, 2.251752589066721
+        100.5, 4.605174352581845
+        1000000.0, 13.815510057964191
+        1000000000000000.0, 34.538776394910684
+        -0.5, 0.03648997397857652
+        -2.3, 3.3173231575618227
+        -10.7, 0.13374481244706443
+    |]
+
+let private betaCases: (float * float * float * float)[] =
+    [|
+        0.5, 0.5, 3.141592653589793, 1.1447298858494002
+        1.0, 1.0, 1.0, 0.0
+        2.0, 3.0, 0.08333333333333333, -2.4849066497880004
+        0.001, 0.001, 1999.996714935228, 7.600900817008347
+        0.1, 10.0, 7.5913800009109895, 2.0270133931824375
+        10.5, 20.25, 2.568137333897245e-09, -19.780084973616695
+        8.0, 8.0, 1.9425019425019425e-05, -10.848948661710063
+        7.9, 8.1, 1.9450899301260316e-05, -10.847617252400042
+        100.0, 200.0, 3.607285449794666e-84, -192.13419227497894
+        1000000.0, 4.0, 5.999964000149999e-24, -53.47028876262204
+        3.5, 100000.0, 1.050889876096561e-17, -39.094309274611234
+        1000.0, 0.01, 92.79634711761626, 4.530407276060692
+    |]
+
+let private betaLargeCases: (float * float * float * float)[] =
+    [|
+        285012.3312716716, 54.57821217759673, 8.179028401067405e-228, -522.887827836458
+        56.66781809454644, 409868.9057467205, 1.6303372430918338e-244, -561.3419757995265
+        221798.3284124938, 57.378267480692294, 5.8907725724773266e-232, -532.4263544187525
+        163.29755153612564, 2693.0586087351535, 3.1757281850743475e-273, -627.4501934316967
+        34.62098830767503, 32691.762932782338, 3.856283668053207e-119, -272.65792212688245
+        90.80721825997759, 41402.73972602267, 3.108210272216323e-282, -648.1949491389507
+    |]
+
+let private logFactorialCases: (int * float)[] =
+    [|
+        0, 0.0
+        1, 0.0
+        2, 0.6931471805599453
+        10, 15.104412573075516
+        20, 42.335616460753485
+        21, 45.38013889847691
+        100, 363.73937555556347
+        1000, 5912.128178488163
+        1000000, 12815518.384658169
+        2147483647, 43996705655.378525
+    |]
+
+let private logChooseCases: (int * int * float)[] =
+    [|
+        0, 0, 0.0
+        5, 0, 0.0
+        5, 5, 0.0
+        10, 3, 4.787491742782046
+        50, 25, 32.47055650581199
+        1000, 500, 689.4672615678512
+        1000000, 3, 39.654769204662266
+        1000000, 999997, 39.654769204662266
+        2147483647, 2, 42.28197801275968
+    |]
+
+let private raises (name: string) (f: unit -> float) : unit =
+    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> f () |> ignore) name
+
+[<Tests>]
+let tests =
+    testList
+        "Special"
+        [
+            test "gammaLn matches the reference" {
+                for x, expected in gammaLnCases do
+                    expectClose 1e-13 1e-14 expected (Special.gammaLn x) (sprintf "gammaLn %g" x)
+            }
+
+            test "gamma matches the reference" {
+                for x, expected in gammaCases do
+                    expectClose 1e-13 0.0 expected (Special.gamma x) (sprintf "gamma %g" x)
+            }
+
+            test "gamma of n is (n - 1)!" {
+                // Γ(n) = (n − 1)!; the float product 1 · 2 · … · (n − 1) is exact for n ≤ 23.
+                let mutable factorial = 1.0
+
+                for n in 1..23 do
+                    expectClose 1e-13 0.0 factorial (Special.gamma (float n)) (sprintf "gamma %d" n)
+                    factorial <- factorial * float n
+            }
+
+            test "gamma of one half is the root of pi" {
+                // Γ(½) = √π.
+                expectClose 1e-13 0.0 (sqrt Math.PI) (Special.gamma 0.5) "gamma 0.5"
+            }
+
+            test "gamma satisfies its recurrence" {
+                // Γ(x + 1) = x Γ(x).
+                let xs =
+                    [ for k in 1..400 -> 0.05 * float k ] @ [ for k in 0..100 -> -0.05 * float k - 0.025 ]
+
+                for x in xs do
+                    expectClose 3e-13 0.0 (x * Special.gamma x) (Special.gamma (x + 1.0)) (sprintf "x = %g" x)
+            }
+
+            test "gamma overflows from 171.63" {
+                Expect.isLessThan (Special.gamma 171.62) infinity "gamma 171.62 is finite"
+                Expect.equal (Special.gamma 171.63) infinity "gamma 171.63"
+                Expect.equal (Special.gamma 1e10) infinity "gamma 1e10"
+            }
+
+            test "digamma matches the reference" {
+                for x, expected in digammaCases do
+                    expectClose 1e-13 1e-14 expected (Special.digamma x) (sprintf "digamma %g" x)
+            }
+
+            test "beta and betaLn match the reference" {
+                for a, b, expectedBeta, expectedLn in betaCases do
+                    expectClose 1e-13 0.0 expectedBeta (Special.beta a b) (sprintf "beta %g %g" a b)
+                    expectClose 1e-13 1e-14 expectedLn (Special.betaLn a b) (sprintf "betaLn %g %g" a b)
+            }
+
+            test "beta where ln B is at least 256 in magnitude" {
+                for a, b, expectedBeta, expectedLn in betaLargeCases do
+                    let at = sprintf "at %g %g" a b
+                    Expect.isTrue (abs expectedLn >= 256.0 && expectedBeta >= 1e-300) ("the case is in the regime " + at)
+                    expectClose 3e-13 0.0 expectedBeta (Special.beta a b) ("beta " + at)
+                    expectClose 1e-13 1e-14 expectedLn (Special.betaLn a b) ("betaLn " + at)
+
+                for _, _, _, expectedLn in betaCases do
+                    Expect.isLessThan (abs expectedLn) 256.0 "the brief's cases hold beta to 1e-13, below |ln B| = 256"
+            }
+
+            test "beta is symmetric" {
+                for a, b, _, _ in Array.append betaCases betaLargeCases do
+                    Expect.equal (Special.beta b a) (Special.beta a b) (sprintf "beta %g %g" a b)
+                    Expect.equal (Special.betaLn b a) (Special.betaLn a b) (sprintf "betaLn %g %g" a b)
+            }
+
+            test "logFactorial matches the reference" {
+                for n, expected in logFactorialCases do
+                    expectClose 1e-13 1e-14 expected (Special.logFactorial n) (sprintf "logFactorial %d" n)
+
+                Expect.equal (Special.logFactorial 0) 0.0 "ln 0! = 0"
+                Expect.equal (Special.logFactorial 1) 0.0 "ln 1! = 0"
+            }
+
+            test "logChoose matches the reference" {
+                for n, k, expected in logChooseCases do
+                    expectClose 1e-13 1e-14 expected (Special.logChoose n k) (sprintf "logChoose %d %d" n k)
+                    Expect.equal (Special.logChoose n (n - k)) (Special.logChoose n k) (sprintf "symmetry at %d %d" n k)
+            }
+
+            test "log1p and expm1 at small arguments" {
+                // ln(1 + x) = x − x²/2 + x³/3 − …, eˣ − 1 = x + x²/2 + x³/6 + …; at x = 1e-10 the x³ term, 3.3e-31, is
+                // below an ulp of the result.
+                Expect.isLessThanOrEqual (ulps (Special.log1p 1e-10) (1e-10 - 5e-21)) 1.0 "log1p 1e-10"
+                Expect.isLessThanOrEqual (ulps (Special.expm1 1e-10) (1e-10 + 5e-21)) 1.0 "expm1 1e-10"
+                Expect.equal (Special.log1p 1e-300) 1e-300 "log1p 1e-300"
+                Expect.equal (Special.expm1 1e-300) 1e-300 "expm1 1e-300"
+
+                for x in [ 1e-5; -1e-5 ] do
+                    // The series to the x⁶ term; the x⁷ term is below 1e-31 relative.
+                    let log1pSeries =
+                        x * (1.0 - x * (1.0 / 2.0 - x * (1.0 / 3.0 - x * (1.0 / 4.0 - x * (1.0 / 5.0 - x / 6.0)))))
+
+                    let expm1Series =
+                        x
+                        * (1.0 + x * (1.0 / 2.0 + x * (1.0 / 6.0 + x * (1.0 / 24.0 + x * (1.0 / 120.0 + x / 720.0)))))
+
+                    expectClose 1e-15 0.0 log1pSeries (Special.log1p x) (sprintf "log1p %g" x)
+                    expectClose 1e-15 0.0 expm1Series (Special.expm1 x) (sprintf "expm1 %g" x)
+
+                Expect.equal (Special.log1p 0.0) 0.0 "log1p 0"
+                Expect.equal (Special.expm1 0.0) 0.0 "expm1 0"
+            }
+
+            test "log1p and expm1 inverses and ranges" {
+                for x in [ 0.5; 3.0; 1e5 ] do
+                    expectClose 1e-15 0.0 x (Special.expm1 (Special.log1p x)) (sprintf "expm1 (log1p %g)" x)
+
+                Expect.equal (Special.log1p -1.0) (-infinity) "log1p -1"
+                Expect.equal (Special.log1p infinity) infinity "log1p infinity"
+                Expect.equal (Special.expm1 (-infinity)) -1.0 "expm1 -infinity"
+                Expect.equal (Special.expm1 1000.0) infinity "expm1 1000"
+                Expect.isTrue (Double.IsNaN (Special.log1p nan)) "log1p nan"
+                Expect.isTrue (Double.IsNaN (Special.expm1 nan)) "expm1 nan"
+                raises "log1p -1.5" (fun () -> Special.log1p -1.5)
+            }
+
+            test "infinity and NaN" {
+                for name, f in [ "gammaLn", Special.gammaLn; "gamma", Special.gamma; "digamma", Special.digamma ] do
+                    Expect.equal (f infinity) infinity (name + " infinity")
+                    Expect.isTrue (Double.IsNaN (f nan)) (name + " nan")
+
+                Expect.isTrue (Double.IsNaN (Special.beta nan 1.0)) "beta nan 1"
+                Expect.isTrue (Double.IsNaN (Special.betaLn 1.0 nan)) "betaLn 1 nan"
+                // B(a, b) → 0 as a → ∞ for a fixed b > 0.
+                Expect.equal (Special.betaLn infinity 2.0) (-infinity) "betaLn infinity 2"
+                Expect.equal (Special.beta 2.0 infinity) 0.0 "beta 2 infinity"
+            }
+
+            test "arguments outside the domain raise" {
+                raises "gammaLn 0" (fun () -> Special.gammaLn 0.0)
+                raises "gammaLn -3" (fun () -> Special.gammaLn -3.0)
+                raises "gammaLn -infinity" (fun () -> Special.gammaLn (-infinity))
+                raises "gamma -1" (fun () -> Special.gamma -1.0)
+                raises "digamma 0" (fun () -> Special.digamma 0.0)
+                raises "digamma -2" (fun () -> Special.digamma -2.0)
+                raises "beta 0 1" (fun () -> Special.beta 0.0 1.0)
+                raises "betaLn 1 -1" (fun () -> Special.betaLn 1.0 -1.0)
+                raises "logFactorial -1" (fun () -> Special.logFactorial -1)
+                raises "logChoose 5 6" (fun () -> Special.logChoose 5 6)
+                raises "logChoose 5 -1" (fun () -> Special.logChoose 5 (-1))
+            }
+        ]

@@ -29,6 +29,7 @@ let all =
             testList "GeneratorTests.fs" [ Ranvier.Science.Tests.GeneratorTests.tests ]
             testList "RunTests.fs" [ Ranvier.Science.Tests.RunTests.tests ]
             testList "ConfidenceSequenceTests.fs" [ Ranvier.Science.Tests.ConfidenceSequenceTests.tests ]
+            testList "SpecialTests.fs" [ Ranvier.Science.Tests.SpecialTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]
