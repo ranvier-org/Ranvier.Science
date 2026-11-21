@@ -522,7 +522,9 @@ the feeds or rebuilds the rows was not observed.
 
 Under the Expecto shim, `Expect.throwsT` for a `System` exception type accepts any exception
 (*from documentation*: `tests/Ranvier.Science.Tests.Fable/Expecto.fs`, lines 138-147), so the exception types the
-plan's review focus names are pinned on .NET only.
+plan's review focus names are pinned on .NET only, and there up to subclasses: Expecto's `throwsT` matches with `:?`,
+so `Expect.throwsT<ArgumentException>` also passes on an `ArgumentOutOfRangeException` (*general knowledge*: a type
+test accepts a derived type).
 
 ## Sources read
 

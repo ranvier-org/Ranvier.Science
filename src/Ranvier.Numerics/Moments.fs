@@ -24,6 +24,9 @@ module Moments =
             M2 = Sum.zero
         }
 
+    /// The state with the given count, mean total and sum of squares about the mean; the caller keeps them consistent.
+    let internal ofState (count: float) (mean: Sum) (m2: Sum) : Moments = { N = count; Mean = mean; M2 = m2 }
+
     let add (compensated: bool) (m: Moments) (x: float) : Moments =
         let n = m.N + 1.0
         let delta = x - Sum.value m.Mean
@@ -99,13 +102,34 @@ module Moments =
     let mean (m: Moments) : float =
         if m.N = 0.0 then nan else Sum.value m.Mean
 
-    /// The population variance, (1/n)·Σy² − mean², never negative; NaN when the count is zero.
+    /// <summary>
+    /// The population variance, Σ(x − mean)² / n, from the sum of squared deviations that Welford's update keeps;
+    /// never negative; NaN when the count is zero. The update subtracts a running mean from each observation, so for
+    /// data with an offset the relative error reaches about ε·|mean|/sd (ε = 2⁻⁵², sd the standard deviation; general
+    /// knowledge), whichever the flag: the test "an offset of 1e6 costs at most ε · |mean| / sd of the sample variance"
+    /// pins that bound at an offset of 1e6 and a spread of about 1 against <c>tests/reference/special.py numerics</c>.
+    /// </summary>
     let variance (m: Moments) : float =
         if m.N = 0.0 then
             nan
         else
             let v = Sum.value m.M2 / m.N
             if v < 0.0 then 0.0 else v
+
+    /// The sample variance, Σ(x − mean)² / (n − 1), never negative; NaN when the count is below 2. For data with an
+    /// offset its relative error reaches about ε·|mean|/sd, as <c>variance</c> states.
+    let sampleVariance (m: Moments) : float =
+        if m.N < 2.0 then
+            nan
+        else
+            let v = Sum.value m.M2 / (m.N - 1.0)
+            if v < 0.0 then 0.0 else v
+
+    /// sqrt (variance); NaN when the count is zero.
+    let standardDeviation (m: Moments) : float = sqrt (variance m)
+
+    /// sqrt (sampleVariance); NaN when the count is below 2.
+    let sampleStandardDeviation (m: Moments) : float = sqrt (sampleVariance m)
 
     /// sqrt (variance / count).
     let standardError (m: Moments) : float = sqrt (variance m / m.N)

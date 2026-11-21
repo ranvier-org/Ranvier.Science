@@ -2,15 +2,18 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
-        <Description>Units, quantities and models on the Ranvier reactive graph, with a one-line formula notation over a model's quantities and runs: simulations advanced with a clock.</Description>
-        <PackageTags>units;units-of-measure;quantities;formula;simulation;ranvier;reactive;fsharp</PackageTags>
+        <Description>Units, quantities and models on the Ranvier reactive graph: an SI unit catalogue with prefixes, parsing and conversion, physical constants with their uncertainty, first-order and Monte Carlo propagation of uncertainty, a one-line formula notation whose results are model entries, and runs: simulations advanced with a clock, with an ODE integrator.</Description>
+        <PackageTags>units;units-of-measure;quantities;si;physical-constants;uncertainty;formula;simulation;ranvier;reactive;fsharp</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
         <Compile Include="Units.fs" />
+        <Compile Include="Catalogue.fs" />
+        <Compile Include="Expr.fs" />
         <Compile Include="Model.fs" />
-        <Compile Include="Quantity.fs" />
         <Compile Include="Formula.fs" />
+        <Compile Include="Quantity.fs" />
+        <Compile Include="Constants.fs" />
         <Compile Include="Run.fs" />
     </ItemGroup>
 

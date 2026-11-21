@@ -3,10 +3,20 @@
     <ItemGroup>
         <Compile Include="$(MSBuildThisFileDirectory)Exact.fs" Link="Exact.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Support.fs" Link="Support.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)Bounds.fs" Link="Bounds.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Smoke.fs" Link="Smoke.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)Probes.fs" Link="Probes.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)SumTests.fs" Link="SumTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MomentsTests.fs" Link="MomentsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)UncertainTests.fs" Link="UncertainTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)FormulaEntryTests.fs" Link="FormulaEntryTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)LifetimeTests.fs" Link="LifetimeTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)CatalogueTests.fs" Link="CatalogueTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)UnitTextTests.fs" Link="UnitTextTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)NotationTests.fs" Link="NotationTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)ConstantsTests.fs" Link="ConstantsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)OrderStatisticTests.fs" Link="OrderStatisticTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)MonteCarloTests.fs" Link="MonteCarloTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)AggregateTests.fs" Link="AggregateTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)ToleranceTests.fs" Link="ToleranceTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)UnitsTests.fs" Link="UnitsTests.fs" />
@@ -16,8 +26,32 @@
         <Compile Include="$(MSBuildThisFileDirectory)GeneratorTests.fs" Link="GeneratorTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)RunTests.fs" Link="RunTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)ConfidenceSequenceTests.fs" Link="ConfidenceSequenceTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)SpecialTests.fs" Link="SpecialTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)LinearAlgebraTests.fs" Link="LinearAlgebraTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)RootsTests.fs" Link="RootsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)LeastSquaresTests.fs" Link="LeastSquaresTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)CalculusTests.fs" Link="CalculusTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)OdeTests.fs" Link="OdeTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)InterpolateTests.fs" Link="InterpolateTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)FourierTests.fs" Link="FourierTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)ComomentsTests.fs" Link="ComomentsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)HigherMomentsTests.fs" Link="HigherMomentsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)WeightedMomentsTests.fs" Link="WeightedMomentsTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)HistogramTests.fs" Link="HistogramTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)WindowTests.fs" Link="WindowTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)ContinuousTests.fs" Link="ContinuousTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)DiscreteTests.fs" Link="DiscreteTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)DescribeTests.fs" Link="DescribeTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)IntervalTests.fs" Link="IntervalTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)HypothesisTests.fs" Link="HypothesisTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)SequentialTestTests.fs" Link="SequentialTestTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)AdjustTests.fs" Link="AdjustTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)RegressionTests.fs" Link="RegressionTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)CorrelationTests.fs" Link="CorrelationTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)ResamplingTests.fs" Link="ResamplingTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)GuideTests.fs" Link="GuideTests.fs" />
     </ItemGroup>
 </Project>

@@ -2,13 +2,22 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
-        <Description>Statistics over the moments of Ranvier.Numerics: the normal quantile, a time-uniform confidence sequence for a mean and the fixed-sample interval.</Description>
-        <PackageTags>statistics;normal-quantile;confidence-sequence;confidence-interval;ranvier;fsharp</PackageTags>
+        <Description>Statistics for the Ranvier reactive graph: continuous and discrete distributions, descriptive statistics, confidence intervals, hypothesis tests, a sequential test with its confidence sequence, multiple-testing adjustments, regression, correlation, curve fitting, the bootstrap and kernel density estimation.</Description>
+        <PackageTags>statistics;distributions;hypothesis-testing;confidence-interval;confidence-sequence;sequential-testing;regression;correlation;bootstrap;kernel-density;ranvier;fsharp</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
         <Compile Include="NormalQuantile.fs" />
+        <Compile Include="Check.fs" />
         <Compile Include="ConfidenceSequence.fs" />
+        <Compile Include="Continuous.fs" />
+        <Compile Include="Discrete.fs" />
+        <Compile Include="Describe.fs" />
+        <Compile Include="Intervals.fs" />
+        <Compile Include="HypothesisTest.fs" />
+        <Compile Include="Sequential.fs" />
+        <Compile Include="Regression.fs" />
+        <Compile Include="Resampling.fs" />
     </ItemGroup>
 
     <ItemGroup>

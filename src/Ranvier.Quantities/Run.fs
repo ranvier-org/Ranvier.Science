@@ -1,6 +1,7 @@
 namespace Ranvier.Quantities
 
 open Ranvier
+open Ranvier.Numerics
 
 /// The state returned by one call of `start`.
 [<Sealed>]
@@ -27,6 +28,12 @@ type Run<'s> internal (stepped: Memo<Stepped<'s>>) =
     /// restarts the run.
     /// </remarks>
     member _.State: 's = stepped.Value.State
+
+/// The state of a run made by `Run.ode`: the time since the start and the state vector at that time. Mutable, so a
+/// memo or run holding it publishes on every recomputation.
+type OdeState =
+    { mutable Time: float
+      mutable State: float[] }
 
 module Run =
     /// <summary>
@@ -93,3 +100,53 @@ module Run =
     /// `createWith infinity`.
     let create (clock: unit -> float) (start: unit -> 's) (advance: 's -> float -> unit) : Run<'s> =
         createWith infinity clock start advance
+
+    /// <summary>
+    /// A run that integrates y' = rhs t y with <c>Ode.solve</c> as the clock advances.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is <c>create</c> with a start that returns <c>Time = 0</c> and a copy of the array <c>start</c> returned,
+    /// and an advance that integrates from the held time over the clock's gap. <c>Time</c> counts from 0 at each start
+    /// and not from the clock. As for <c>create</c>, an advance happens only when the clock moves above its last
+    /// value; a clock equal to the last value or within 1e-9 below it leaves <c>Time</c> and <c>State</c> unchanged.
+    /// Each start and each advance puts a fresh array in <c>State</c>, never the one <c>start</c> returned; reads
+    /// between them return that same array, which a caller must not mutate.
+    /// </para>
+    /// <para>
+    /// Reads inside <c>rhs</c> are not tracked, so a signal it reads does not restart the run. A value <c>start</c>
+    /// reads restarts it, as for <c>create</c>.
+    /// </para>
+    /// <para>
+    /// When <c>Ode.solve</c> returns an <c>Error</c>, the read raises <c>InvalidOperationException</c> with its message
+    /// and the state stays as it was; the failure rules of <c>Run</c> apply, so a later clock change retries the
+    /// integration over the gap from the last clock recorded before the failure. An exception raised by <c>rhs</c>
+    /// propagates unchanged, with the same retry. Raises <c>ArgumentOutOfRangeException</c> at the call for the
+    /// options <c>Ode.solve</c> rejects.
+    /// </para>
+    /// <para>
+    /// The run is two memos, as for <c>create</c>, and its state is a mutable record: the run publishes on every
+    /// recomputation and never cuts off. The cost of an advance is that of <c>Ode.solve</c> over the gap.
+    /// </para>
+    /// </remarks>
+    let ode
+        (options: OdeOptions)
+        (clock: unit -> float)
+        (start: unit -> float[])
+        (rhs: float -> float[] -> float[])
+        : Run<OdeState> =
+        // An empty interval checks the options without calling rhs.
+        Ode.solve options rhs 0.0 [||] 0.0 |> ignore
+
+        let start' () =
+            { Time = 0.0
+              State = Array.copy (start ()) }
+
+        let advance (s: OdeState) (gap: float) =
+            match Ode.solve options rhs s.Time s.State (s.Time + gap) with
+            | Ok solution ->
+                s.State <- solution.States[solution.States.Length - 1]
+                s.Time <- solution.Times[solution.Times.Length - 1]
+            | Error message -> raise (System.InvalidOperationException message)
+
+        create clock start' advance

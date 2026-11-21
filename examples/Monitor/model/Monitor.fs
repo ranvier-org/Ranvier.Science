@@ -118,7 +118,7 @@ type private Bound =
 module Monitor =
     let private unbound: Bound = { Source = ValueNone; Evaluate = fun () -> nan }
 
-    let BurnIn = 30.0
+    let BurnIn = ConfidenceSequence.standardBurnIn
 
     /// In mK about the target.
     let ChartHalfRange = 3.0
@@ -345,7 +345,7 @@ module Monitor =
                     counts.Bounds <- counts.Bounds + 1
                     let m = moments ()
                     let a = alphaPerChannel.Value
-                    ConfidenceSequence.ofMomentsAfter BurnIn a (ConfidenceSequence.rhoTightestAt a tightestAt.Value) m)
+                    ConfidenceSequence.interval (ConfidenceSequence.tunedFor a tightestAt.Value BurnIn) m)
 
             let lower = Quantity.derive rowModel "lower" "sequence lower bound" Units.millikelvin (fun () -> sequence.Value.Lower * 1.0<mK>)
             let upper = Quantity.derive rowModel "upper" "sequence upper bound" Units.millikelvin (fun () -> sequence.Value.Upper * 1.0<mK>)
@@ -451,7 +451,7 @@ module Monitor =
                         | _ -> Moments.zero)
                 (fun () -> rows.Keys |> Array.map rows.Get :> Row seq)
 
-        let policy = FloatPolicy.standard |> FloatPolicy.withRefoldFloor 64
+        let policy = FloatPolicy.standard
 
         let monitor =
             {
