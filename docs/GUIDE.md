@@ -23,7 +23,7 @@ Expect.isTrue (abs (fit.Parameters[1] - 1.3) <= 1e-8 * 1.3) "the rate"
 
 ## Integrate an ODE in a Run
 
-Run.ode integrates a system as a function of a clock. The first read of its state starts the run at time 0; each later change of the clock integrates the state over the gap, so a read always shows the state at the clock. The state is a record of `Time` and `State`, and its array is the run's own.
+Run.ode integrates a system as a function of a clock. The run starts at its first read, at the clock's value then, with `Time` 0 and a copy of the start state; `Time` counts from 0 at each start, not from the clock. Each later rise of the clock integrates the state over the gap, so the snippet reads the state once before it moves the clock: without that read the run would start at the clock's value of 1 and the state would stay at 1. The clock starts at 0 here, so `Time` is 1 after the move. The array in `State` is the run's own and is not to be mutated.
 
 Test: "integrate an ODE in a Run" in tests/Ranvier.Science.Tests/GuideTests.fs
 
@@ -88,7 +88,7 @@ match parse "m/" with
 
 ## Use the physical constants in a formula
 
-Constants.declare adds the CODATA 2022 constants to a model as entries, each with its published uncertainty; `m_e` and `c` are two of them. A formula names them like any other entry. The speed of light is exact, so the relative uncertainty of the rest energy is that of the electron mass.
+Constants.declare adds the CODATA 2022 constants to a model as entries, the measured ones (`m_e`, `G`, `alpha` and others) with their CODATA 2022 uncertainty and the defining ones (`c`, `h`, `e`, `k_B`, `N_A`) exact. A formula names them like any other entry. The speed of light is exact, so the relative uncertainty of the rest energy is that of the electron mass.
 
 Test: "use the physical constants in a formula" in tests/Ranvier.Science.Tests/GuideTests.fs
 
@@ -145,7 +145,7 @@ within [| 0.05; 0.005; 0.05; 0.2; 0.025 |] (Adjust.benjaminiHochberg p)
 
 ## Monitor a stream with a sequential test
 
-A sequential test keeps a confidence sequence over a stream of observations, so its verdict stays valid however often it is read. SequentialTest.add folds in one observation, and `createStreamFold` keeps the test current as items arrive. The snippet tunes the sequence for 1000 observations at level 0.05 and feeds it 2000 draws of a normal distribution whose mean is 0.3, against the null of 0.
+A sequential test keeps a confidence sequence over a stream of observations. The sequence is valid at every count at once, so reading the verdict after each observation does not inflate the error rate; the guarantee is asymptotic, with no statement at any finite count, and the sequence shows no bounds before its burn-in count. SequentialTest.add folds in one observation, and `createStreamFold` keeps the test current as items arrive. The snippet tunes the sequence for 1000 observations at level 0.05 and feeds it 2000 draws of a normal distribution whose mean is 0.3, against the null of 0.
 
 Test: "monitor a stream with a sequential test" in tests/Ranvier.Science.Tests/GuideTests.fs
 
