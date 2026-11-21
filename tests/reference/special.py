@@ -13,7 +13,8 @@ Sections:
     lognormal
             the cdf and survival of the log-normal distribution with mu = 0.5 and sigma = 0.8
     zeta    the Riemann zeta function at n = 2 to 30, as doubles
-    weibull the Weibull variance scale^2 (Gamma(1 + 2/k) - Gamma(1 + 1/k)^2) and the Weibull survival function
+    weibull the Weibull variance scale^2 (Gamma(1 + 2/k) - Gamma(1 + 1/k)^2), from shape 10 up and at shapes 5 and
+            9.9, and the Weibull survival function
     dist-gamma, dist-chi-squared, dist-beta, dist-student-t, dist-fisher-f
             the cdf, survival and density of the gamma, chi-squared, beta, Student t and F distributions at the
             points of ContinuousTests.fs, and their quantiles at p = 0.05 and 0.975
@@ -32,10 +33,18 @@ Sections:
     counts  the exact binomial test, the chi-squared goodness-of-fit and independence tests and Fisher's exact test of
             HypothesisTests.fs: p-values as exact fractions (the two-sided rule sums every mass at most the observed
             mass times 1 + 1e-7), chi-squared statistics as exact fractions, chi-squared tails in decimal arithmetic
+    parametric
+            the t, z, F and ANOVA tests of HypothesisTests.fs on R's sleep data and three groups, a one-sample t whose
+            p-value is near 1e-300, and an ANOVA of groups of unequal sizes
     regression
             the least-squares fits of RegressionTests.fs: y on x1 over the first 10 rows, y on (1, x1, x2), y on (x1, x2)
-            without a constant, y on (1, x1) with weights, and y on (1, x1) with weights 1e30, 1, ..., 1; coefficients, standard errors, t statistics, two-sided
-            p-values, R-squared, adjusted R-squared, residual standard error and the covariance
+            without a constant, y on (1, x1) with weights, and y on (1, x1) with weights 1e30, 1, ..., 1; coefficients,
+            standard errors, t statistics, two-sided p-values, R-squared, adjusted R-squared, residual standard error
+            and the covariance; then the stiff-weight table, one weight of 1 to 1e15 beside weights of 1 with y
+            offset by 0 to 1e10
+    numerics
+            the root of the sum of the squares of 1000 seeded contributions (UncertainTests.fs) and the sample variance
+            of 1000 doubles offset by 1e6 (MomentsTests.fs), exact from the doubles
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -143,8 +152,9 @@ Methods:
                 Gauss-Jordan elimination, RSS = sum w (y - Xb)^2, sigma^2 = RSS / (n - p) with n the number of positive
                 weights, the covariance sigma^2 (X'WX)^-1, and R^2 = 1 - RSS / TSS with TSS about the weighted mean where
                 the design has a column of one non-zero value (a constant), about zero where it has none; adjusted R^2 =
-                1 - (1 - R^2)(n - c)/(n - p), c = 1 with a constant column and 0 without (general knowledge: the formula
-                of R's summary.lm). The standard errors are Decimal.sqrt of the exact covariance diagonal, t = b / se,
+                1 - (1 - R^2)(n - c)/(n - p), c = 1 with a constant column and 0 without (from documentation: the
+                formula of R's summary.lm, stats/R/lm.R at trunk, lines 363 to 365). The standard errors are
+                Decimal.sqrt of the exact covariance diagonal, t = b / se,
                 and the two-sided p-value 2 min(cdf, survival) of the Student t at n - p degrees of freedom from
                 student_t_cdf and student_t_sf.
     correlation
@@ -1014,6 +1024,9 @@ def section_weibull() -> None:
         "weibullSurvivalCases",
         [(k, 1.7, x, value(weibull_survival, k, 1.7, x)) for k, row in xs.items() for x in row],
     )
+
+    # Below shape 10, where the variance is the direct difference of the two gamma values.
+    emit("weibullVarianceBelowTenCases", [(k, sc, value(weibull_variance, k, sc)) for k in [5.0, 9.9] for sc in scales])
 
 
 def check_distribution_helpers() -> None:
@@ -1973,6 +1986,15 @@ def section_parametric() -> None:
     emit("pooledCases", [row_values(pooled_test, SLEEP_A, SLEEP_B)])
     emit("varianceRatioCases", [row_values(variance_ratio_test, SLEEP_A, SLEEP_B)])
     emit("anovaCases", [row_values(one_way_anova, ANOVA_GROUPS)])
+    print("// a p-value near 1e-300: the 300 values 14 + noise[i % 10] against 0; and groups of unequal sizes")
+    print()
+    emit("farTailCases", [row_values(one_sample_t, 0.0, FAR_TAIL_SAMPLE)])
+    emit("anovaUnequalCases", [row_values(one_way_anova, ANOVA_UNEQUAL_GROUPS)])
+
+
+FAR_TAIL_NOISE = [0.3, -1.2, 2.1, -0.7, 1.5, -2.2, 0.9, -0.4, 1.8, -1.6]
+FAR_TAIL_SAMPLE = [14.0 + FAR_TAIL_NOISE[i % 10] for i in range(300)]
+ANOVA_UNEQUAL_GROUPS = [[6, 8, 4, 5, 3], [8, 12, 9, 11, 6, 8, 10], [13, 9, 11]]
 
 
 SLACK = Fraction(1) + Fraction(1, 10**7)
@@ -2333,6 +2355,38 @@ def section_regression() -> None:
         )
         emit_floats(name + "Covariance", regression_floats(args, "covariance"))
 
+    print("// stiff weights: y = 2 + 0.5 x + noise + offset on (1, x), x = 1..12, formed in doubles as the F# test forms")
+    print("// them, weight w on the sixth row and 1 elsewhere; each row: w, offset, then the intercept and slope, their")
+    print("// standard errors, t statistics and two-sided p-values, R-squared, adjusted R-squared and residual standard")
+    print("// error")
+    print()
+    rows = []
+    for w, offset in STIFF_CASES:
+        rows.append((w, offset) + row_values(stiff_fit, w, offset))
+    print("let private stiffCases: float[][] =")
+    print("    [|")
+    for row in rows:
+        print("        [| " + "; ".join(literal(v) for v in row) + " |]")
+    print("    |]")
+    print()
+
+
+STIFF_NOISE = [0.3, -1.2, 2.1, -0.7, 1.5, -2.2, 0.9, -0.4, 1.8, -1.6, 0.2, 3.1]
+STIFF_CASES = [(1e15, 1e8), (1e12, 1e10), (1e15, 0.0), (1.0, 1e8), (1e4, 1e4), (1e6, 1e6), (1e8, 1e8)]
+
+
+def stiff_fit(w: float, offset: float) -> tuple:
+    """The fields of the weighted fit of the stiff-weight data, exact as fractions of the doubles."""
+    xs = [float(i) for i in range(1, 13)]
+    ys = [2.0 + 0.5 * xs[i] + STIFF_NOISE[i] + offset for i in range(12)]
+    weights = [w if i == 5 else 1.0 for i in range(12)]
+    fit = regression_fit([[1] * 12, xs], ys, weights)
+    return tuple(fit["coefficients"]) + tuple(fit["errors"]) + tuple(fit["t"]) + tuple(fit["p"]) + (
+        fit["r2"],
+        fit["adjusted"],
+        fit["sigma"],
+    )
+
 
 COR_X = [1, 2, 3, 4, 5, 6, 7, 8]
 COR_Y = [2, 1, 4, 3, 7, 8, 6, 5]
@@ -2451,6 +2505,47 @@ def section_resampling() -> None:
 OFFSET_CASES = [(1.0, 1e-3), (1e9, 1e-3), (1e9, 1e-6), (1e6, 1e-9)]
 
 
+def lcg_values(seed: float, count: int, scale: float) -> list[float]:
+    """The minimal-standard LCG (16807 mod 2^31 - 1), exact in doubles, each state over 2^31 - 1 times scale, formed
+    as the F# tests form them."""
+    state = seed
+    values = []
+    for _ in range(count):
+        state = (state * 16807.0) % 2147483647.0
+        values.append(state / 2147483647.0 * scale)
+    return values
+
+
+UNCERTAINTY_CONTRIBUTIONS = lcg_values(20261121.0, 1000, 10.0)
+
+
+def root_sum_of_squares(values: list[float]) -> Decimal:
+    """sqrt of the sum of the squares of the exact values of the doubles."""
+    total = sum(Fraction(v) ** 2 for v in values)
+    return Decimal(total.numerator).sqrt() / Decimal(total.denominator).sqrt()
+
+
+def offset_moments_sample() -> list[float]:
+    """1000 doubles 1e6 + ((i * 7919) mod 1000) / 500 - 1, i < 1000, formed as the F# test forms them."""
+    return [1e6 + (float((i * 7919) % 1000) / 500.0 - 1.0) for i in range(1000)]
+
+
+def sample_variance(values: list[float]) -> Decimal:
+    """The sample variance, divisor n - 1, of the exact values of the doubles."""
+    exact = [Fraction(v) for v in values]
+    mean = sum(exact) / len(exact)
+    return dec(sum((v - mean) ** 2 for v in exact) / (len(exact) - 1))
+
+
+def section_numerics() -> None:
+    print("// python -I tests/reference/special.py numerics")
+    print("// the root of the sum of the squared contributions of UncertainTests.fs, and the sample variance of the")
+    print("// offset sample of MomentsTests.fs, each exact from the doubles")
+    print()
+    print(f"let private rootSumOfSquares = {value(lambda: root_sum_of_squares(UNCERTAINTY_CONTRIBUTIONS))!r}")
+    print(f"let private offsetSampleVariance = {value(lambda: sample_variance(offset_moments_sample()))!r}")
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -2475,6 +2570,7 @@ SECTIONS = {
     "regression": section_regression,
     "correlation": section_correlation,
     "resampling": section_resampling,
+    "numerics": section_numerics,
 }
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ type BinRule =
     | Sturges
     /// Width σ·(24√π / n)^(1/3) with σ the population standard deviation.
     | Scott
-    /// Width 2·IQR / n^(1/3).
+    /// Width 2·IQR · n^(−1/3), formed as NumPy forms it.
     | FreedmanDiaconis
     /// This many bins, which must be at least 1.
     | Count of int
@@ -33,10 +33,13 @@ type BinRule =
 /// <summary>Order statistics, ranks, autocorrelation, a five-number summary and histogram bin edges of a sample held
 /// in a float array.</summary>
 /// <remarks>
-/// A function that reads values (every one but <c>quantileSorted</c> and <c>ranks</c>) returns NaN, or NaN fields,
-/// when the array holds a NaN and raises nothing for it; <c>ranks</c> raises. The bin rules are those of numpy 2.x
-/// <c>histogram_bin_edges</c>, from documentation (numpy.org, numpy.histogram_bin_edges), pinned by the test "bin edges
-/// follow NumPy's rules". The costs given are general knowledge of the algorithms used.
+/// A function that reads values (every one but <c>quantileSorted</c>, <c>ranks</c> and <c>binEdges</c>) returns NaN,
+/// or NaN fields, when the array holds a NaN and raises nothing for it; <c>ranks</c> and <c>binEdges</c> raise, as
+/// NumPy's <c>histogram_bin_edges</c> does. A NaN probability differs between the two quantile functions:
+/// <c>quantile</c> and <c>quantiles</c> return NaN for it, as for NaN data, while <c>quantileSorted</c>, which is
+/// <c>OrderStatistic.quantileSorted</c>, raises. The bin rules are those of numpy 2.x <c>histogram_bin_edges</c>, from
+/// documentation (numpy.org, numpy.histogram_bin_edges), pinned by the test "bin edges follow NumPy's rules". The
+/// costs given are general knowledge of the algorithms used.
 /// </remarks>
 module Describe =
     let private hasNaN (xs: float[]) : bool =
@@ -272,7 +275,7 @@ module Describe =
                     squares <- squares + (x - m) * (x - m)
 
                 fromWidth (sqrt (squares / n) * Math.Pow(24.0 * Math.Sqrt Math.PI / n, 1.0 / 3.0))
-            | FreedmanDiaconis -> fromWidth (2.0 * interquartileRange xs / Math.Pow(n, 1.0 / 3.0))
+            | FreedmanDiaconis -> fromWidth (2.0 * interquartileRange xs * Math.Pow(n, -1.0 / 3.0))
 
         if range = 0.0 then
             lo <- lo - 0.5

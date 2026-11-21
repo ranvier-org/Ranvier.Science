@@ -62,17 +62,22 @@ module ConfidenceSequence =
 
     /// <summary>
     /// mean ± radius at the moments' count and population standard deviation. NaN bounds for an empty sample;
-    /// a zero-width interval at the observation for a sample of one. Raises ArgumentOutOfRangeException unless
-    /// 0 &lt; alpha &lt; 1 and rho is finite and greater than 0.
+    /// a zero-width interval at the observation for a sample of one. From two observations, a spread below about
+    /// 1.5e-154 or above about 1.3e154, where the moments' sum of squares leaves the normal doubles, gives NaN bounds,
+    /// and so does a constant sample whose mean is below 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude, where an underflowed
+    /// spread cannot be told from none (test "a spread the moments cannot resolve gives NaN bounds"). Raises
+    /// ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1 and rho is finite and greater than 0.
     /// </summary>
     /// <remarks>
     /// The interval holds the mean only asymptotically, with no coverage statement at any finite count. At small
     /// counts it is too narrow (at one observation it excludes every other value); <c>interval</c> applies a
-    /// burn-in before the bounds are shown or acted on.
+    /// burn-in before the bounds are shown or acted on. The radius is formed from the variance the moments hold;
+    /// <c>Moments</c> loses up to about ε·|mean|/sd of it, relative, for data with an offset (ε = 2⁻⁵²; see
+    /// <c>Moments.variance</c>).
     /// </remarks>
     let ofMoments (alpha: float) (rho: float) (m: Moments) : Interval =
         let mean = Moments.mean m
-        let r = radius alpha rho (Moments.count m) (sqrt (Moments.variance m))
+        let r = radius alpha rho (Moments.count m) (sqrt (Check.resolvedVariance Moments.variance m))
         { Lower = mean - r; Upper = mean + r }
 
     /// <summary>
@@ -151,11 +156,14 @@ module ConfidenceSequence =
 module FixedSample =
     /// <summary>
     /// mean ± z(1 − α/2) · sd / sqrt t, with sd the population standard deviation and t the count. NaN bounds for
-    /// an empty sample; a zero-width interval at the observation for a sample of one. Raises
-    /// ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1.
+    /// an empty sample; a zero-width interval at the observation for a sample of one; NaN bounds for a spread the
+    /// moments cannot resolve, as <c>ConfidenceSequence.ofMoments</c> states. Raises ArgumentOutOfRangeException
+    /// unless 0 &lt; alpha &lt; 1.
     /// </summary>
     let ofMoments (alpha: float) (m: Moments) : Interval =
         Check.alpha alpha
         let mean = Moments.mean m
-        let r = -(NormalQuantile.ofProbability (alpha / 2.0)) * Moments.standardError m
+        let r =
+            -(NormalQuantile.ofProbability (alpha / 2.0))
+            * sqrt (Check.resolvedVariance Moments.variance m / Moments.count m)
         { Lower = mean - r; Upper = mean + r }

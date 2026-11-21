@@ -3,6 +3,25 @@ namespace Ranvier.Statistics
 open System
 open Ranvier.Numerics
 
+module internal Spread =
+    /// The sample standard deviation, divisor n − 1, by the corrected two-pass formula, never NaN from rounding: the
+    /// deviations from the rounded mean are exact for values within a factor of two of it, and subtracting (Σd)²/n
+    /// removes the effect of the mean's rounding, so a small spread about a large offset keeps its digits where a
+    /// one-pass update loses them, and identical values give exactly 0. A NaN or infinite value gives NaN.
+    let sampleStandardDeviation (xs: float[]) : float =
+        let n = float xs.Length
+        let mean = Array.sum xs / n
+        let mutable squares = 0.0
+        let mutable total = 0.0
+
+        for x in xs do
+            let d = x - mean
+            squares <- squares + d * d
+            total <- total + d
+
+        let variance = (squares - total * total / n) / (n - 1.0)
+        sqrt (if variance < 0.0 then 0.0 else variance)
+
 /// <summary>The nonparametric bootstrap of a statistic of a sample: a percentile interval and a standard error.</summary>
 /// <remarks>
 /// A resample draws n indices, each with <c>Generator.integer 0 n</c>, and copies those items into a new array, so
@@ -72,12 +91,16 @@ module Bootstrap =
         struct ({ Lower = bounds[0]; Upper = bounds[1] }, next)
 
     /// <summary>The bootstrap standard error: the sample standard deviation, divisor n − 1 (n the count of
-    /// resamples), of the statistic over the resamples, folded through <c>Moments</c> so that identical statistics
-    /// give exactly 0, and the generator after the draws. A NaN from the statistic gives NaN. Raises
-    /// ArgumentOutOfRangeException unless the count of resamples is at least 2 (one value has no spread) and
-    /// ArgumentException for an empty sample. Cost: one call of the statistic per resample plus O(resamples · n).
-    /// Pinned by "the bootstrap standard error of the mean", "a constant sample gives a zero-width interval at the
-    /// constant" and "bootstrap arguments out of range raise".</summary>
+    /// resamples), of the statistic over the resamples, by the corrected two-pass formula of the bandwidths, so that
+    /// identical statistics give exactly 0 and statistics with a large offset keep the digits of their spread, and
+    /// the generator after the draws. A NaN from the statistic gives NaN. Raises ArgumentOutOfRangeException unless
+    /// the count of resamples is at least 2 (one value has no spread) and ArgumentException for an empty sample.
+    /// Cost: one call of the statistic per resample plus O(resamples · n). Relative error within 1e-12 of the
+    /// spread of the statistics taken about their offset, for 400 resample means of 50 values at an offset of 1e9
+    /// (test "the bootstrap standard error of statistics with a large offset"), where a one-pass fold can lose up to
+    /// about ε·offset/sd relative, 1e-4 there (ε = 2⁻⁵², general knowledge). Pinned also by "the bootstrap standard
+    /// error of the mean", "a constant sample gives a zero-width interval
+    /// at the constant" and "bootstrap arguments out of range raise".</summary>
     let standardError
         (resamples: int)
         (statistic: float[] -> float)
@@ -89,8 +112,7 @@ module Bootstrap =
 
         checkSample sample
         let struct (values, next) = statistics resamples statistic sample g
-        let moments = Array.fold (fun m x -> Moments.add true m x) Moments.zero values
-        struct (Moments.sampleStandardDeviation moments, next)
+        struct (Spread.sampleStandardDeviation values, next)
 
 /// <summary>Kernel density estimation with a Gaussian kernel, and the two rule-of-thumb bandwidths of R.</summary>
 /// <remarks>
@@ -102,8 +124,9 @@ module Bootstrap =
 /// cause. Both are NaN for data that holds a NaN or an infinity, and raise nothing for it. The spread is computed on
 /// the data multiplied by an exact power of two near its 2-norm and scaled back at the end, so no value is rounded by
 /// the scaling and a sample near 1e300 or 1e-300 gives the bandwidth that scaling the sample gives (measured here by
-/// the "Resampling" test "bandwidths scale with the data without overflow or underflow", at scales 1e300, 1e-300 and
-/// 1e-150 and at ±1.5e308, and by "bandwidths of offset data match exact rational arithmetic", whose four rows
+/// <c>dotnet run -c Release --project tests/Ranvier.Science.Tests -- --filter-test-list "Resampling"</c>, whose test
+/// "bandwidths scale with the data without overflow or underflow" runs at scales 1e300, 1e-300 and 1e-150 and at
+/// ±1.5e308, and whose test "bandwidths of offset data match exact rational arithmetic" has four rows
 /// (offsets 1 to 1e9, spreads 1e-9 to 1e-3) agree with exact rational arithmetic to 1e-13 relative, from
 /// tests/reference/special.py resampling), where a squared deviation or the IQR would otherwise underflow to 0 or
 /// overflow to infinity.
@@ -114,22 +137,6 @@ module Density =
             raise (ArgumentException("A bandwidth needs at least 2 observations.", nameof sample))
 
     let private isFinite (x: float) : bool = not (Double.IsNaN x || Double.IsInfinity x)
-
-    // The sample standard deviation, divisor n − 1, by the corrected two-pass formula: the deviations from the
-    // rounded mean are exact for values within a factor of two of it, and subtracting (Σd)²/n removes the effect of the
-    // mean's rounding, so a small spread about a large offset keeps its digits where a one-pass update loses them.
-    let private standardDeviation (xs: float[]) : float =
-        let n = float xs.Length
-        let mean = Array.sum xs / n
-        let mutable squares = 0.0
-        let mutable total = 0.0
-
-        for x in xs do
-            let d = x - mean
-            squares <- squares + d * d
-            total <- total + d
-
-        sqrt ((squares - total * total / n) / (n - 1.0))
 
     // factor · min(s, IQR/1.34) · n^(−1/5) for `factor`; when the minimum is 0 and `fallbacks` is set, s, then |x₁|,
     // then 1 take its place, as in bw.nrd0.
@@ -149,7 +156,7 @@ module Density =
                 // that of the sample itself, even for a small spread about a large offset.
                 let exponent = RegressionSupport.exponentNear sample
                 let scaled = Array.map (fun x -> RegressionSupport.scaleByPowerOfTwo x (-exponent)) sample
-                let s = standardDeviation scaled
+                let s = Spread.sampleStandardDeviation scaled
                 let lo = min s (Describe.interquartileRange scaled / 1.34)
 
                 if lo > 0.0 then RegressionSupport.scaleByPowerOfTwo (weight * lo) exponent
@@ -180,7 +187,9 @@ module Density =
     /// contributes 0 to the sum at a finite x. The terms are added in order, so the rounding grows with n. The sum is
     /// divided by n, by √(2π) and by the bandwidth in turn, so no intermediate overflows or underflows needlessly: a
     /// peak above the largest double is infinity, and where x − xᵢ overflows the true value is below 1e-307, so the
-    /// 0 returned is within the smallest normal double of it. Cost: O(n) per evaluation. Pinned by "the estimate of
+    /// 0 returned is within the smallest normal double of it (general knowledge: with u = |x − xᵢ|/h the term is
+    /// φ(u)/h = u·φ(u)/|x − xᵢ|, and u·φ(u) is at most φ(1) ≈ 0.242, so the term is below 0.242/1.8e308). Cost: O(n)
+    /// per evaluation. Pinned by "the estimate of
     /// one point is a normal density", "the estimate averages the kernels of its points", "the estimate integrates
     /// to 1", "the estimate copies its sample", "density arguments out of range raise" and "the estimate at extreme
     /// scales is exact or honestly zero".</summary>

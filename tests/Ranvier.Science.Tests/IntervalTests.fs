@@ -1,8 +1,6 @@
 // Reference values: the tables below, printed by
 //   python -I tests/reference/special.py intervals
-// and the closed forms and identities written in each test. The sleep Welch interval, -3.3654832 to 0.2054832, is
-// also what R's t.test prints for datasets::sleep (general knowledge: recalled, not read here), which the table's
-// values agree with; no test asserts it.
+// and the closed forms and identities written in each test.
 module Ranvier.Science.Tests.IntervalTests
 
 open System
@@ -231,6 +229,25 @@ let tests =
                 let student = MeanInterval.student 0.05 a
                 Expect.equal student.Lower 2.0 "student lower"
                 Expect.equal student.Upper 2.0 "student upper")
+
+            testCase "a spread the moments cannot resolve gives NaN bounds, not a zero-width interval" (fun () ->
+                // The sleep groups scaled by 1e-200 (the squared deviations underflow to 0) and 1e-162 (a subnormal
+                // sum of squares), and shifted by 10 and scaled by 1e155 without compensation (it overflows).
+                let overflowed (xs: float[]) =
+                    Array.fold (Moments.add false) Moments.zero (Array.map (fun x -> (x + 10.0) * 1e155) xs)
+
+                let samples =
+                    [|
+                        "1e-200", moments (Array.map (fun x -> x * 1e-200) sleepA), moments (Array.map (fun x -> x * 1e-200) sleepB)
+                        "1e-162", moments (Array.map (fun x -> x * 1e-162) sleepA), moments (Array.map (fun x -> x * 1e-162) sleepB)
+                        "1e155 uncompensated", overflowed sleepA, overflowed sleepB
+                    |]
+
+                for (label, a, b) in samples do
+                    bothNaN ("student " + label) (MeanInterval.student 0.05 a)
+                    bothNaN ("chiSquared " + label) (VarianceInterval.chiSquared 0.05 a)
+                    bothNaN ("welch " + label) (DifferenceInterval.welch 0.05 a b)
+                    bothNaN ("pooled " + label) (DifferenceInterval.pooled 0.05 a b))
 
             testCase "arguments out of range raise" (fun () ->
                 let a = moments dataA

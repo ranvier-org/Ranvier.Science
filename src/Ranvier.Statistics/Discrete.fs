@@ -22,16 +22,17 @@ type Discrete =
 /// distributions.
 /// </summary>
 /// <remarks>
-/// <c>mass</c>, <c>logMass</c>, <c>cdf</c> and <c>survival</c> state their error bound over one domain, measured here
-/// by a dense scan on .NET and on JavaScript separately against exact fractions (the binomial and hypergeometric) and
-/// 50-digit decimal sums (the Poisson, geometric and negative binomial), 166 569 points not kept in the repository:
-/// the binomial with trials up to 1000 and p from 1e-10 to 0.999; the Poisson with mean from 0.001 to 1000; the
-/// geometric with p from 1e-10 to 0.999; the negative binomial with r from 0.5 to 100, p from 0.002 to 0.999 and mean
-/// r(1 − p)/p up to 1000; the hypergeometric with population up to 1000. The Bernoulli and discrete uniform are closed
-/// forms of one rounding each. Rows inside the domain are pinned against <c>tests/reference/special.py</c> (section
-/// discrete) by the tests "binomial against exact fractions", "binomial tails", "Poisson against the reference",
-/// "negative binomial against the reference" and "hypergeometric against exact fractions", and rows at its ends by
-/// "the stated domains at their edges against the reference". The two targets can differ in the last digits.
+/// <c>mass</c>, <c>logMass</c>, <c>cdf</c> and <c>survival</c> state their error bound over one domain: the binomial
+/// with trials up to 1000 and p from 1e-10 to 0.999; the Poisson with mean from 0.001 to 1000; the geometric with p
+/// from 1e-10 to 0.999; the negative binomial with r from 0.5 to 100, p from 0.002 to 0.999 and mean r(1 − p)/p up to
+/// 1000; the hypergeometric with population up to 1000. The Bernoulli and discrete uniform are closed forms of one
+/// rounding each. Rows inside the domain are pinned against <c>tests/reference/special.py</c> (section discrete) by
+/// the tests "binomial against exact fractions", "binomial tails", "Poisson against the reference", "negative binomial
+/// against the reference" and "hypergeometric against exact fractions", and rows at its ends by "the stated domains at
+/// their edges against the reference". Between the pinned rows the bound rests on a dense scan on .NET and on
+/// JavaScript separately against exact fractions (the binomial and hypergeometric) and 50-digit decimal sums (the
+/// Poisson, geometric and negative binomial), measured here and not committed. The two targets can differ in the last
+/// digits.
 /// </remarks>
 module Discrete =
     let private maxInt = float Int32.MaxValue
@@ -189,9 +190,9 @@ module Discrete =
         - 0.5 * (log (2.0 * Math.PI * x) + Special.log1p (-x / n))
 
     /// <summary>The natural logarithm of the mass at k: −∞ outside the support. Absolute error at most 1e-12 where the
-    /// mass is at least 1e-300, over the domain the module states (measured here by its scan, worst 5.7e-13; pinned by
-    /// the test "the stated domains at their edges against the reference"). <c>mass</c> is its exponential but for the
-    /// Bernoulli and the discrete uniform.</summary>
+    /// mass is at least 1e-300, over the domain the module states (pinned by the test "the stated domains at their
+    /// edges against the reference"; between the pinned rows, the module's uncommitted scan). <c>mass</c> is its
+    /// exponential but for the Bernoulli and the discrete uniform.</summary>
     let logMass (d: Discrete) (k: int) : float =
         let struct (lower, upper) = support d
 
@@ -226,13 +227,13 @@ module Discrete =
 
     /// <summary>
     /// P(X = k): 0 outside the support. Relative error at most 1e-12 where the value is at least 1e-300, over the
-    /// domain the module states (measured here by its scan, worst 5.9e-13, the Poisson at mean 1000 in its far tail).
-    /// The binomial, Poisson and negative binomial use Loader's saddle-point form (C. Loader, "Fast and accurate
-    /// computation of binomial probabilities", 2000; general knowledge: the Stirling-error and deviance terms behind
-    /// R's dbinom and dpois), whose terms stay small where the mass is not. The direct exp(k ln mean − mean − ln k!),
-    /// whose terms reach 16 000 there, loses up to 4.3e-12 at mean 1000 (measured here by the same scan; the test
-    /// "where the direct mass and the rounded 1 - p lose accuracy, against the reference" holds rows at means 300 and
-    /// 1000). The geometric is exp(ln p + k ln(1 − p)), the hypergeometric the exponential of three
+    /// domain the module states (pinned as the module states). The binomial, Poisson and negative binomial use
+    /// Loader's saddle-point form (C. Loader, "Fast and accurate computation of binomial probabilities", 2000; general
+    /// knowledge: the Stirling-error and deviance terms behind R's dbinom and dpois), whose terms stay small where the
+    /// mass is not. The direct exp(k ln mean − mean − ln k!), whose terms reach 16 000 at mean 1000, loses more than
+    /// the bound there (the module's uncommitted scan read 4.3e-12); the test "where the direct mass and the rounded
+    /// 1 - p lose accuracy, against the reference" holds rows at means 300 and 1000. The geometric is
+    /// exp(ln p + k ln(1 − p)), the hypergeometric the exponential of three
     /// <c>Special.logChoose</c> terms, and the Bernoulli and discrete uniform 1 − p, p and 1/(upper − lower + 1).
     /// </summary>
     let mass (d: Discrete) (k: int) : float =
@@ -264,8 +265,8 @@ module Discrete =
 
     /// <summary>
     /// P(X ≤ k): 0 below the support and 1 at and above the upper end of a bounded support. Relative error at most
-    /// 1e-12 where the value is at least 1e-300, over the domain the module states (measured here by its scan, worst
-    /// 3.9e-13, the hypergeometric). The binomial is I_(1 − p)(n − k, k + 1), the Poisson Q(k + 1, mean) and the
+    /// 1e-12 where the value is at least 1e-300, over the domain the module states (pinned as the module states). The
+    /// binomial is I_(1 − p)(n − k, k + 1), the Poisson Q(k + 1, mean) and the
     /// negative binomial I_p(r, k + 1), by <c>Special.betaRegularized</c> and <c>Special.gammaUpperRegularized</c>; the
     /// rounding of 1 − p moves the binomial by about 2 · trials · 2^-54 relative at most (general knowledge). The
     /// geometric is −expm1((k + 1) ln(1 − p)). The hypergeometric is the sum of the masses from the lower end of the
@@ -306,7 +307,7 @@ module Discrete =
     /// <summary>
     /// P(X &gt; k), accurate in the upper tail: 1 below the support and 0 at and above the upper end of a bounded
     /// support. Relative error at most 1e-12 where the value is at least 1e-300, over the domain the module states
-    /// (measured here by its scan, worst 4.3e-13). The binomial is I_p(k + 1, n − k), the Poisson P(k + 1, mean) and
+    /// (pinned as the module states). The binomial is I_p(k + 1, n − k), the Poisson P(k + 1, mean) and
     /// the geometric (1 − p)^(k + 1) by its logarithm; the hypergeometric is the sum of the masses from k + 1 to the
     /// upper end from the mode on, and below it 1 minus the sum up to k, at the cost <c>cdf</c> states. The negative
     /// binomial is 1 − I_p(r, k + 1) where that cdf is at most ½, and above it I_q(k + 1, r) at q, the double nearest
@@ -543,8 +544,9 @@ module Discrete =
     /// time without replacement by <c>Generator.integer</c>, at cost O(draws); the Bernoulli is 1 where a uniform value
     /// is below p; the discrete uniform is <c>Generator.integer</c>. Each is exact in distribution, the geometric and
     /// Bernoulli to the 2^-32 spacing of <c>Generator.uniform</c>'s values (from documentation: its code in
-    /// Generator.fs), which caps a geometric draw at ⌊32 ln 2 / −ln(1 − p)⌋. A draw beyond Int32.MaxValue gives
-    /// Int32.MaxValue.
+    /// Generator.fs), which caps a geometric draw at ⌊32 ln 2 / −ln(1 − p)⌋ and makes the Bernoulli's P(1)
+    /// 2^-32 · ⌈p · 2^32⌉, so 2.3e-10 for any p below 2^-32 (general knowledge, from that spacing). A draw beyond
+    /// Int32.MaxValue gives Int32.MaxValue.
     /// </summary>
     let sample (d: Discrete) (g: Generator) : struct (int * Generator) =
         let struct (lower, upper) = support d

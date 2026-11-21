@@ -13,12 +13,12 @@ open Ranvier.Numerics
 /// with whether some interval from the burn-in on excluded the null value (the duality of Johari, Pekelis and
 /// Walsh, "Always valid inference", with the confidence sequence of Waudby-Smith et al., arXiv 2103.06476; general
 /// knowledge), except where the null value lies within rounding of an interval's endpoint: the verdict is the
-/// p-value's, computed from the likelihood ratio, and the interval's from a rounded mean and radius. On streams of 40
-/// observations with relative spread about 1e-15 and the null value within 3 ulps of the mean, 33,953 of 140,000
-/// comparisons disagreed (measured here by the review probe probe.fsx, in the scratchpad folder
-/// agents\T3-task-9-review; no such disagreement arose in the duality tests at ordinary spreads). Its validity is the sequence's: asymptotic, with no statement at any finite count. A paired
-/// two-sample test folds the differences. The record publishes a new instance on every <c>add</c> and claims no
-/// cut-off under structural equality. Build it with <c>SequentialTest.create</c>.
+/// p-value's, computed from the likelihood ratio, and the interval's from a rounded mean and radius, so the two can
+/// disagree for near-constant data with the null value within a few ulps of the mean; the duality tests, at ordinary
+/// spreads, found no disagreement. Its validity is the sequence's: asymptotic, with no statement at any finite count.
+/// A paired two-sample test folds the differences. The record publishes a new instance on every <c>add</c> and claims
+/// no cut-off under structural equality; a test whose p-value is NaN is not equal to itself, since NaN is unequal to
+/// NaN. Build it with <c>SequentialTest.create</c>.
 /// </remarks>
 [<NoComparison>]
 type SequentialTest =
@@ -46,8 +46,11 @@ module SequentialTest =
     /// The test after one more observation. From the burn-in on the p-value becomes the smaller of itself and
     /// exp(−ln Λ), with ln Λ = −½ ln(tρ² + 1) + ρ²(t(x̄ − θ₀))² / (2σ²(tρ² + 1)) at the count t, the mean x̄ and the
     /// population standard deviation σ of the observations; the exponent is 0 when x̄ = θ₀, and infinite, giving
-    /// p-value 0, when x̄ ≠ θ₀ and σ = 0. A NaN or infinite observation, or an overflow that leaves ln Λ NaN, makes
-    /// the p-value NaN for good. The flag is that of <c>Moments.add</c>.
+    /// p-value 0, when x̄ ≠ θ₀ and σ = 0 for a constant stream whose mean is at least 2⁻⁴⁸⁰ (about 3.2e-145) in
+    /// magnitude. A NaN or infinite observation, an overflow that leaves ln Λ NaN, or, where x̄ ≠ θ₀, a spread the
+    /// moments cannot resolve (below about 1.5e-154 or above about 1.3e154, where their sum of squares leaves the
+    /// normal doubles, or a constant stream nearer 0; test "a spread the moments cannot resolve gives a NaN p-value,
+    /// not a rejection") makes the p-value NaN for good. The flag is that of <c>Moments.add</c>.
     /// </summary>
     let add (compensated: bool) (t: SequentialTest) (x: float) : SequentialTest =
         let m = Moments.add compensated t.Moments x
@@ -62,16 +65,18 @@ module SequentialTest =
                 let rho2 = t.Settings.Rho * t.Settings.Rho
                 let spread = n * rho2 + 1.0
                 let deviation = Moments.mean m - t.Theta0
-                let sd = sqrt (Moments.variance m)
 
                 let exponent =
                     if deviation = 0.0 then
                         0.0
-                    elif sd = 0.0 then
-                        infinity
                     else
-                        let z = deviation / sd
-                        z * z * (n * n * rho2 / (2.0 * spread))
+                        let sd = sqrt (Check.resolvedVariance Moments.variance m)
+
+                        if sd = 0.0 then
+                            infinity
+                        else
+                            let z = deviation / sd
+                            z * z * (n * n * rho2 / (2.0 * spread))
 
                 let logRatio = -0.5 * log spread + exponent
 

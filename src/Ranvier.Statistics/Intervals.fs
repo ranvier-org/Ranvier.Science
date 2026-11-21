@@ -27,16 +27,22 @@ module internal IntervalSupport =
 /// count too small for the interval gives NaN bounds; NaN data gives NaN bounds. Each bound's relative error is that
 /// of the quantile it uses, <c>Continuous.quantile</c> of the normal and Student t, over the samples the test file
 /// pins; the figure is stated on each function. Measured here on .NET (Release), by an F# script that compared each
-/// row of those tests with its reference, the largest relative error of a bound was 1.5e-16.
+/// row of those tests with its reference, the largest relative error of a bound was 1.5e-16. The bound is relative to
+/// the mean and variance the moments hold; <c>Moments</c> adds its own loss for data with an offset, a relative error
+/// up to about ε·|mean|/sd in the variance (ε = 2⁻⁵²; see <c>Moments.variance</c>).
 /// </remarks>
 module MeanInterval =
     /// <summary>
     /// The interval mean ± t · s / √n with t the Student t quantile at 1 − α/2 for n − 1 degrees of freedom and s the
     /// sample standard deviation (divisor n − 1). It holds the mean with probability 1 − α for independent normal
-    /// observations of unknown variance. NaN bounds for a count below 2. Relative error at most 1e-12 over the
-    /// samples of the tests "the Student interval against the reference" (ten observations, α 0.05 and 0.01), which
-    /// pins it, and "small samples give NaN bounds" at the edge; the coverage of the 95% interval on 2,000 seeded
-    /// samples is pinned by "the Student interval covers at its level".
+    /// observations of unknown variance. NaN bounds for a count below 2. A constant sample whose mean is at least
+    /// 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude gives [mean, mean]; a spread below about 1.5e-154 or above about 1.3e154,
+    /// where the moments' sum of squares leaves the normal doubles, gives NaN bounds, and so does a constant sample
+    /// nearer 0, where an underflowed spread cannot be told from none (test "a spread the moments cannot resolve gives
+    /// NaN bounds, not a zero-width interval"). Relative error at most 1e-12 over the samples of the tests "the
+    /// Student interval against the reference" (ten observations, α 0.05 and 0.01), which pins it, and "small samples
+    /// give NaN bounds" at the edge; the coverage of the 95% interval on 2,000 seeded samples is pinned by "the Student
+    /// interval covers at its level".
     /// </summary>
     let student (alpha: float) (m: Moments) : Interval =
         Check.alpha alpha
@@ -45,7 +51,8 @@ module MeanInterval =
         if n < 2.0 then
             IntervalSupport.nanInterval
         else
-            let half = IntervalSupport.tUpper alpha (n - 1.0) * Moments.sampleStandardDeviation m / sqrt n
+            let half =
+                IntervalSupport.tUpper alpha (n - 1.0) * sqrt (Check.resolvedVariance Moments.sampleVariance m) / sqrt n
             IntervalSupport.around (Moments.mean m) half
 
     /// <summary>
@@ -74,7 +81,12 @@ module MeanInterval =
 /// are <c>Continuous.quantile</c> of the normal and the beta. The methods are those compared by Brown, Cai and
 /// DasGupta, "Interval estimation for a binomial proportion", Statistical Science 16(2), 2001 (general knowledge).
 /// Measured here on .NET (Release), by an F# script that compared each row with its reference, the largest relative
-/// error of a bound was 3.7e-16.
+/// error of a bound was 3.7e-16. Two regimes fall outside that bound. A bound read at 1 − α/2 carries the rounding of
+/// 1 − α/2, an absolute error up to 2⁻⁵³ in a tail of α/2 (general knowledge): at α = 1e-10 the upper Clopper–Pearson
+/// and Jeffreys bounds were off by 2.9e-10 to 3.7e-9 relative. And a beta quantile carries the round trip of
+/// <c>Continuous.quantile</c> (the cdf at the bound within 1e-12 of the target), not a relative error of the bound:
+/// for n of 1e5 or more and at most 3 successes the upper bounds were off by up to 5.7e-11. Both figures were measured
+/// by an mpmath scan in the review of Plan T3 Task 5, not committed (spec §5.2 admits no third-party package).
 /// </remarks>
 module ProportionInterval =
     let private validate (alpha: float) (successes: int) (trials: int) : unit =
@@ -137,7 +149,8 @@ module ProportionInterval =
     /// <summary>
     /// The exact (Clopper–Pearson) interval: the Beta(x, n − x + 1) quantile at α/2 and the Beta(x + 1, n − x)
     /// quantile at 1 − α/2 for x successes in n trials, with 0 at x = 0 and 1 at x = n. Its coverage is at least
-    /// 1 − α at every proportion. At 0 successes the upper bound is 1 − (α/2)^(1/n), pinned by the test
+    /// 1 − α at every proportion (general knowledge: Brown, Cai and DasGupta 2001, named in the module's remarks; no
+    /// test here measures it). At 0 successes the upper bound is 1 − (α/2)^(1/n), pinned by the test
     /// "Clopper-Pearson at one trial and at zero successes has a closed form". Raises ArgumentOutOfRangeException and
     /// gives NaN bounds as the module states.
     /// </summary>
@@ -189,9 +202,13 @@ module VarianceInterval =
     /// freedom and s² the sample variance (divisor n − 1). It holds the variance with probability 1 − α for
     /// independent normal observations; it is not robust to other distributions. Raises ArgumentOutOfRangeException
     /// unless 0 &lt; alpha &lt; 1 (NaN raises), before it looks at the sample. NaN bounds for a count below 2 and for
-    /// NaN data. Relative error at most 1e-12 over the sample of the test "the variance interval against the
-    /// reference" (ten observations, α 0.05), which pins it; measured here on .NET (Release), by an F# script that
-    /// compared both bounds with the reference, the largest was 2.2e-16.
+    /// NaN data, and for a spread the moments cannot resolve, as <c>MeanInterval.student</c> states. Relative error at
+    /// most 1e-12 over the sample of the test "the variance interval against the reference" (ten observations, α
+    /// 0.05), which pins it; measured here on .NET (Release), by an F# script that compared both bounds with the
+    /// reference, the largest was 2.2e-16. The lower bound is read at 1 − α/2, whose rounding costs accuracy at small
+    /// α: at α = 1e-10 it was off by up to 3.7e-9 relative (measured by an mpmath scan in the review of Plan T3 Task 5,
+    /// not committed; spec §5.2 admits no third-party package). The variance carries the loss of <c>Moments</c> for
+    /// data with an offset, up to about ε·|mean|/sd relative (ε = 2⁻⁵²).
     /// </summary>
     let chiSquared (alpha: float) (m: Moments) : Interval =
         Check.alpha alpha
@@ -202,7 +219,7 @@ module VarianceInterval =
         else
             let dof = n - 1.0
             let chi = Continuous.chiSquared dof
-            let numerator = dof * Moments.sampleVariance m
+            let numerator = dof * Check.resolvedVariance Moments.sampleVariance m
 
             { Lower = IntervalSupport.divide numerator (Continuous.quantile chi (1.0 - alpha / 2.0))
               Upper = IntervalSupport.divide numerator (Continuous.quantile chi (alpha / 2.0)) }
@@ -211,17 +228,20 @@ module VarianceInterval =
 /// second.</summary>
 /// <remarks>
 /// Both raise ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1 (NaN raises), before they look at the samples.
-/// NaN data gives NaN bounds. Relative error at most 1e-12 over the samples of the test "difference intervals against
-/// the reference" (R's <c>datasets::sleep</c>, α 0.05), which pins both; measured here on .NET (Release), by an F#
-/// script that compared each bound with the reference, the largest relative error was 7.4e-17.
+/// NaN data gives NaN bounds, and so does a spread the moments cannot resolve in either sample, as
+/// <c>MeanInterval.student</c> states. Relative error at most 1e-12 over the samples of the test "difference intervals
+/// against the reference" (R's <c>datasets::sleep</c>, α 0.05), which pins both; measured here on .NET (Release), by
+/// an F# script that compared each bound with the reference, the largest relative error was 7.4e-17. The bound is
+/// relative to the means and variances the moments hold; <c>Moments</c> adds its own loss for data with an offset, up
+/// to about ε·|mean|/sd relative in each variance (ε = 2⁻⁵²).
 /// </remarks>
 module DifferenceInterval =
     /// <summary>
     /// The Welch interval d ± t · √(s²ₐ/nₐ + s²ᵦ/nᵦ), d the difference of the means and t the Student t quantile at
     /// 1 − α/2 for the Welch–Satterthwaite degrees of freedom ν = (s²ₐ/nₐ + s²ᵦ/nᵦ)² / ((s²ₐ/nₐ)²/(nₐ − 1) +
     /// (s²ᵦ/nᵦ)²/(nᵦ − 1)), which does not assume equal variances. NaN bounds when either count is below 2. A zero
-    /// standard error, both samples constant, gives [d, d]; it is detected before ν, which is then 0/0. ν is formed
-    /// from the ratios of the two terms to their sum, so it neither underflows nor overflows.
+    /// standard error, both samples constant away from 0, gives [d, d]; it is detected before ν, which is then 0/0.
+    /// ν is formed from the ratios of the two terms to their sum, so it neither underflows nor overflows.
     /// </summary>
     let welch (alpha: float) (a: Moments) (b: Moments) : Interval =
         Check.alpha alpha
@@ -232,8 +252,8 @@ module DifferenceInterval =
             IntervalSupport.nanInterval
         else
             let d = Moments.mean a - Moments.mean b
-            let qa = Moments.sampleVariance a / na
-            let qb = Moments.sampleVariance b / nb
+            let qa = Check.resolvedVariance Moments.sampleVariance a / na
+            let qb = Check.resolvedVariance Moments.sampleVariance b / nb
             let s = qa + qb
 
             if s = 0.0 then
@@ -253,7 +273,7 @@ module DifferenceInterval =
     /// ((nₐ − 1)s²ₐ + (nᵦ − 1)s²ᵦ)/(nₐ + nᵦ − 2) and t the Student t quantile at 1 − α/2 for nₐ + nᵦ − 2 degrees of
     /// freedom; it assumes equal variances. A sample of one observation adds 0 to the pooled sum of squares, so one
     /// sample may hold a single observation if the other holds two or more. NaN bounds when either count is below 1
-    /// or the counts total less than 3. Two constant samples give [d, d].
+    /// or the counts total less than 3. Two constant samples away from 0 give [d, d].
     /// </summary>
     let pooled (alpha: float) (a: Moments) (b: Moments) : Interval =
         Check.alpha alpha
@@ -264,9 +284,9 @@ module DifferenceInterval =
             IntervalSupport.nanInterval
         else
             let sumOfSquares (n: float) (m: Moments) : float =
-                if n < 2.0 then 0.0 else (n - 1.0) * Moments.sampleVariance m
+                if n < 2.0 then 0.0 else (n - 1.0) * Check.resolvedVariance Moments.sampleVariance m
 
             let dof = na + nb - 2.0
             let variance = (sumOfSquares na a + sumOfSquares nb b) / dof
-            let half = IntervalSupport.tUpper alpha dof * sqrt (variance * (1.0 / na + 1.0 / nb))
+            let half =IntervalSupport.tUpper alpha dof * sqrt (variance * (1.0 / na + 1.0 / nb))
             IntervalSupport.around (Moments.mean a - Moments.mean b) half

@@ -64,7 +64,9 @@ let tests =
                 Expect.equal (Describe.trimmedMean 0.25 xs) 5.5 "0.25"
                 Expect.equal (Describe.trimmedMean 0.0 xs) 14.5 "0"
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Describe.trimmedMean 0.5 xs |> ignore) "0.5"
-                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Describe.trimmedMean -0.1 xs |> ignore) "-0.1")
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Describe.trimmedMean -0.1 xs |> ignore) "-0.1"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Describe.trimmedMean nan xs |> ignore) "NaN"
+                Expect.isTrue (isNaN (Describe.trimmedMean 0.1 [||])) "an empty array gives NaN")
 
             testCase "ranks with ties" (fun () ->
                 // The average of the 1-based positions a tied group occupies in sorted order.
@@ -83,6 +85,7 @@ let tests =
                 Expect.all (Describe.autocorrelation 2 [| 2.0; 2.0; 2.0; 2.0 |]) isNaN "constant series"
                 // 0.1 is not exact, so the computed mean differs from it; the rule is equality with the first value.
                 Expect.all (Describe.autocorrelation 2 [| 0.1; 0.1; 0.1 |]) isNaN "constant series, inexact mean"
+                Expect.all (Describe.autocorrelation 2 [| 1.0; 2.0; nan; 4.0; 5.0 |]) isNaN "a NaN in the series"
 
                 Expect.throwsT<ArgumentOutOfRangeException>
                     (fun () -> Describe.autocorrelation -1 [| 1.0 .. 5.0 |] |> ignore)
@@ -168,7 +171,14 @@ let tests =
                 Expect.equal (Describe.binEdges Sturges sixtyFour).Length 9 "Sturges at 64, range 37.1"
 
                 // log2 128 + 1 = 8 exactly, so 8 bins and 9 edges.
-                Expect.equal (Describe.binEdges Sturges (Array.init 128 float)).Length 9 "Sturges at 128")
+                Expect.equal (Describe.binEdges Sturges (Array.init 128 float)).Length 9 "Sturges at 128"
+
+                // NumPy's Freedman-Diaconis width is 2 · IQR · n^(-1/3). For 0..25 and 130 (n = 27, IQR 13, range 130)
+                // that is 2 · 13 · 0.33333333333333337 = 8.666666666666668 and 130 over it 14.999999999999998: 15 bins.
+                // The form 2 · IQR / n^(1/3) gives 26 / 3 = 8.666666666666666 and 16 bins (Python 3.14's pow, by
+                // python -I: 27 ** (-1/3) and 27 ** (1/3); in real arithmetic the quotient is exactly 15).
+                let fd = Array.init 27 (fun i -> if i = 26 then 130.0 else float i)
+                Expect.equal (Describe.binEdges FreedmanDiaconis fd).Length 16 "Freedman-Diaconis at 27, range 130")
 
             testCase "a width rule that asks for too many bins raises" (fun () ->
                 // 99 values within 1e-7 of 0 and one at 1000: the IQR is about 5e-8, so the width is about 2e-8 and

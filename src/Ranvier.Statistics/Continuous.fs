@@ -32,10 +32,10 @@ type Continuous =
 /// A NaN argument gives NaN. <c>density</c> and <c>logDensity</c> carry no bound beyond the accuracy of the
 /// <c>exp</c>, <c>log</c> and power functions they call, and for the gamma, chi-squared, beta, Student t and F that of
 /// <c>Special.gammaLn</c> or <c>Special.betaLn</c> and the cancellation of terms of the log density as large as
-/// shape · |ln x| (general knowledge). Measured here against mpmath 1.3.0, by the scan that <c>cdf</c> cites: at most
-/// 2e-13 relative for shapes and degrees of freedom from 0.5 to 100, 1.2e-12 for the gamma at shape 1000 and 1.1e-10
-/// for the chi-squared with 1e5 degrees of freedom; the test "the stated domains at their edges against the reference"
-/// pins the density at the ends of each range, within 1e-12, 2e-12 at gamma shape 1000 and 2e-10 at chi-squared 1e5.
+/// shape · |ln x| (general knowledge). The test "the stated domains at their edges against the reference" pins the
+/// density at the ends of each range of <c>cdf</c>, within 1e-12, 2e-12 at gamma shape 1000 and 2e-10 at chi-squared
+/// 1e5; between them it rests on an mpmath 1.3.0 scan, measured here and not committed (spec §5.2 admits no
+/// third-party package).
 /// </remarks>
 module Continuous =
     let private sqrt2 = sqrt 2.0
@@ -57,7 +57,7 @@ module Continuous =
         LogNormal(mu, sigma)
 
     /// <summary>The uniform distribution on [lower, upper]. Raises ArgumentOutOfRangeException unless both bounds are
-    /// finite, lower is less than upper and upper - lower is finite.</summary>
+    /// finite, lower is less than upper and upper − lower is finite, naming upper for the last two.</summary>
     let uniform (lower: float) (upper: float) : Continuous =
         Check.finite (nameof lower) lower
         Check.finite (nameof upper) upper
@@ -65,7 +65,9 @@ module Continuous =
         if not (lower < upper) then
             raise (ArgumentOutOfRangeException(nameof upper, "upper must be greater than lower."))
 
-        Check.finite "upper - lower" (upper - lower)
+        if Double.IsInfinity(upper - lower) then
+            raise (ArgumentOutOfRangeException(nameof upper, "upper − lower must be finite."))
+
         Uniform(lower, upper)
 
     /// <summary>The exponential distribution with the given rate. Raises ArgumentOutOfRangeException unless the rate
@@ -103,10 +105,18 @@ module Continuous =
         Check.finitePositive (nameof scale) scale
         Gamma(shape, scale)
 
+    // Raises unless dof is finite and dof / 2 is greater than 0, which fails at the least double, 5e-324.
+    let private degreesOfFreedom (name: string) (dof: float) : unit =
+        Check.finitePositive name dof
+
+        if not (dof / 2.0 > 0.0) then
+            raise (ArgumentOutOfRangeException(name, name + " / 2 must be greater than 0."))
+
     /// <summary>The chi-squared distribution with the given degrees of freedom: the gamma with shape dof/2 and scale 2.
-    /// Raises ArgumentOutOfRangeException unless dof is finite and greater than 0.</summary>
+    /// Raises ArgumentOutOfRangeException unless dof is finite and dof/2 is greater than 0 (dof of 1e-323 or
+    /// more).</summary>
     let chiSquared (dof: float) : Continuous =
-        Check.finitePositive (nameof dof) dof
+        degreesOfFreedom (nameof dof) dof
         ChiSquared dof
 
     /// <summary>The beta distribution on [0, 1] with shapes a and b, of density x^(a − 1) (1 − x)^(b − 1) / B(a, b).
@@ -117,17 +127,17 @@ module Continuous =
         Beta(a, b)
 
     /// <summary>Student's t distribution with the given degrees of freedom, centred at 0 with unit scale. Raises
-    /// ArgumentOutOfRangeException unless dof is finite and greater than 0.</summary>
+    /// ArgumentOutOfRangeException unless dof is finite and dof/2 is greater than 0 (dof of 1e-323 or more).</summary>
     let studentT (dof: float) : Continuous =
-        Check.finitePositive (nameof dof) dof
+        degreesOfFreedom (nameof dof) dof
         StudentT dof
 
     /// <summary>The F distribution with d1 numerator and d2 denominator degrees of freedom: (V₁/d1)/(V₂/d2) for
-    /// independent chi-squared V₁ and V₂. Raises ArgumentOutOfRangeException unless both are finite and greater than
-    /// 0.</summary>
+    /// independent chi-squared V₁ and V₂. Raises ArgumentOutOfRangeException unless both are finite and half of each
+    /// is greater than 0 (1e-323 or more).</summary>
     let fisherF (d1: float) (d2: float) : Continuous =
-        Check.finitePositive (nameof d1) d1
-        Check.finitePositive (nameof d2) d2
+        degreesOfFreedom (nameof d1) d1
+        degreesOfFreedom (nameof d2) d2
         FisherF(d1, d2)
 
     // The standard normal distribution function and survival function at z.
@@ -499,23 +509,25 @@ module Continuous =
     /// about shape · (x / scale)^shape · 1.1e-16 for the Weibull at a scale that is not a power of two, which pinned
     /// rows show as at most 1e-9 at shape 1000 (general knowledge: the rounding of x / scale, raised to the shape).
     /// For the gamma, chi-squared, beta, Student t and F the bound holds for shapes and degrees of freedom from 0.5 to
-    /// 100, measured here by a dense scan against mpmath 1.3.0 on .NET and on JavaScript (10 792 points with arguments
-    /// from 1e-300 to 1.7e308, worst 1.5e-13) that is not kept in the repository. The same scan holds it for the gamma
-    /// at shapes from 0.01 to 1000, the chi-squared from 0.05 to 1e5 degrees of freedom, the beta at shapes from 0.2 to
-    /// 500, the t from 0.05 to 1000 degrees of freedom and the F with one of d1 and d2 up to 1000 and the other from 0.5
-    /// to 100. Pinned against <c>tests/reference/special.py</c>: rows inside the range by the tests "gamma against the
-    /// reference", "chi-squared against the reference", "beta against the reference", "Student t against the
-    /// reference" and "F against the reference"; rows at both ends of each range above by the test "the stated domains
-    /// at their edges against the reference"; and the t at 100 degrees of freedom either side of |t| = 1, the beta at
-    /// shape 0.5 near 0 and the F with a degree of freedom of 0.5 far into either tail, where a single form would
-    /// cancel or round 1 − x, by the test "where a plain form would cancel or round 1 - x, against the reference".
-    /// Beyond those ranges the error grows: for the t as about
-    /// dof · 5.5e-17 (general knowledge: the rounding of dof / (dof + t²) near 1, raised to the power dof/2; measured
-    /// here 6.6e-13 at 1e4 and 5.7e-12 at 1e5 degrees of freedom), and for the beta and the F with a shape or degrees
-    /// of freedom below 0.5 as the density times 2^-54 over the value, from the rounding near 1 of 1 − x or of
-    /// x / (x + d2/d1) where the density is unbounded (general knowledge; measured here up to 1.2e-9 for the beta
-    /// survival at shape 0.05 near its median and 3.8e-5 for the F at 0.05 degrees of freedom). Cost: one or two
-    /// evaluations of the regularised incomplete gamma or beta function for those five families.
+    /// 100, for the gamma at shapes from 0.01 to 1000, the chi-squared from 0.05 to 1e5 degrees of freedom, the beta at
+    /// shapes from 0.2 to 500, the t from 0.05 to 1000 degrees of freedom and the F with one of d1 and d2 up to 1000
+    /// and the other from 0.5 to 100. Pinned against <c>tests/reference/special.py</c>: rows inside the range by the
+    /// tests "gamma against the reference", "chi-squared against the reference", "beta against the reference",
+    /// "Student t against the reference" and "F against the reference"; rows at both ends of each range by the test
+    /// "the stated domains at their edges against the reference"; and the t at 100 degrees of freedom either side of
+    /// |t| = 1, the beta at shape 0.5 near 0 and the F with a degree of freedom of 0.5 far into either tail, where a
+    /// single form would cancel or round 1 − x, by the test "where a plain form would cancel or round 1 - x, against
+    /// the reference". Between the pinned rows the bound rests on an mpmath 1.3.0 scan on .NET and on JavaScript,
+    /// measured here and not committed (spec §5.2 admits no third-party package). Beyond those ranges the error grows:
+    /// for the t as about dof · 5.5e-17 (general knowledge: the rounding of dof / (dof + t²) near 1, raised to the
+    /// power dof/2; that scan read 6.6e-13 at 1e4 and 5.7e-12 at 1e5 degrees of freedom), and for the beta and the F
+    /// with a shape or degrees of freedom below 0.5 as the density times 2^-54 over the value, from the rounding near 1
+    /// of 1 − x or of x / (x + d2/d1) where the density is unbounded (general knowledge; that scan read up to 1.2e-9
+    /// for the beta survival at shape 0.05 near its median and 3.8e-5 for the F at 0.05 degrees of freedom). For the
+    /// gamma, where x / scale is below the least normal double the value is that at 0, or carries the precision lost
+    /// in a subnormal x / scale: the test "the gamma reads its value at 0 where x / scale underflows" pins 0 for
+    /// shape 0.5, scale 1e300 at x = 1e-300, where the cdf is erf(1e-300) ≈ 1.1e-300.
+    /// Cost: one or two evaluations of the regularised incomplete gamma or beta function for those five families.
     /// </summary>
     let cdf (d: Continuous) (x: float) : float =
         if Double.IsNaN x then
@@ -552,8 +564,8 @@ module Continuous =
     /// above; the Weibull for shape up to 20. Beyond it the error grows with the conditioning of the input:
     /// about shape · (x / scale)^shape · 1.1e-16 for the Weibull at a scale that is not a power of two, which pinned
     /// rows show as at most 1e-9 at shape 1000 (general knowledge: the rounding of x / scale, raised to the shape).
-    /// For the gamma, chi-squared, beta, Student t and F the domain, its edges and the cost are those of <c>cdf</c>
-    /// (measured here by the same tests and scan).
+    /// For the gamma, chi-squared, beta, Student t and F the domain, its edges, the gamma's x / scale underflow and the
+    /// cost are those of <c>cdf</c> (pinned by the same tests; between them, the same uncommitted scan).
     /// </summary>
     let survival (d: Continuous) (x: float) : float =
         if Double.IsNaN x then
@@ -598,7 +610,8 @@ module Continuous =
         | Uniform (lower, upper) -> struct (lower, upper)
 
     /// <summary>
-    /// The x with P(X ≤ x) = p. At p = 0 and 1 it is the support's lower and upper bound; NaN at NaN. Raises
+    /// The x with P(X ≤ x) = p, where that x is representable as a double. At p = 0 and 1 it is the support's lower
+    /// and upper bound; NaN at NaN. Raises
     /// ArgumentOutOfRangeException for p outside [0, 1]. The round trip holds: the <c>cdf</c> at the result is within
     /// relative 1e-12 of p for p ≤ 0.5, and the <c>survival</c> at the result is within relative 1e-12 of 1 − p for
     /// p &gt; 0.5, down to p = 1e-300, over the parameter values pinned by the <c>Continuous</c> tests (measured
@@ -609,19 +622,19 @@ module Continuous =
     /// its argument to half an ulp of mu (general knowledge), and a pinned row shows at most 2e-11 at mu = 300,
     /// sigma = 0.1.
     /// For the gamma, chi-squared, beta, Student t and F the round trip holds over the domain of <c>cdf</c>, where the
-    /// quantile is a normal double and the doubles beside it resolve p, measured here by a dense scan of the quantiles
-    /// at 96 values of p from 1e-300 to 1 − 2e-16 on .NET and on JavaScript (worst 9.8e-13 for a beta quantile near 1
-    /// that the doubles barely resolve, 2e-13 for the other families). It is pinned inside the range by the test
+    /// quantile is a normal double and the doubles beside it resolve p. It is pinned inside the range by the test
     /// "quantile round trips for the incomplete-function families", at both ends of each range by "quantile round
     /// trips at the edges of the stated domains", and within 1e-14 of p = 1 for the gamma and chi-squared by "gamma
-    /// and chi-squared quantile round trips within 1e-14 of 1". Where the quantile is below the least normal double the result is
-    /// 0, and beyond the largest double −∞ for the t at small dof; near 1 for the beta with a small b, where adjacent
-    /// doubles move the survival by more than 1e-12 of itself (measured here: from p = 0.95 at b = 0.5 to
-    /// p = 1 − 1e-10 at b = 4 for a up to 100, and at b = 12 with a = 500), the result is within one double of the
-    /// root. Outside the domain of <c>cdf</c> the round trip carries the errors <c>cdf</c> states there, and for the
-    /// beta and F with a shape or dof below 0.5 also the rounding near 1 of the reflected inverse (measured here
-    /// 1.5e-9 for the beta at shape 0.05, 3.7e-4 for the F at 0.05 degrees of freedom and 9.7e-12 for the t at 1e5
-    /// degrees of freedom). The gamma and chi-squared invert P with <c>Special.gammaLowerRegularizedInverse</c> and
+    /// and chi-squared quantile round trips within 1e-14 of 1"; between the pinned rows, at p from 1e-300 to 1 − 2e-16,
+    /// it rests on an mpmath 1.3.0 scan on .NET and on JavaScript, measured here and not committed (spec §5.2 admits no
+    /// third-party package). Where the quantile is below the least normal double the result is 0 or a subnormal, and
+    /// beyond the largest double −∞ for the t at small dof; near 1 for the beta with a small b, where adjacent doubles
+    /// move the survival by more than 1e-12 of itself (that scan: from p = 0.95 at b = 0.5 to p = 1 − 1e-10 at b = 4
+    /// for a up to 100, and at b = 12 with a = 500), the result is within one double of the root. Outside the domain
+    /// of <c>cdf</c> the round trip carries the errors <c>cdf</c> states there, and for the beta and F with a shape or
+    /// dof below 0.5 also the rounding near 1 of the reflected inverse (that scan read 1.5e-9 for the beta at shape
+    /// 0.05, 3.7e-4 for the F at 0.05 degrees of freedom and 9.7e-12 for the t at 1e5 degrees of freedom). The gamma
+    /// and chi-squared invert P with <c>Special.gammaLowerRegularizedInverse</c> and
     /// above p = ½ refine that by at most 8 Newton steps on ln Q; at shapes far below the tested ones, where the root
     /// underflows with p within about 1e-15 of 1, the result is that inverse's floor, 5e-324 · scale (measured here at
     /// shape 1e-20). The beta, t and F map from
@@ -733,13 +746,15 @@ module Continuous =
     /// <summary>
     /// The variance: +∞ where the integral that defines it diverges to +∞ (the Student t with 1 &lt; dof ≤ 2, the F with
     /// 2 &lt; d2 ≤ 4) or where it overflows, and NaN where it is undefined (the Cauchy, the Student t with dof ≤ 1 and
-    /// the F with d2 ≤ 2, whose means are undefined or infinite). The Weibull's is
-    /// scale² (Γ(1 + 2/shape) − Γ(1 + 1/shape)²) for shape below 10, and scale² Γ(1 + ε)² expm1(S) with ε = 1/shape and
-    /// S = Σ over n = 2..30 of (−1)ⁿ ζ(n) (2ⁿ − 2) εⁿ / n from shape 10 on, where the difference would cancel
-    /// (the Euler constant terms of ln Γ(1 + 2ε) − 2 ln Γ(1 + ε) cancel exactly; the series is from documentation:
-    /// the expansion of ln Γ(1 + z) in ζ(n)). Relative error at most 1e-13 over shape from 10 to 1e8, and at shape 2 within 1e-14, pinned by the tests "weibull variance against
-    /// the reference at large shape" and "weibull closed forms" against <c>tests/reference/special.py weibull</c>
-    /// (measured here). The ζ(n) come from <c>tests/reference/special.py zeta</c>.
+    /// the F with d2 ≤ 2, whose means are undefined or infinite). The Weibull's is scale² (Γ(1 + 2/shape) −
+    /// Γ(1 + 1/shape)²) for shape below 10, and scale² Γ(1 + ε)² expm1(S) with ε = 1/shape and S = Σ over n = 2..30
+    /// of (−1)ⁿ ζ(n) (2ⁿ − 2) εⁿ / n from shape 10 on, where the difference would cancel (the Euler constant terms of
+    /// ln Γ(1 + 2ε) − 2 ln Γ(1 + ε) cancel exactly; the series is the expansion of ln Γ(1 + z) in ζ(n), general
+    /// knowledge). Relative error at most 1e-13 over shape from 10 to 1e8, within 1e-14 at shape 2, and at most 1e-12
+    /// at shapes 5 and 9.9, where the direct difference loses about log10(shape²) digits; pinned by the tests "weibull
+    /// variance against the reference at large shape", "weibull variance against the reference below shape 10" and
+    /// "weibull closed forms" against <c>tests/reference/special.py weibull</c> (measured here). The ζ(n) come from
+    /// <c>tests/reference/special.py zeta</c>.
     /// </summary>
     let variance (d: Continuous) : float =
         match d with

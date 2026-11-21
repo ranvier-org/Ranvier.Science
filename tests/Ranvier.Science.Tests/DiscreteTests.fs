@@ -486,7 +486,11 @@ let tests =
                 rejects "hypergeometric -1 0 0" (fun () -> Discrete.hypergeometric -1 0 0)
                 rejects "bernoulli -0.1" (fun () -> Discrete.bernoulli -0.1)
                 rejects "uniform 3 2" (fun () -> Discrete.uniform 3 2)
-                rejects "uniform 0 Int32.MaxValue" (fun () -> Discrete.uniform 0 Int32.MaxValue))
+                rejects "uniform 0 Int32.MaxValue" (fun () -> Discrete.uniform 0 Int32.MaxValue)
+                rejects "poisson nan" (fun () -> Discrete.poisson nan)
+                rejects "geometric nan" (fun () -> Discrete.geometric nan)
+                rejects "negativeBinomial nan 0.5" (fun () -> Discrete.negativeBinomial nan 0.5)
+                rejects "negativeBinomial 2 nan" (fun () -> Discrete.negativeBinomial 2.0 nan))
 
             testCase "samples follow the distribution" (fun () ->
                 let count = 20000

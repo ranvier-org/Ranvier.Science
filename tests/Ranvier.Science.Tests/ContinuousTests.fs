@@ -102,6 +102,14 @@ let private weibullSurvivalCases: struct (float * float * float * float)[] =
         struct (1000.0, 1.7, 1.705, 6.467103253477042e-09)
     |]
 
+let private weibullVarianceBelowTenCases: struct (float * float * float)[] =
+    [|
+        struct (5.0, 1.0, 0.044229977983117334)
+        struct (5.0, 1.7, 0.12782463637120908)
+        struct (9.9, 1.0, 0.013339995684942823)
+        struct (9.9, 1.7, 0.038552587529484754)
+    |]
+
 // python -I tests/reference/special.py dist-gamma
 // shape, scale, x, cdf, survival, density
 let private gammaCases: struct (float * float * float * float * float * float)[] =
@@ -684,6 +692,26 @@ let tests =
                 Expect.isTrue (Continuous.variance (Continuous.weibull 1e8 1.0) > 0.0) "positive at shape 1e8"
                 Expect.isTrue (Continuous.standardDeviation (Continuous.weibull 1e8 1.0) > 0.0) "sd at shape 1e8")
 
+            testCase "the gamma reads its value at 0 where x / scale underflows" (fun () ->
+                // The documented limit: at shape 0.5, scale 1e300 and x = 1e-300, x / scale is 1e-600, which is 0 in
+                // the doubles, so the cdf reads 0 and the density +infinity, the values at 0. The true cdf is
+                // P(1/2, 1e-600) = erf(1e-300), about 1.1e-300, and the density about 0.564 (closed forms).
+                let d = Continuous.gamma 0.5 1e300
+                Expect.equal (Continuous.cdf d 1e-300) 0.0 "cdf"
+                Expect.equal (Continuous.survival d 1e-300) 1.0 "survival"
+                Expect.equal (Continuous.density d 1e-300) infinity "density")
+
+            testCase "weibull variance against the reference below shape 10" (fun () ->
+                // Below 10 the variance is the direct difference Γ(1 + 2/k) − Γ(1 + 1/k)², which loses about log10(k²)
+                // digits to cancellation.
+                for row in weibullVarianceBelowTenCases do
+                    let struct (k, scale, v) = row
+
+                    Expect.isLessThanOrEqual
+                        (rel (Continuous.variance (Continuous.weibull k scale)) v)
+                        1e-12
+                        ("variance at shape " + string k + ", scale " + string scale))
+
             testCase "weibull survival at a large shape and a scale that is not a power of two" (fun () ->
                 for row in weibullSurvivalCases do
                     let struct (k, scale, x, sf) = row
@@ -860,7 +888,25 @@ let tests =
                 rejects "studentT 0" (fun () -> Continuous.studentT 0.0)
                 rejects "studentT infinity" (fun () -> Continuous.studentT infinity)
                 rejects "fisherF 0 1" (fun () -> Continuous.fisherF 0.0 1.0)
-                rejects "fisherF 1 -1" (fun () -> Continuous.fisherF 1.0 -1.0))
+                rejects "fisherF 1 -1" (fun () -> Continuous.fisherF 1.0 -1.0)
+
+                // dof / 2 must be greater than 0: at the least double, 5e-324, it rounds to 0 and the cdf raised inside.
+                rejects "chiSquared 5e-324" (fun () -> Continuous.chiSquared 5e-324)
+                rejects "studentT 5e-324" (fun () -> Continuous.studentT 5e-324)
+                rejects "fisherF 5e-324 1" (fun () -> Continuous.fisherF 5e-324 1.0)
+                rejects "fisherF 1 5e-324" (fun () -> Continuous.fisherF 1.0 5e-324)
+                Expect.isTrue (Continuous.cdf (Continuous.chiSquared 1e-323) 1.0 > 0.0) "chiSquared 1e-323 is accepted"
+
+                // upper - lower overflows: the exception names the parameter upper.
+                rejects "uniform -1e308 1e308" (fun () -> Continuous.uniform -1e308 1e308)
+#if !FABLE_COMPILER
+                let e = Expect.throwsC (fun () -> Continuous.uniform -1e308 1e308 |> ignore) id
+
+                match e with
+                | :? ArgumentOutOfRangeException as range -> Expect.equal range.ParamName "upper" "the parameter named"
+                | other -> failtestf "expected ArgumentOutOfRangeException, got %s" (other.GetType().Name)
+#endif
+                )
 
             testCase "equal parameters give equal distributions" (fun () ->
                 Expect.equal (Continuous.normal 0.0 1.0) (Continuous.normal 0.0 1.0) "same parameters"
@@ -1243,7 +1289,11 @@ let tests =
                 // Left out (measured here): the p whose root is below the least normal double (1e-100, and 1e-10 at
                 // shapes 0.025 and 0.01), and for the beta with b = 0.5 or 0.2 the p whose root lies so near 1 that
                 // adjacent doubles move the survival by more than a third of the bound (from 0.999 at (0.5, 0.5),
-                // 0.975 at (100, 0.5) and (0.2, 0.2), 0.5 at (500, 0.2)), or whose root rounds to 1.
+                // 0.975 at (100, 0.5) and (0.2, 0.2), 0.5 at (500, 0.2)), or whose root rounds to 1. A third, not the
+                // whole bound, because the quantile's doc calls such a root unresolved where adjacent doubles move the
+                // survival by more than the 1e-12 bound itself: a p that the doubles resolve only to a third of the bound
+                // or worse sits near that line, and the result is then within one double of the root rather than within
+                // the bound, which this test does not assert.
                 let atLeastNormal = without [ 1e-100 ]
                 let upTo (largest: float) = all |> List.filter (fun p -> p <= largest)
 

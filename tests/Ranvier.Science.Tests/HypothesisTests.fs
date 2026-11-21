@@ -44,6 +44,24 @@ let private anovaCases: struct (float * float * float * float * float * float)[]
         struct (9.264705882352942, 2.0, 15.0, 0.9976012226706071, 0.0023987773293929083, 0.004797554658785817)
     |]
 
+// a p-value near 1e-300: the 300 values 14 + noise[i % 10] against 0; and groups of unequal sizes
+
+let private farTailCases: struct (float * float * float * float * float)[] =
+    [|
+        struct (170.66270085641796, 299.0, 1.0, 2.542024305316277e-300, 5.084048610632554e-300)
+    |]
+
+let private anovaUnequalCases: struct (float * float * float * float * float * float)[] =
+    [|
+        struct (9.410071942446043, 2.0, 12.0, 0.9965159891016888, 0.003484010898311163, 0.006968021796622326)
+    |]
+
+let private farTailNoise = [| 0.3; -1.2; 2.1; -0.7; 1.5; -2.2; 0.9; -0.4; 1.8; -1.6 |]
+let private farTailSample = Array.init 300 (fun i -> 14.0 + farTailNoise[i % 10])
+
+let private anovaUnequalGroups: float[][] =
+    [| [| 6.0; 8.0; 4.0; 5.0; 3.0 |]; [| 8.0; 12.0; 9.0; 11.0; 6.0; 8.0; 10.0 |]; [| 13.0; 9.0; 11.0 |] |]
+
 // python -I tests/reference/special.py counts
 // successes, trials, p0, then the Less, Greater and TwoSided p-values, as exact fractions
 let private binomialTestCases: struct (int * int * float * float * float * float)[] =
@@ -271,6 +289,19 @@ let tests =
                     close "denominator degrees of freedom" r.DenominatorDegreesOfFreedom d2
                     close "p-value" r.PValue greater)
 
+            testCase "a p-value near 1e-300 and groups of unequal size against the reference" (fun () ->
+                for struct (t, dof, less, greater, two) in farTailCases do
+                    let run alt = HypothesisTest.oneSampleT alt 0.0 (moments farTailSample)
+                    checkT run t dof
+                    pValues "far tail" run less greater two
+
+                for struct (f, d1, d2, _, greater, _) in anovaUnequalCases do
+                    let r = HypothesisTest.oneWayAnova (Array.map moments anovaUnequalGroups)
+                    close "statistic" r.Statistic f
+                    close "numerator degrees of freedom" r.DegreesOfFreedom d1
+                    close "denominator degrees of freedom" r.DenominatorDegreesOfFreedom d2
+                    close "p-value" r.PValue greater)
+
             testCase "the alternatives are consistent" (fun () ->
                 for (name, run) in allTests do
                     let less = (run Less).PValue
@@ -379,6 +410,69 @@ let tests =
                 Expect.isTrue (isNaN pooledEqual.Statistic) "pooled equal means: NaN statistic"
                 Expect.isTrue (isNaN pooledEqual.PValue) "pooled equal means: NaN p-value")
 
+            testCase "a spread the moments cannot resolve gives NaN, not an infinite statistic" (fun () ->
+                // The sleep groups scaled by 1e-200 (the squares of the deviations underflow to 0, so the moments read
+                // as constant) and by 1e-162 (the sum of squares is subnormal and has lost bits).
+                let scaled (s: float) (xs: float[]) = moments (Array.map (fun x -> x * s) xs)
+
+                let statisticAndPValueNaN (message: string) (r: TestResult) =
+                    Expect.isTrue (isNaN r.Statistic) (message + ": NaN statistic, not " + string r.Statistic)
+                    Expect.isTrue (isNaN r.PValue) (message + ": NaN p-value, not " + string r.PValue)
+
+                for s in [| 1e-200; 1e-162 |] do
+                    let a = scaled s sleepA
+                    let b = scaled s sleepB
+                    let groups = Array.map (scaled s) anovaGroups
+
+                    for alt in [| TwoSided; Less; Greater |] do
+                        let label = string s + " " + string alt
+                        statisticAndPValueNaN ("oneSampleT " + label) (HypothesisTest.oneSampleT alt 0.0 a)
+                        allNaN ("welchT " + label) (HypothesisTest.welchT alt a b)
+                        statisticAndPValueNaN ("pooledT " + label) (HypothesisTest.pooledT alt a b)
+                        statisticAndPValueNaN ("varianceRatio " + label) (HypothesisTest.varianceRatio alt a b)
+
+                    statisticAndPValueNaN ("oneWayAnova " + string s) (HypothesisTest.oneWayAnova groups)
+
+                // Shifted by 10 and scaled by 1e155: without compensation the sum of squares overflows to +infinity,
+                // which gave t = 0 and p = 1 where t is about 19.
+                let overflowed (xs: float[]) =
+                    Array.fold (Moments.add false) Moments.zero (Array.map (fun x -> (x + 10.0) * 1e155) xs)
+
+                statisticAndPValueNaN "oneSampleT at 1e155" (HypothesisTest.oneSampleT TwoSided 0.0 (overflowed sleepA))
+
+                statisticAndPValueNaN
+                    "pooledT at 1e155"
+                    (HypothesisTest.pooledT TwoSided (overflowed sleepA) (overflowed (Array.map (fun x -> x * 2.0) sleepB))))
+
+            testCase "a spread of 1e-150 gives the scale-free statistics" (fun () ->
+                // The squares of the deviations stay normal doubles at 1e-150, so t, F and p are those of the unscaled
+                // sleep data and ANOVA groups, against the same reference rows.
+                let scaled (xs: float[]) = moments (Array.map (fun x -> x * 1e-150) xs)
+                let struct (t, dof, less, greater, two) = oneSampleTCases[0]
+                let run alt = HypothesisTest.oneSampleT alt 0.0 (scaled sleepA)
+                checkT run t dof
+                pValues "oneSampleT" run less greater two
+
+                let struct (t, dof, less, greater, two) = welchCases[0]
+                let run alt = HypothesisTest.welchT alt (scaled sleepA) (scaled sleepB)
+                checkT run t dof
+                pValues "welch" run less greater two
+
+                let struct (t, dof, less, greater, two) = pooledCases[0]
+                let run alt = HypothesisTest.pooledT alt (scaled sleepA) (scaled sleepB)
+                checkT run t dof
+                pValues "pooled" run less greater two
+
+                let struct (f, _, _, less, greater, two) = varianceRatioCases[0]
+                let run alt = HypothesisTest.varianceRatio alt (scaled sleepA) (scaled sleepB)
+                close "F" (run TwoSided).Statistic f
+                pValues "F" run less greater two
+
+                let struct (f, _, _, _, greater, _) = anovaCases[0]
+                let anova = HypothesisTest.oneWayAnova (Array.map scaled anovaGroups)
+                close "ANOVA F" anova.Statistic f
+                close "ANOVA p-value" anova.PValue greater)
+
             testCase "an empty group gives NaN fields" (fun () ->
                 allNaN "empty group" (HypothesisTest.oneWayAnova [| moments anovaGroups[0]; Moments.zero |])
                 allNaN "all singletons" (HypothesisTest.oneWayAnova [| moments [| 1.0 |]; moments [| 2.0 |] |])
@@ -478,6 +572,19 @@ let tests =
                 let closed = exp (-two.Statistic / 2.0)
                 Expect.isLessThanOrEqual (abs (two.PValue - closed)) (1e-13 * closed) "2 x 3 against exp(-x/2)")
 
+            testCase "independence at counts near the double maximum" (fun () ->
+                // The first reference table times 2^990: the statistic is homogeneous of degree 1, so it is the reference
+                // statistic times 2^990, where the products of totals overflowed and the statistic was NaN.
+                let factor = Math.Pow(2.0, 990.0)
+                let big = independenceTables[0] |> Array.map (Array.map (fun x -> x * factor))
+                let struct (statistic, _) = independenceCases[0]
+                let r = HypothesisTest.chiSquaredIndependence big
+                close "statistic" r.Statistic (statistic * factor)
+                Expect.equal r.DegreesOfFreedom 2.0 "degrees of freedom"
+                Expect.equal r.PValue 0.0 "the p-value of a statistic near 3e298 underflows to 0"
+                // A statistic of about 2e308 cannot be represented: every field is NaN, not a finite degrees of freedom.
+                allNaN "unrepresentable" (HypothesisTest.chiSquaredIndependence [| [| 1e308; 1.0 |]; [| 1.0; 1e308 |] |]))
+
             testCase "Fisher's tea-tasting table" (fun () ->
                 // Fisher, The Design of Experiments, 1935, chapter 2: masses 1, 16, 36, 16, 1 over 70.
                 let run alt = HypothesisTest.fisherExact alt 3 1 1 3
@@ -495,7 +602,14 @@ let tests =
             testCase "Fisher's odds ratio at a zero cell" (fun () ->
                 Expect.equal (HypothesisTest.fisherExact TwoSided 3 0 1 2).Statistic infinity "bc = 0 < ad"
                 Expect.equal (HypothesisTest.fisherExact TwoSided 0 3 2 0).Statistic 0.0 "ad = 0 < bc"
-                Expect.isTrue (isNaN (HypothesisTest.fisherExact TwoSided 0 0 2 0).Statistic) "ad = bc = 0")
+                Expect.isTrue (isNaN (HypothesisTest.fisherExact TwoSided 0 0 2 0).Statistic) "ad = bc = 0"
+
+                // A zero margin leaves one table, so every p-value is 1 and the odds ratio is 0/0.
+                for alt in [| TwoSided; Less; Greater |] do
+                    let zeroRow = HypothesisTest.fisherExact alt 0 0 3 2
+                    Expect.equal zeroRow.PValue 1.0 (sprintf "a zero row, %A" alt)
+                    Expect.isTrue (isNaN zeroRow.Statistic) "a zero row's odds ratio"
+                    Expect.equal (HypothesisTest.fisherExact alt 0 3 0 2).PValue 1.0 (sprintf "a zero column, %A" alt))
 
             testCase "count arguments out of range raise" (fun () ->
                 let range (message: string) (f: unit -> TestResult) =

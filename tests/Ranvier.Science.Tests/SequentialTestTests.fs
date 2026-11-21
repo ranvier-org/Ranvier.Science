@@ -164,6 +164,17 @@ let tests =
                 Expect.equal (SequentialTest.pValue t) 1.0 "p-value"
                 Expect.isFalse (SequentialTest.rejects t) "no rejection")
 
+            testCase "a spread the moments cannot resolve gives a NaN p-value, not a rejection" (fun () ->
+                // A true null: 200 values centred on 0 (the integers -99.5 to 99.5 in a fixed order) scaled by 1e-200,
+                // where the squared deviations underflow and the moments read as constant, and by 1e-162, where the sum
+                // of squares is subnormal. The p-value was 0 and the test rejected.
+                let centred = Array.init 200 (fun i -> float ((i * 37) % 200) - 99.5)
+
+                for scale in [| 1e-200; 1e-162 |] do
+                    let t = fold (Array.map (fun x -> x * scale) centred)
+                    Expect.isTrue (Double.IsNaN (SequentialTest.pValue t)) ("NaN p-value at " + string scale)
+                    Expect.isFalse (SequentialTest.rejects t) ("no rejection at " + string scale))
+
             testCase "zero spread away from theta0 rejects with p-value 0" (fun () ->
                 let t = fold (Array.create 40 1.0)
                 Expect.equal (SequentialTest.pValue t) 0.0 "p-value"

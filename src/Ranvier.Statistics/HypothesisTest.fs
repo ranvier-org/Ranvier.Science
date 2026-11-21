@@ -32,9 +32,9 @@ type TestResult =
 
 module internal PValue =
     /// Less: the cdf at the statistic; Greater: the survival; TwoSided: min 1 (2 · min cdf survival). NaN statistic
-    /// gives NaN. Each tail is computed directly, so Less + Greater differs from 1 by the two tails' rounding: 0 measured here
-    /// for the t and normal distributions over the seeded samples of the test "Less + Greater is 1 on seeded samples",
-    /// and 2.2e-15 for the F distribution (measured by the reviewer over 20000 random pairs on .NET).
+    /// gives NaN. Each tail is computed directly, so Less + Greater differs from 1 by the two tails' rounding: at most
+    /// 1e-15 for the t and normal distributions (0 measured) and at most 4e-15 for the F, the bounds the test "Less +
+    /// Greater is 1 on seeded samples" asserts over 5000 seeded pairs.
     let continuous (alternative: Alternative) (d: Continuous) (statistic: float) : float =
         if Double.IsNaN statistic then
             nan
@@ -93,18 +93,26 @@ module internal TestSupport =
 /// <summary>Hypothesis tests on the moments of one or more samples, for normally distributed observations.</summary>
 /// <remarks>
 /// Each test takes the <c>Moments</c> of its samples. A count too small for the test gives a result with every field
-/// NaN, and NaN data gives a NaN statistic and p-value; neither raises. A zero spread gives an infinite statistic and
-/// a p-value of 0 where the means differ (a non-zero difference over 0), and a NaN statistic where they agree. The
-/// p-value is a tail probability of the null distribution with the relative error of <c>Continuous.cdf</c> and
-/// <c>Continuous.survival</c>, at most 1e-12 where it is at least 1e-300; each function names the test that pins it
-/// against the script <c>tests/reference/special.py</c>, section parametric.
+/// NaN, and NaN data gives a NaN statistic and p-value; neither raises. A spread below about 1.5e-154 or above about
+/// 1.3e154, where the moments' sum of squares leaves the normal doubles, gives a NaN statistic and p-value, since a
+/// spread whose squares underflowed cannot be told from none (tests "a spread the moments cannot resolve gives NaN,
+/// not an infinite statistic" and "a spread of 1e-150 gives the scale-free statistics"). A constant sample whose mean
+/// is at least 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude has an exactly zero spread, which gives an infinite statistic and
+/// a p-value of 0 where the means differ (a non-zero difference over 0), and a NaN statistic where they agree; a
+/// constant sample nearer 0, zeros included, gives NaN. The p-value is a tail probability of the null distribution
+/// with the relative error of <c>Continuous.cdf</c> and <c>Continuous.survival</c>, at most 1e-12 where it is at least
+/// 1e-300; each function names the test that pins it against the script <c>tests/reference/special.py</c>, section
+/// parametric. That bound is relative to the mean and variance the moments hold. <c>Moments</c> adds its own loss
+/// for data with an offset, a relative error up to about ε·|mean|/sd in the variance (ε = 2⁻⁵²; see
+/// <c>Moments.variance</c>), and a test that receives the moments cannot undo it.
 /// </remarks>
 module HypothesisTest =
     /// <summary>
     /// The one-sample t test of the mean against the null value: t = (x̄ − μ₀)/(s/√n) with s the sample standard
     /// deviation (divisor n − 1), on n − 1 degrees of freedom. Raises ArgumentOutOfRangeException when the null value
     /// is not finite (NaN raises too). A count below 2 gives every field NaN. A constant sample gives ±∞
-    /// (p-value 0 two-sided) at a mean other than the null value and NaN at the null value. Relative error of the
+    /// (p-value 0 two-sided) at a mean other than the null value and NaN at the null value, and a spread the moments
+    /// cannot resolve gives NaN, as the module's remarks state. Relative error of the
     /// p-value at most 1e-12 over the samples of the test "one-sample t against the reference" (R's
     /// <c>datasets::sleep</c> group 1 and the paired differences), which pins it.
     /// </summary>
@@ -115,7 +123,7 @@ module HypothesisTest =
         if n < 2.0 then
             TestSupport.nanResult
         else
-            let t = (Moments.mean m - mu0) / (Moments.sampleStandardDeviation m / sqrt n)
+            let t = (Moments.mean m - mu0) / (sqrt (Check.resolvedVariance Moments.sampleVariance m) / sqrt n)
             TestSupport.tResult alternative t (n - 1.0)
 
     /// <summary>
@@ -146,8 +154,9 @@ module HypothesisTest =
     /// Welch–Satterthwaite degrees of freedom ν = (s²ₐ/nₐ + s²ᵦ/nᵦ)² / ((s²ₐ/nₐ)²/(nₐ − 1) + (s²ᵦ/nᵦ)²/(nᵦ − 1)),
     /// which does not assume equal variances. A count below 2 in either sample gives every field NaN. A zero
     /// standard error (both samples constant) makes ν NaN; the statistic is then ±∞ with p-value 0 two-sided when
-    /// the means differ, and NaN with p-value NaN when they agree. Relative error of the p-value at most 1e-12 over
-    /// the samples of the test "Welch and pooled t against the reference", which pins it.
+    /// the means differ, and NaN with p-value NaN when they agree; a spread the moments cannot resolve gives every
+    /// field NaN (module remarks). Relative error of the p-value at most 1e-12 over the samples of the test "Welch and
+    /// pooled t against the reference", which pins it.
     /// </summary>
     let welchT (alternative: Alternative) (a: Moments) (b: Moments) : TestResult =
         let na = Moments.count a
@@ -156,8 +165,8 @@ module HypothesisTest =
         if na < 2.0 || nb < 2.0 then
             TestSupport.nanResult
         else
-            let qa = Moments.sampleVariance a / na
-            let qb = Moments.sampleVariance b / nb
+            let qa = Check.resolvedVariance Moments.sampleVariance a / na
+            let qb = Check.resolvedVariance Moments.sampleVariance b / nb
             let s = qa + qb
             let d = Moments.mean a - Moments.mean b
 
@@ -177,8 +186,9 @@ module HypothesisTest =
     /// variances. A sample of one observation adds 0 to the pooled sum of squares, so it is defined when one sample
     /// holds a single observation and the other two or more, as in <c>DifferenceInterval.pooled</c>; counts of (1, 1)
     /// or a count of 0 give every field NaN. Two constant samples give a statistic of
-    /// ±∞ (p-value 0 two-sided) when the means differ and NaN when they agree. Relative error of the p-value at most
-    /// 1e-12 over the samples of the test "Welch and pooled t against the reference", which pins it.
+    /// ±∞ (p-value 0 two-sided) when the means differ and NaN when they agree; a spread the moments cannot resolve
+    /// gives a NaN statistic and p-value (module remarks). Relative error of the p-value at most 1e-12 over the samples
+    /// of the test "Welch and pooled t against the reference", which pins it.
     /// </summary>
     let pooledT (alternative: Alternative) (a: Moments) (b: Moments) : TestResult =
         let na = Moments.count a
@@ -188,7 +198,7 @@ module HypothesisTest =
             TestSupport.nanResult
         else
             let sumOfSquares (n: float) (m: Moments) : float =
-                if n < 2.0 then 0.0 else (n - 1.0) * Moments.sampleVariance m
+                if n < 2.0 then 0.0 else (n - 1.0) * Check.resolvedVariance Moments.sampleVariance m
 
             let dof = na + nb - 2.0
             let variance = (sumOfSquares na a + sumOfSquares nb b) / dof
@@ -199,8 +209,9 @@ module HypothesisTest =
     /// The F test of equal variances: F = s²ₐ/s²ᵦ on (nₐ − 1, nᵦ − 1) degrees of freedom, the parameter being
     /// σ²ₐ/σ²ᵦ against 1; Less means the ratio is below 1. It assumes normal observations and is sensitive to
     /// departures from normality. A count below 2 in either sample gives every field NaN. A constant b gives an
-    /// infinite statistic (p-value 0 two-sided) where a varies and NaN where a is constant too. Relative error of
-    /// the p-value at most 1e-12 over the samples of the test "variance ratio against the reference", which pins it.
+    /// infinite statistic (p-value 0 two-sided) where a varies and NaN where a is constant too; a spread the moments
+    /// cannot resolve, in either sample, gives a NaN statistic and p-value (module remarks). Relative error of the
+    /// p-value at most 1e-12 over the samples of the test "variance ratio against the reference", which pins it.
     /// </summary>
     let varianceRatio (alternative: Alternative) (a: Moments) (b: Moments) : TestResult =
         let na = Moments.count a
@@ -209,7 +220,8 @@ module HypothesisTest =
         if na < 2.0 || nb < 2.0 then
             TestSupport.nanResult
         else
-            let f = Moments.sampleVariance a / Moments.sampleVariance b
+            let f =
+                Check.resolvedVariance Moments.sampleVariance a / Check.resolvedVariance Moments.sampleVariance b
 
             {
                 Statistic = f
@@ -224,8 +236,9 @@ module HypothesisTest =
     /// freedom; the p-value is the F survival at the statistic, the test for unequal means. It assumes normal
     /// observations of equal variance. Raises ArgumentException for fewer than two groups. An empty group, or
     /// N = k (no degrees of freedom within groups), gives every field NaN. Constant groups give an infinite
-    /// statistic (p-value 0) when their means differ and NaN when they agree. Relative error of the p-value at most
-    /// 1e-12 over the groups of the test "one-way ANOVA against the reference", which pins it.
+    /// statistic (p-value 0) when their means differ and NaN when they agree; a group of two or more whose spread the
+    /// moments cannot resolve gives a NaN statistic and p-value (module remarks). Relative error of the p-value at
+    /// most 1e-12 over the groups of the test "one-way ANOVA against the reference", which pins it.
     /// </summary>
     let oneWayAnova (groups: Moments[]) : TestResult =
         if groups.Length < 2 then
@@ -245,7 +258,7 @@ module HypothesisTest =
                     let delta = Moments.mean g - grand
                     Moments.count g * delta * delta)
 
-            let within = groups |> Array.sumBy (fun g -> Moments.count g * Moments.variance g)
+            let within = groups |> Array.sumBy (fun g -> Moments.count g * Check.resolvedVariance Moments.variance g)
             let f = (between / (k - 1.0)) / (within / (total - k))
 
             {
@@ -409,7 +422,9 @@ module HypothesisTest =
     /// row total · column total / grand total, χ² = Σ (o − e)²/e without a continuity correction, on (r − 1)(c − 1)
     /// degrees of freedom, and the p-value is the χ² survival at the statistic. Raises ArgumentException for fewer
     /// than 2 rows or 2 columns or rows of unequal length; raises ArgumentOutOfRangeException for an entry that is
-    /// negative or not finite. A zero row or column total gives every field NaN. The χ² approximation is poor where
+    /// negative or not finite. A zero row or column total gives every field NaN, and so does a statistic that is not
+    /// a finite number; the table is first divided by one power of two near its largest entry, so no total or product
+    /// of totals overflows (test "independence at counts near the double maximum"). The χ² approximation is poor where
     /// an expected count is below about 5 (general knowledge). Relative error of the p-value at most 1e-12 over the
     /// tables of the test "independence against the reference", which pins it against the script
     /// <c>tests/reference/special.py</c>, section counts.
@@ -430,21 +445,36 @@ module HypothesisTest =
             for o in row do
                 finiteNotNegative (nameof table) o
 
-        let rowTotals = table |> Array.map Array.sum
-        let columnTotals = Array.init columns (fun j -> table |> Array.sumBy (fun row -> row[j]))
-        let total = Array.sum rowTotals
+        let largest = table |> Array.map Array.max |> Array.max
 
-        if total <= 0.0 || Array.exists (fun t -> t <= 0.0) rowTotals || Array.exists (fun t -> t <= 0.0) columnTotals then
+        if largest = 0.0 then
             TestSupport.nanResult
         else
-            let mutable statistic = 0.0
+            // The table is divided by one power of two near its largest entry, so no total or product of totals
+            // overflows; the statistic is homogeneous of degree 1 in the counts, so it is multiplied back at the end.
+            let step = Math.Pow(2.0, Math.Floor(Math.Log(largest) / Math.Log(2.0)))
+            let scaled = table |> Array.map (Array.map (fun x -> x / step))
+            let rowTotals = scaled |> Array.map Array.sum
+            let columnTotals = Array.init columns (fun j -> scaled |> Array.sumBy (fun row -> row[j]))
+            let total = Array.sum rowTotals
 
-            for i in 0 .. table.Length - 1 do
-                for j in 0 .. columns - 1 do
-                    let e = rowTotals[i] * columnTotals[j] / total
-                    statistic <- statistic + (table[i][j] - e) * (table[i][j] - e) / e
+            if Array.exists (fun t -> t <= 0.0) rowTotals || Array.exists (fun t -> t <= 0.0) columnTotals then
+                TestSupport.nanResult
+            else
+                let mutable statistic = 0.0
 
-            chiSquaredResult statistic (float ((table.Length - 1) * (columns - 1)))
+                for i in 0 .. scaled.Length - 1 do
+                    for j in 0 .. columns - 1 do
+                        let e = rowTotals[i] * columnTotals[j] / total
+                        let d = scaled[i][j] - e
+                        statistic <- statistic + d * (d / e)
+
+                let statistic = statistic * step
+
+                if Double.IsNaN statistic || Double.IsInfinity statistic then
+                    TestSupport.nanResult
+                else
+                    chiSquaredResult statistic (float ((table.Length - 1) * (columns - 1)))
 
     /// <summary>
     /// Fisher's exact test on the 2 × 2 table [[a, b], [c, d]] of counts: under independence, given the margins,
@@ -455,11 +485,15 @@ module HypothesisTest =
     /// R computes the masses by a different route, so its sum can differ in the last digits). Every mass comes from
     /// <c>Discrete.mass</c>, the observed one included. Statistic is the sample odds ratio ad/(bc): +∞ where
     /// bc = 0 &lt; ad, NaN where ad and bc are both 0 (R reports the conditional maximum likelihood estimate
-    /// instead). Both degrees-of-freedom fields are NaN. Raises ArgumentOutOfRangeException for a negative cell or a
-    /// total above Int32.MaxValue. Cost: O(support) masses for TwoSided, else one cdf. Relative error of the p-value
-    /// at most 1e-12 over the tables of the tests "Fisher's tea-tasting table" and "Fisher against exact fractions",
-    /// which pin it against the closed form of the tea table and the script <c>tests/reference/special.py</c>,
-    /// section counts.
+    /// instead). A zero margin, a row or a column of zeros, leaves one table with those margins, so every p-value is
+    /// 1 and the odds ratio is NaN (0/0); R's fisher.test gives a p-value of 1 there too (general knowledge), and the
+    /// test "Fisher's odds ratio at a zero cell" pins it. Both degrees-of-freedom fields are NaN. Raises
+    /// ArgumentOutOfRangeException for a negative cell or a total above Int32.MaxValue. Cost: O(support) masses for
+    /// TwoSided, else one cdf. Relative error of the p-value at most 1e-12 over the tables of the tests "Fisher's
+    /// tea-tasting table" and "Fisher against exact fractions", which pin it against the closed form of the tea table
+    /// and the script <c>tests/reference/special.py</c>, section counts; the review of Plan T3 Task 7 measured the
+    /// bound against exact rational arithmetic over nine tables with totals up to 3400, with the error growing with
+    /// the total (not committed).
     /// </summary>
     let fisherExact (alternative: Alternative) (a: int) (b: int) (c: int) (d: int) : TestResult =
         if a < 0 then
@@ -583,7 +617,8 @@ module HypothesisTest =
     /// <c>mannWhitney</c> applies; Less means the differences' location is below 0. Where every difference is zero
     /// Statistic is 0 and the p-value NaN. An empty array or a NaN gives every field NaN and raises nothing; both
     /// degrees-of-freedom fields are NaN. Cost: O(n log n). The p-value is an approximation: R computes it exactly, ties
-    /// included, where n is below 50 (from documentation, wilcox.test.R line 76). Relative error of
+    /// included, where its n, which counts the zeros, is below 50 (from documentation, wilcox.test.R line 76). Relative
+    /// error of
     /// the p-value at most 1e-12 against the approximating formula over the three data sets of the tests "Wilcoxon on
     /// the sleep differences" and "Wilcoxon against the reference" (ties and a zero, a zero without ties, V at its
     /// mean), and against closed forms over 100000 differences of ±1 in "the continuity correction and the tie
@@ -664,7 +699,9 @@ module HypothesisTest =
     /// the alternating series 2 Σ(−1)^(k−1) exp(−2k²λ²) from λ = 1.18 and as 1 − (√(2π)/λ) Σ exp(−(2k − 1)²π²/(8λ²))
     /// below it (general knowledge), each sum stopping when the next term is at most 2^-53 of the sum: at most 3 terms
     /// for λ from 0.04 to 6 (measured here: <c>python -I tests/reference/special.py ranks</c> asserts it on a grid of
-    /// step 0.001), and 1 beyond. Q is 1 below λ = 0.04 and underflows to 0 above λ of about 19 (general knowledge).
+    /// step 0.001), and 1 beyond. Q is 1 below λ = 0.04 and underflows to 0 above λ of about 19 (general knowledge);
+    /// Q ≈ 2 exp(−2λ²) is below 1e-300 from λ of about 18.6 and subnormal from about 18.8 (general knowledge), so a
+    /// p-value below 1e-300 carries no relative bound, as spec §5.1's bounds start at 1e-300.
     /// An empty sample, a NaN, or a cdf value that is NaN or outside [0, 1] gives every field NaN and raises nothing;
     /// both degrees-of-freedom fields are NaN. Cost: O(n log n) and n calls of the cdf. The p-value is an
     /// approximation: R computes it exactly for n below 100 without ties (from documentation, ks.test.R), and it is not

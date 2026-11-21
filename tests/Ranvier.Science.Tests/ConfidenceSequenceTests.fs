@@ -155,6 +155,19 @@ let tests =
                 Expect.isTrue (Double.IsNaN (ConfidenceSequence.radius 0.05 1.0 10.0 nan)) "radius"
             }
 
+            // 200 values centred on 0 (the integers -99.5 to 99.5 in a fixed order) scaled by 1e-200, where the squared
+            // deviations underflow, and by 1e-162, where the sum of squares is subnormal: the intervals were zero-width.
+            test "a spread the moments cannot resolve gives NaN bounds" {
+                let centred = Array.init 200 (fun i -> float ((i * 37) % 200) - 99.5)
+
+                for scale in [ 1e-200; 1e-162 ] do
+                    let m = Array.fold (Moments.add true) Moments.zero (Array.map (fun x -> x * scale) centred)
+                    let s = ConfidenceSequence.ofMoments 0.05 1.0 m
+                    let f = FixedSample.ofMoments 0.05 m
+                    Expect.isTrue (Double.IsNaN s.Lower && Double.IsNaN s.Upper) (sprintf "sequence bounds at %g" scale)
+                    Expect.isTrue (Double.IsNaN f.Lower && Double.IsNaN f.Upper) (sprintf "fixed-sample bounds at %g" scale)
+            }
+
             test "a sample of one reached by removal gives a zero-width interval" {
                 let xs = Array.init 1000 (fun k -> sqrt (float k) + 0.1)
                 let mutable m = Array.fold (Moments.add true) Moments.zero xs

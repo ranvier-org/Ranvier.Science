@@ -86,7 +86,28 @@ let tests =
                 Bootstrap.standardError 7 record sample (Generator.create 5) |> ignore
                 Expect.equal seen.Count 7 "one call per resample for standardError")
 
+            testCase "the bootstrap standard error of statistics with a large offset" (fun () ->
+                // The resample means of offset + i · 1e-3, offset 1e9: each recorded mean minus 1e9 is exact (Sterbenz),
+                // so the spread of the differences is the reference. A one-pass fold of the means can lose up to about
+                // ε · 1e9 / sd relative, 1e-4 here; it read 2.9e-7 off, more than this test allows, at f8a6caf.
+                let xs = Array.init 50 (fun i -> 1e9 + float i * 1e-3)
+                let recorded = ResizeArray<float>()
+
+                let recordMean (resample: float[]) : float =
+                    let m = Array.average resample
+                    recorded.Add m
+                    m
+
+                let struct (se, _) = Bootstrap.standardError 400 recordMean xs (Generator.create 6)
+                let differences = recorded.ToArray() |> Array.map (fun m -> m - 1e9)
+                let m = Array.fold (Moments.add true) Moments.zero differences
+                expectClose 1e-12 0.0 (Moments.sampleStandardDeviation m) se "standard error")
+
             testCase "a constant sample gives a zero-width interval at the constant" (fun () ->
+                // 0.1 three times has a mean that rounds (0.30000000000000004 / 3), so the deviations are not 0.
+                let struct (three, _) = Bootstrap.standardError 50 Array.average [| 0.1; 0.1; 0.1 |] (Generator.create 1)
+                Expect.equal three 0.0 "standard error of 0.1 three times"
+
                 for c in [ 0.5; 0.1 ] do
                     let xs = Array.create 200 c
                     // Every resample equals the sample, so the bounds are the statistic of the sample itself.
@@ -154,6 +175,9 @@ let tests =
                 expectClose 1e-14 0.0 (0.9 * 4.0 ** -0.2) (Density.silvermanBandwidth [| 0.0; 0.0; 0.0; 0.0 |]) "zeros"
                 Expect.equal (Density.scottBandwidth [| 5.0; 5.0; 5.0; 5.0 |]) 0.0 "Scott of a constant"
                 Expect.equal (Density.scottBandwidth [| 0.0; 0.0; 0.0; 0.0 |]) 0.0 "Scott of zeros"
+                // A constant whose mean rounds: s is still exactly 0, so Silverman falls back to |x1| and Scott is 0.
+                expectClose 1e-14 0.0 (0.9 * 0.1 * 3.0 ** -0.2) (Density.silvermanBandwidth [| 0.1; 0.1; 0.1 |]) "constant 0.1"
+                Expect.equal (Density.scottBandwidth [| 0.1; 0.1; 0.1 |]) 0.0 "Scott of a constant 0.1"
                 // The IQR is 0 but s > 0: nine zeros and a 10 have mean 1, variance 90/9 = 10, so s = sqrt 10.
                 let spike = Array.append (Array.zeroCreate 9) [| 10.0 |]
                 Expect.equal (Describe.interquartileRange spike) 0.0 "the IQR is 0"
@@ -197,8 +221,9 @@ let tests =
             testCase "bandwidths of offset data match exact rational arithmetic" (fun () ->
                 // python -I tests/reference/special.py resampling: the exact bandwidths of the 50 doubles
                 // offset + i * spread (rationals and 60-digit decimals, rounded once). Scaling by a power of two is
-                // exact, so each is within 1e-13 relative; a scale that rounds each value loses 1e-5 and 6% on the
-                // last three rows.
+                // exact, so each is within 1e-13 relative; a scale that rounds each value loses of the order of
+                // ε · offset / s relative, from about 1e-5 to 1e-2 on the last three rows (general knowledge, not
+                // measured here).
                 let cases: struct (float * float * float * float)[] =
                     [|
                         struct (1.0, 0.001, 0.0059996784578804415, 0.007066287961503631)
@@ -216,15 +241,16 @@ let tests =
             testCase "seeded resamples are equal on both targets" (fun () ->
                 // The sample is the integers 0 to 199 in the order i * 37 mod 200 (37 is coprime to 200): exact on every
                 // platform, with no exp, log or trigonometry, so the literals do not depend on the libm. The bootstrap
-                // itself uses Generator.integer (exact), type-7 quantiles and sums. The literals were printed on .NET
-                // (net10.0, Release, Windows) for 500 resamples and Generator.create 4; the mocha run must reproduce
-                // them bit for bit.
+                // itself uses Generator.integer (exact), type-7 quantiles, sums and a square root. The literals were
+                // printed on .NET (net10.0, Release, Windows) for 500 resamples and Generator.create 4, the standard
+                // error again after its fold became the corrected two-pass formula (it moved by one ulp); the mocha run
+                // must reproduce them bit for bit.
                 let exact = Array.init 200 (fun i -> float ((i * 37) % 200))
                 let struct (ci, _) = Bootstrap.percentile 0.05 500 Array.average exact (Generator.create 4)
                 Expect.equal ci.Lower 91.055125 "lower bound"
                 Expect.equal ci.Upper 107.255 "upper bound"
                 let struct (se, _) = Bootstrap.standardError 500 Array.average exact (Generator.create 4)
-                Expect.equal se 4.240561452445175 "standard error")
+                Expect.equal se 4.240561452445176 "standard error")
 
             testCase "the estimate of one point is a normal density" (fun () ->
                 let f = Density.gaussianKernel 0.5 [| 2.0 |]

@@ -1,9 +1,35 @@
 namespace Ranvier.Statistics
 
 open System
+open Ranvier.Numerics
 
 /// Argument checks shared by the statistics modules. Each raises ArgumentOutOfRangeException naming the parameter.
 module internal Check =
+    // 2^-480: from this mean on, two distinct doubles near the mean differ by at least 2^-533, whose square is a
+    // non-zero subnormal.
+    let private resolvedMean = 3.2033329522929615e-145
+
+    // 2^-1022, the least normal double.
+    let private leastNormal = 2.2250738585072014e-308
+
+    /// <summary>
+    /// The variance that the given function reads from the moments, where the moments resolve it, and NaN where they
+    /// do not: NaN for a NaN or infinite variance (the sum of squares overflowed), for a non-zero variance below
+    /// 2^-1022 (a subnormal sum of squares, which has lost bits), and for a variance of exactly 0 at a mean below
+    /// 2^-480 in magnitude, where squares that underflowed to 0 cannot be told from a constant sample. From a mean of
+    /// 2^-480 two distinct doubles differ by at least 2^-533, so a sample that is not constant leaves a non-zero sum of
+    /// squares, and an exact 0 there is a constant sample. Below a count of 2 the variance is returned as read: one
+    /// observation has no spread to lose. So a spread below about 1.5e-154 or above about 1.3e154 gives NaN.
+    /// </summary>
+    let resolvedVariance (variance: Moments -> float) (m: Moments) : float =
+        let v = variance m
+
+        if Moments.count m < 2.0 then v
+        elif Double.IsNaN v || Double.IsInfinity v then nan
+        elif v = 0.0 then (if abs (Moments.mean m) < resolvedMean then nan else 0.0)
+        elif v < leastNormal then nan
+        else v
+
     /// Raises unless 0 < alpha < 1; NaN raises.
     let alpha (alpha: float) : unit =
         if not (alpha > 0.0 && alpha < 1.0) then
