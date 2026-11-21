@@ -17,6 +17,7 @@
         <Compile Include="HypothesisTest.fs" />
         <Compile Include="Sequential.fs" />
         <Compile Include="Regression.fs" />
+        <Compile Include="Resampling.fs" />
     </ItemGroup>
 
     <ItemGroup>

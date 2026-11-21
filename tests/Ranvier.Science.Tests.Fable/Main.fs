@@ -51,6 +51,7 @@ let all =
             testList "AdjustTests.fs" [ Ranvier.Science.Tests.AdjustTests.tests ]
             testList "RegressionTests.fs" [ Ranvier.Science.Tests.RegressionTests.tests ]
             testList "CorrelationTests.fs" [ Ranvier.Science.Tests.CorrelationTests.tests ]
+            testList "ResamplingTests.fs" [ Ranvier.Science.Tests.ResamplingTests.tests ]
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]
