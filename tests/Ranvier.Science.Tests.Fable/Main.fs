@@ -55,6 +55,7 @@ let all =
             testList "CrossTargetTests.fs" [ Ranvier.Science.Tests.CrossTargetTests.tests ]
             testList "MonitorPartsTests.fs" [ Ranvier.Science.Tests.MonitorPartsTests.tests ]
             testList "MonitorTests.fs" [ Ranvier.Science.Tests.MonitorTests.tests ]
+            testList "GuideTests.fs" [ Ranvier.Science.Tests.GuideTests.tests ]
         ]
 
 Mocha.runTests all |> ignore

@@ -52,5 +52,6 @@
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)GuideTests.fs" Link="GuideTests.fs" />
     </ItemGroup>
 </Project>
