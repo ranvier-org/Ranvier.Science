@@ -32,6 +32,10 @@ Sections:
     counts  the exact binomial test, the chi-squared goodness-of-fit and independence tests and Fisher's exact test of
             HypothesisTests.fs: p-values as exact fractions (the two-sided rule sums every mass at most the observed
             mass times 1 + 1e-7), chi-squared statistics as exact fractions, chi-squared tails in decimal arithmetic
+    regression
+            the least-squares fits of RegressionTests.fs: y on x1 over the first 10 rows, y on (1, x1, x2), y on (x1, x2)
+            without a constant, and y on (1, x1) with weights; coefficients, standard errors, t statistics, two-sided
+            p-values, R-squared, adjusted R-squared, residual standard error and the covariance
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
 (Decimal(x) of the float the test passes), then again at DIGITS + 20; the script exits 1 unless both round to the same
@@ -135,6 +139,14 @@ Methods:
                 square root by Decimal.sqrt. Wilson at 0 successes has lower bound 0 and at n successes upper bound 1
                 (the formula reaches them exactly in real arithmetic); Agresti-Coull is clipped to [0, 1];
                 Clopper-Pearson and Jeffreys have 0 and 1 at the ends.
+    regression  exact fractions of the exact input doubles (integers here): the normal equations X'WX b = X'Wy solved by
+                Gauss-Jordan elimination, RSS = sum w (y - Xb)^2, sigma^2 = RSS / (n - p) with n the number of positive
+                weights, the covariance sigma^2 (X'WX)^-1, and R^2 = 1 - RSS / TSS with TSS about the weighted mean where
+                the design has a column of one non-zero value (a constant), about zero where it has none; adjusted R^2 =
+                1 - (1 - R^2)(n - c)/(n - p), c = 1 with a constant column and 0 without (general knowledge: the formula
+                of R's summary.lm). The standard errors are Decimal.sqrt of the exact covariance diagonal, t = b / se,
+                and the two-sided p-value 2 min(cdf, survival) of the Student t at n - p degrees of freedom from
+                student_t_cdf and student_t_sf.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -2204,6 +2216,114 @@ def section_ranks() -> None:
     )
 
 
+REG_X1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+REG_X2 = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8]
+REG_Y = [6, 5, 9, 7, 13, 18, 11, 15, 16, 13, 16, 22]
+REG_WEIGHTS = [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 0]
+
+
+def gauss_jordan_inverse(a: list[list[Fraction]]) -> list[list[Fraction]]:
+    """The inverse of a square matrix of fractions, exact."""
+    n = len(a)
+    m = [list(row) + [Fraction(int(i == j)) for j in range(n)] for i, row in enumerate(a)]
+    for c in range(n):
+        pivot = next(r for r in range(c, n) if m[r][c] != 0)
+        m[c], m[pivot] = m[pivot], m[c]
+        d = m[c][c]
+        m[c] = [v / d for v in m[c]]
+        for r in range(n):
+            if r != c and m[r][c] != 0:
+                f = m[r][c]
+                m[r] = [v - f * w for v, w in zip(m[r], m[c])]
+    return [row[n:] for row in m]
+
+
+def regression_fit(columns, ys, weights=None) -> dict:
+    """The weighted least-squares fit of ys on the columns, exact as fractions, with every field the tests read as a
+    Decimal (the context's precision): coefficients, standard errors, t, two-sided p, R^2, adjusted R^2, sigma, the
+    covariance (row by row) and the degrees of freedom."""
+    n = len(ys)
+    p = len(columns)
+    w = [Fraction(1)] * n if weights is None else [Fraction(v) for v in weights]
+    cols = [[Fraction(v) for v in c] for c in columns]
+    y = [Fraction(v) for v in ys]
+    xtx = [[sum(w[i] * cols[j][i] * cols[k][i] for i in range(n)) for k in range(p)] for j in range(p)]
+    xty = [sum(w[i] * cols[j][i] * y[i] for i in range(n)) for j in range(p)]
+    inverse = gauss_jordan_inverse(xtx)
+    beta = [sum(inverse[j][k] * xty[k] for k in range(p)) for j in range(p)]
+    rss = sum(w[i] * (y[i] - sum(beta[j] * cols[j][i] for j in range(p))) ** 2 for i in range(n))
+    kept = [i for i in range(n) if w[i] > 0]
+    count = len(kept)
+    constant = any(c[kept[0]] != 0 and all(c[i] == c[kept[0]] for i in kept) for c in cols)
+    total_weight = sum(w[i] for i in kept)
+    centre = sum(w[i] * y[i] for i in kept) / total_weight if constant else Fraction(0)
+    tss = sum(w[i] * (y[i] - centre) ** 2 for i in kept)
+    dof = count - p
+    sigma2 = rss / dof
+    covariance = [[sigma2 * inverse[j][k] for k in range(p)] for j in range(p)]
+    r2 = 1 - rss / tss
+    adjusted = 1 - (1 - r2) * (count - (1 if constant else 0)) / dof
+    coefficients = [dec(b) for b in beta]
+    errors = [dec(covariance[j][j]).sqrt() for j in range(p)]
+    t = [coefficients[j] / errors[j] for j in range(p)]
+    return {
+        "coefficients": coefficients,
+        "errors": errors,
+        "t": t,
+        "p": [t_tails(dof, t[j])[2] for j in range(p)],
+        "r2": dec(r2),
+        "adjusted": dec(adjusted),
+        "sigma": dec(sigma2).sqrt(),
+        "covariance": [dec(covariance[j][k]) for j in range(p) for k in range(p)],
+        "dof": Decimal(dof),
+    }
+
+
+def regression_floats(fit_args, key: str) -> list[float]:
+    """The field `key` of regression_fit(*fit_args), each entry a double checked at two precisions."""
+    def field(i, *args):
+        v = regression_fit(*args)[key]
+        return v[i] if isinstance(v, list) else v
+
+    width = len(regression_fit(*fit_args)[key]) if isinstance(regression_fit(*fit_args)[key], list) else 1
+    field.__name__ = key
+    return [value(field, i, *fit_args) for i in range(width)]
+
+
+def emit_floats(name: str, values: list[float]) -> None:
+    """Prints `let private name: float[]`, one entry per line."""
+    print(f"let private {name}: float[] =")
+    print("    [|")
+    for v in values:
+        print("        " + literal(v))
+    print("    |]")
+    print()
+
+
+def section_regression() -> None:
+    print("// python -I tests/reference/special.py regression")
+    print("// each model: coefficients, standard errors, t statistics, two-sided p-values, then R-squared, adjusted")
+    print("// R-squared, residual standard error and degrees of freedom, then the covariance row by row")
+    print()
+    check_distribution_helpers()
+    models = {
+        "simple": ([[1] * 10, REG_X1[:10]], REG_Y[:10], None),
+        "linear": ([[1] * 12, REG_X1, REG_X2], REG_Y, None),
+        "noConstant": ([REG_X1, REG_X2], REG_Y, None),
+        "weighted": ([[1] * 12, REG_X1], REG_Y, REG_WEIGHTS),
+    }
+    for name, args in models.items():
+        emit_floats(name + "Coefficients", regression_floats(args, "coefficients"))
+        emit_floats(name + "StandardErrors", regression_floats(args, "errors"))
+        emit_floats(name + "T", regression_floats(args, "t"))
+        emit_floats(name + "P", regression_floats(args, "p"))
+        emit_floats(
+            name + "Summary",
+            [value(lambda *a, k=k: regression_fit(*a)[k], *args) for k in ("r2", "adjusted", "sigma", "dof")],
+        )
+        emit_floats(name + "Covariance", regression_floats(args, "covariance"))
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -2225,6 +2345,7 @@ SECTIONS = {
     "parametric": section_parametric,
     "counts": section_counts,
     "ranks": section_ranks,
+    "regression": section_regression,
 }
 
 if __name__ == "__main__":

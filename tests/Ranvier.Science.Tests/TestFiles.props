@@ -46,6 +46,7 @@
         <Compile Include="$(MSBuildThisFileDirectory)HypothesisTests.fs" Link="HypothesisTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)SequentialTestTests.fs" Link="SequentialTestTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)AdjustTests.fs" Link="AdjustTests.fs" />
+        <Compile Include="$(MSBuildThisFileDirectory)RegressionTests.fs" Link="RegressionTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)CrossTargetTests.fs" Link="CrossTargetTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorPartsTests.fs" Link="MonitorPartsTests.fs" />
         <Compile Include="$(MSBuildThisFileDirectory)MonitorTests.fs" Link="MonitorTests.fs" />
