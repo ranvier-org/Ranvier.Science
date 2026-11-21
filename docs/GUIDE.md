@@ -145,7 +145,7 @@ within [| 0.05; 0.005; 0.05; 0.2; 0.025 |] (Adjust.benjaminiHochberg p)
 
 ## Monitor a stream with a sequential test
 
-A sequential test keeps a confidence sequence over a stream of observations. The sequence is valid at every count at once, so reading the verdict after each observation does not inflate the error rate; the guarantee is asymptotic, with no statement at any finite count, and the sequence shows no bounds before its burn-in count. SequentialTest.add folds in one observation, and `createStreamFold` keeps the test current as items arrive. The snippet tunes the sequence for 1000 observations at level 0.05 and feeds it 2000 draws of a normal distribution whose mean is 0.3, against the null of 0.
+A sequential test keeps a confidence sequence over a stream of observations. The sequence is asymptotically valid at every count at once (time-uniform), with no statement at any finite count, so reading the verdict after each observation does not inflate the error rate in that limit; the sequence shows no bounds before its burn-in count. SequentialTest.add folds in one observation, and `createStreamFold` keeps the test current as items arrive. The snippet tunes the sequence for 1000 observations at level 0.05 and feeds it 2000 draws of a normal distribution whose mean is 0.3, against the null of 0.
 
 Test: "monitor a stream with a sequential test" in tests/Ranvier.Science.Tests/GuideTests.fs
 

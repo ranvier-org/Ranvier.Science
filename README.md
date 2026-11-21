@@ -2,8 +2,7 @@
 
 Numerics, quantities and statistics libraries built on the Ranvier reactive graph.
 
-Packages of numerics, quantities and statistics built on the Ranvier reactive graph. Version 0.2.0 builds on the
-published `Ranvier` 0.2.1 package. The interfaces will change before 1.0.
+Version 0.2.0 builds on the published `Ranvier` 0.2.1 package. The interfaces will change before 1.0.
 
 ## Packages
 
@@ -42,11 +41,12 @@ JavaScript.
 [The guide](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/GUIDE.md) walks through the tasks a
 scientist brings, each snippet the text of a test that runs on both targets. [The accuracy
 record](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/accuracy.md) lists each approximating
-kernel with the bound its tests pin and the reference that bound is checked against.
+kernel with the bound its tests pin, the reference that bound is checked against, the rows pinned at one case only and
+the known limits.
 
 Section 3 of
-[the findings](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md#3-interfaces-to-change-before-widening)
-lists the interface changes from 0.1.0 and what became of each.
+[the findings](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md#changes-from-010), "Changes
+from 0.1.0", lists the changes to the public interface since 0.1.0, the breaking ones first.
 
 ## What it holds
 
@@ -98,7 +98,7 @@ nodes.
 
 The commands below run from the repository root. The scripted runs hide the window and run Chrome headless; a run
 without a script name (`dotnet run -c Release --project examples/Monitor/native`) opens a visible window, and no run of
-that kind or of the `dev` host has been made in this slice.
+that kind or of the `dev` host is recorded in this repository.
 
 1. .NET suite: `dotnet run -c Release --project tests/Ranvier.Science.Tests`
 2. JavaScript suite: `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release`, then

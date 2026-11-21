@@ -334,7 +334,9 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
      (`Types.fs`, 294-307).
    - Under the Expecto shim, `Expect.throwsT` for a `System` exception type accepts any exception, so the exception
      types the plans named are pinned on .NET only (*from documentation*: `docs/PROBES.md`, "Limits of the JavaScript
-     suite", which reads `tests/Ranvier.Science.Tests.Fable/Expecto.fs`, 138-147).
+     suite", which reads `tests/Ranvier.Science.Tests.Fable/Expecto.fs`, 138-147), and there up to subclasses:
+     `throwsT` matches with `:?`, so `Expect.throwsT<ArgumentException>` also passes on an
+     `ArgumentOutOfRangeException` (*general knowledge*).
 9. **The Fable compiler: `abs` on a non-numeric type compiles to `Math.abs` (Fickl 0.10.1, Fable 5.27).**
    - Observed: F#'s `abs u` on a type with an `Abs` static member, `Uncertain` here, compiles to `Math.abs(u)` and
      returns NaN, with no error and no warning (*measured here*, 2026-11-20: the generated call site
@@ -451,6 +453,64 @@ or `Projection.fold` (read in `bench/Ranvier.Counters/Scenarios.fs` and `Workloa
    - The tracked Attitude page's chart frame is one module-level value that reads no node, since nothing in it depends
      on a control (Task 4).
       **0.2.0:** not applicable (the AstroShowcase pages left this repository on 2026-11-20).
+
+### Changes from 0.1.0
+
+The changes to the public surface of the 0.1.0 source files, read from `git diff f329053..f8a6caf -- src` (f329053 is
+the last 0.1.0 commit; the thirteen `.fs` files and the three project files that existed there), with the spec's
+interface changes (`docs/superpowers/specs/2026-11-20-toolkit-design.md`, §4, I1 to I9) beside each. Modules that did
+not exist in 0.1.0 are listed by name at the end.
+
+Breaking, in source or in behaviour:
+
+- `ConfidenceSequence.ofMomentsAfter` is removed (I4). The burn-in belongs to the sequence: `SequenceSettings`, built by
+  `ConfidenceSequence.settings` or `tunedFor`, and `ConfidenceSequence.interval`, which shows NaN bounds below the
+  burn-in; `standardBurnIn` is 30. `radius`, `ofMoments` and `rhoTightestAt` are unchanged.
+- `UnitInfo.equivalent` is removed and `UnitInfo.sameUnit` changes rule (I1): equal dimensions and scales within
+  `1e-12 · max(|a.Scale|, |b.Scale|)`, symmetric in its arguments, where 0.1.0 compared the scales exactly. The formula
+  checker uses `sameUnit`.
+- `UnitInfo.multiply`, `divide`, `power` and `sqrt` raise `ArithmeticException` when the resulting scale is not finite
+  or is 0 (I2); `Formula.check` turns that into an `Error` naming the unit.
+- `FloatPolicy.standard` carries `RefoldFloor = 64`, where 0.1.0 had 0 (I3): a maintained aggregate under it re-folds
+  once the removals since the last re-fold reach the larger of the row count and 64.
+- `Entry`, a public record, gains the fields `Uncertainty`, `Measured` and `Formula` (I5), so a record expression that
+  builds an `Entry` must give them.
+- `Expr` moves from `Formula.fs` to `Expr.fs`, in the same namespace, and gains the cases `UnitLiteral` and `Convert`
+  (I5, the formula notation's units), so a match over `Expr` without a wildcard is incomplete.
+- Entries and blocks declared under an active graph leave their model when the owner that declared them is cleaned up,
+  and the identifier may then be declared again (I6). A removed entry reads its last value or keeps its failure; one
+  removed before its memo ran raises `InvalidOperationException`, as `Block.Value` does. A declaration inside a pure
+  body raises `InvalidOperationException`.
+- `Model.create` gives a model whose catalogue is `UnitCatalogue.si`; `Model.createWith` takes another catalogue.
+- The measures `m`, `kg`, `s` and `K` become abbreviations of FSharp.Core's
+  `Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols` measures, so a `float<UnitSymbols.m>` and a `float<m>` are one type
+  (I8). Source-compatible. They, `km`, `mK` and the `Units` module move from `Units.fs` to `Catalogue.fs`, in the same
+  namespace; `km` and `mK` stay measures of their own.
+- The packages depend on core `Ranvier` 0.2.1, where 0.1.0 depended on 0.2.0 (I7). The FSharp.Core minimum,
+  8.0.100, is unchanged.
+
+Additive, in the 0.1.0 modules:
+
+- `Moments`: `sampleVariance` (divisor n − 1, NaN below 2), `standardDeviation` and `sampleStandardDeviation` (I9).
+- `Aggregate`: `maintainedBy`, the general maintained fold, and `comomentsBy`, `higherMomentsBy`, `weightedMomentsBy`,
+  `histogramBy` and `quantileBy`.
+- `Generator`: `integer`, `exponential`, `gamma`, `beta`, `binomial`, `poisson`, `shuffle` and `split`.
+- `ConfidenceSequence`: `SequenceSettings`, `settings`, `tunedFor`, `standardBurnIn` and `interval` (I4).
+- `Units.fs`: the `Prefix` type and module (the SI prefixes from quecto to quetta), `UnitCatalogue`,
+  `UnitInfo.prefixed`, `parse`, `conversionFactor` and `convert`, and `UnitOf.convert` and `prefixed`; `Catalogue.fs`
+  adds the SI base and derived units and the units accepted for use with the SI as measures and `Units` values.
+- `Formula`: `measuredEvaluator`, `monteCarlo` and `MonteCarloResult`.
+- `Quantity`: `inputWithUncertainty`, `measuredConstant`, `deriveMeasured`, `formula` and `view`, and
+  `Input.SetUncertainty` (I5).
+- `Model`: `createWith`.
+- `Run`: `ode` and `OdeState`.
+
+New modules: in `Ranvier.Numerics`, `Special`, `Roots`, `Minimize`, `LeastSquares`, `Integrate`, `Differentiate`, `Ode`,
+`Interpolate`, `Interpolant`, `Vector`, `Matrix` and its decompositions, `Fourier`, `Comoments`, `HigherMoments`,
+`WeightedMoments`, `Window`, `TimeWindow`, `DecayedMoments`, `Histogram`, `QuantileEstimate`, `OrderStatistic` and
+`Uncertain`; in `Ranvier.Quantities`, `Constants` (`PhysicalConstants`); in `Ranvier.Statistics`,
+`Continuous`, `Discrete`, `Describe`, `MeanInterval`, `ProportionInterval`, `VarianceInterval`, `DifferenceInterval`,
+`HypothesisTest`, `SequentialTest`, `Adjust`, `Regression`, `Correlation`, `Bootstrap` and `Density`.
 
 ## 4. The cost of adding a key
 
@@ -680,3 +740,10 @@ Weighed against:
   integrations to 1 for a change of the ballistic coefficient (*measured here*: `docs/measurements/tracked-pages.md`),
   but each port today repeats its drawing code and builds a model per mount, so the interface changes of section 3
   would come after the pages that need them.
+
+A later enhancement, found in 0.2.0: `Special.gammaLowerRegularized` and `gammaUpperRegularized` have no uniform
+asymptotic (Temme) expansion, so their series and continued fraction pass the 10,000-term cap near x = a for a above
+about 1e6, and P and Q are NaN there. The Poisson cdf and survival they serve are NaN near the mean from a mean of about
+1.674e6 (*from documentation*: `Discrete.cdf`'s doc comment, which the tests "a Poisson past its mean limit: NaN near the
+mean, and quantile raises" and "a Poisson at its mean limit: the quantile is the least k" pin). Temme's expansion would
+lift both limits.
