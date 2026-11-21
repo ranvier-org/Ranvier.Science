@@ -1055,6 +1055,27 @@ let tests =
                 let fit = Regression.curve line [| 1e-14 |] xs ys
                 expectClose 1e-8 0.0 slope fit.Parameters[0] "slope from 1e-14")
 
+            testCase "a start 1e45 to 1e77 times the answer is rescaled and restarted until it fits" (fun () ->
+                // One restart closes about 2^66 of the gap between the start and the fit; the fit repeats while an
+                // exponent moves by more than 20.
+                let xs = [| 1.0 .. 8.0 |]
+                let shape = [| 0.3; -0.2; 0.5; -0.4; 0.1; 0.2; -0.3; 0.4 |]
+                let ys = Array.mapi (fun i x -> 2.013 * x + 0.01 * shape[i]) xs
+                // Least squares through the origin: Σxy / Σx² (the normal equation of one parameter).
+                let slope = Array.sum (Array.map2 (*) xs ys) / Array.sumBy (fun x -> x * x) xs
+
+                for factor in [| 2e45; 2e60; 2e77 |] do
+                    let fit = Regression.curve (fun p x -> p[0] * x) [| factor * 2.013 |] xs ys
+                    expectClose 1e-8 0.0 slope fit.Parameters[0] (sprintf "slope from %g times the answer" factor)
+                    Expect.isTrue fit.Converged (sprintf "converged from %g times the answer" factor))
+
+            testCase "an ordinary start is one run" (fun () ->
+                // The exponential of "curve fitting recovers exact parameters" took 6 iterations before the restarts.
+                let xs = Array.init 21 (fun i -> 0.25 * float i)
+                let ys = Array.map (fun x -> 2.5 * exp (-1.3 * x)) xs
+                let fit = Regression.curve (fun p x -> p[0] * exp (-p[1] * x)) [| 1.0; 1.0 |] xs ys
+                Expect.equal fit.Iterations 6 "iterations")
+
             testCase "a start too far from the fitted magnitude shows as NaN standard errors" (fun () ->
                 // At p = 1e-34 a relative step of 1.5e-8 changes no residual (about 1e-23) in the doubles, so the
                 // Jacobian column is exactly 0: the fit stays at the start and no standard error exists.

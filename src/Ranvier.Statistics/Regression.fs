@@ -573,7 +573,11 @@ module Regression =
     /// <c>LeastSquares</c> runs on the scaled values q, which are about 1 at the start; the floor is then in units of
     /// the start, not absolute (tests "parameters of 1e-23 are fitted, not left at the start" and "an exponential of
     /// amplitude 1.38e-23 is fitted"). Where a fitted parameter's power of two differs from its start's by more than
-    /// 2^20 the fit is restarted once from the fitted values scaled afresh, and <c>Iterations</c> counts both runs. A
+    /// 2^20 the fit runs again from the fitted values scaled afresh, repeating while such a parameter moves, up to 32
+    /// runs in all, and <c>Iterations</c> counts every run; <c>Converged</c> is false where the 32nd run still moves
+    /// one by more than 2^20 (a parameter heading for 0 or infinity). One run closes a gap of about 1e20 between the
+    /// start and the fit and a few runs close the gap of the test "a start 1e45 to 1e77 times the answer is rescaled
+    /// and restarted until it fits"; an ordinary start is one run (test "an ordinary start is one run"). A
     /// start far below the fitted magnitude can still read as flat to the forward difference, which steps by a
     /// relative 1.5e-8 of the parameter (general knowledge): then a Jacobian column is exactly 0 and the standard
     /// errors are NaN, which is how such a start shows (test "a start too far from the fitted magnitude shows as NaN
@@ -655,20 +659,30 @@ module Regression =
                     (Array.mapi (fun j v -> RegressionSupport.scaleByPowerOfTwo v (-exponents[j])) start)
 
             let startExponents = exponentsOf initial
-            let first = run startExponents initial
-            let firstParameters = toParameters startExponents first.Parameters
-            let foundExponents = exponentsOf firstParameters
-            // A parameter that moved by more than 2^20 from the magnitude it was scaled by is scaled afresh, once.
-            let restart = Array.exists2 (fun a b -> abs (a - b) > 20) startExponents foundExponents
+            let mutable runExponents = startExponents
+            let mutable runStart = initial
+            let mutable latest = run runExponents runStart
+            let mutable runs = 1
+            let mutable totalIterations = latest.Iterations
+            let mutable foundExponents = exponentsOf (toParameters runExponents latest.Parameters)
+            // A parameter that moved by more than 2^20 from the magnitude it was scaled by is scaled afresh and the fit
+            // run again from the fitted values, up to 32 runs in all.
+            let mutable moving = Array.exists2 (fun a b -> abs (a - b) > 20) runExponents foundExponents
 
-            let result, exponents, earlier =
-                if restart then
-                    run foundExponents firstParameters, foundExponents, first.Iterations
-                else
-                    first, startExponents, 0
+            while moving && runs < 32 do
+                runStart <- toParameters runExponents latest.Parameters
+                runExponents <- foundExponents
+                latest <- run runExponents runStart
+                runs <- runs + 1
+                totalIterations <- totalIterations + latest.Iterations
+                foundExponents <- exponentsOf (toParameters runExponents latest.Parameters)
+                moving <- Array.exists2 (fun a b -> abs (a - b) > 20) runExponents foundExponents
 
+            let result = latest
+            let exponents = runExponents
+            let stillMoving = moving
             let parameters = toParameters exponents result.Parameters
-            let iterations = result.Iterations + earlier
+            let iterations = totalIterations
 
             // A cost that overflowed, is NaN, or underflowed to 0 over residuals that are not 0, says nothing about the fit.
             let outside =
@@ -678,7 +692,7 @@ module Regression =
             if outside then
                 undefined parameters iterations
             elif dof = 0.0 then
-                { undefined parameters iterations with Converged = result.Converged }
+                { undefined parameters iterations with Converged = result.Converged && not stillMoving }
             else
                 // σ from the per-row residuals scaled by a power of two before squaring, so that a sum of squares in
                 // the subnormal range does not cost digits.
@@ -744,7 +758,7 @@ module Regression =
                     ResidualStandardError = sigma
                     DegreesOfFreedom = dof
                     Iterations = iterations
-                    Converged = result.Converged
+                    Converged = result.Converged && not stillMoving
                 }
 
 /// <summary>Pearson, Spearman and Kendall correlation of two samples, and the tests that it is 0.</summary>
