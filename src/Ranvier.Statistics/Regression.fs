@@ -70,15 +70,15 @@ type LinearRegression =
 /// <summary>A nonlinear least-squares fit from <c>Regression.curve</c>.</summary>
 /// <remarks>
 /// A field that is undefined for the data is NaN: the standard errors, covariance and <c>ResidualStandardError</c>
-/// where the degrees of freedom are 0, and the standard errors and covariance where the parameters are not
-/// identified (min|Rₖₖ|/max|Rₖₖ| of the column-equilibrated Jacobian at most 1e-7, as R's <c>qr</c> tolerance), and
-/// every field but
-/// <c>DegreesOfFreedom</c> where the data hold a NaN or infinity. <c>Converged</c> is <c>LeastSquares</c>' own flag
-/// and is false where the cost left the range of the doubles.
+/// where the degrees of freedom are 0, the standard errors and covariance where the parameters are not identified
+/// (min|Rₖₖ|/max|Rₖₖ| of the column-equilibrated Jacobian at most 1e-7, as R's <c>qr</c> tolerance), and every field
+/// but <c>DegreesOfFreedom</c> where the data hold a NaN or infinity. <c>Converged</c> is <c>LeastSquares</c>' own flag
+/// and is false where the cost left the range of the doubles or a parameter left the magnitudes from about 1e-301 to
+/// 1e301.
 /// </remarks>
 type CurveFit =
     {
-        /// The fitted parameters, the best accepted by <c>LeastSquares.levenbergMarquardt</c>.
+        /// The fitted parameters, the best accepted by <c>LeastSquares.levenbergMarquardtWith</c>.
         Parameters: float[]
         /// The square root of each diagonal entry of <c>Covariance</c>.
         StandardErrors: float[]
@@ -89,14 +89,20 @@ type CurveFit =
         ResidualStandardError: float
         /// n − p.
         DegreesOfFreedom: float
-        /// The iterations <c>LeastSquares.levenbergMarquardt</c> started.
+        /// The iterations <c>LeastSquares.levenbergMarquardtWith</c> started, over every run.
         Iterations: int
-        /// Whether <c>LeastSquares.levenbergMarquardt</c> met a convergence test, and the cost stayed in the doubles.
+        /// Whether the last run of <c>LeastSquares.levenbergMarquardtWith</c> met a convergence test, the cost stayed
+        /// in the doubles and no parameter that started at a magnitude from about 1e-301 to 1e301 ended outside it
+        /// (0 excepted).
         Converged: bool
     }
 
 module internal RegressionSupport =
     let epsilon = 2.220446049250313e-16
+
+    /// √ε = 2⁻²⁶, the relative forward-difference step of MINPACK's fdjac2 (from documentation:
+    /// <c>LeastSquares.levenbergMarquardt</c>).
+    let differenceStep = 1.4901161193847656e-08
 
     /// The ratio of the smallest to the largest |Rₖₖ| of a column-equilibrated Jacobian at or below which parameters
     /// count as not identified: 1e-7, the default <c>tol</c> of R's <c>qr</c> (from documentation: base/R/qr.R at trunk, line 24).
@@ -625,16 +631,25 @@ module Regression =
         fit "polynomial" design observations (Array.create xs.Length 1.0)
 
     /// <summary>
-    /// Nonlinear least squares of ys on a model of xs: <c>LeastSquares.levenbergMarquardt</c> with
-    /// <c>LeastSquaresOptions.standard</c> on the residuals yᵢ − model(p, xᵢ), from the initial parameters. Its
-    /// forward-difference Jacobian J (n points by p parameters) at the returned parameters gives the covariance
-    /// σ²(JᵀJ)⁻¹ = σ² R⁻¹R⁻ᵀ from <c>Matrix.qr</c> of J, never a Cholesky factor of JᵀJ, which would square the
-    /// condition number of J; σ² = Σ rᵢ²/(n − p) = 2 · Cost/(n − p), formed from the per-row residuals scaled by an
-    /// exact power of two before squaring, so a cost in the subnormal range costs no digits (test "the residual
-    /// standard error is exact where the sum of squares is subnormal"). Each Jacobian column is first divided by an exact power of two
-    /// near its 2-norm and the covariance and standard errors multiplied back, as <c>linear</c> does for its design,
-    /// so the covariance does not depend on the units of the parameters (test "columns scaled by 2^15 and 2^-15 give
-    /// the unscaled fit with the errors rescaled"). The scaling does not widen what <c>LeastSquares</c> can fit: its
+    /// Nonlinear least squares of ys on a model of xs: <c>LeastSquares.levenbergMarquardtWith</c> with
+    /// <c>LeastSquaresOptions.standard</c> on the residuals yᵢ − model(p, xᵢ), from the initial parameters, with a
+    /// forward-difference Jacobian of its own. Column j steps the scaled parameter qⱼ (below) by √ε·|qⱼ|, or √ε at 0,
+    /// as <c>LeastSquares.levenbergMarquardt</c> does (from documentation: its doc comment). Where that step changes
+    /// no residual by more than 2^20 times a residual's rounding, ε·max(|yᵢ| + |rᵢ|), the quotient is quantised (a
+    /// parameter fitted near 0 beside others that set the model's size), so the step grows to the one that changes
+    /// the largest residual by about √ε of the residuals' size, at most the larger of |qⱼ| and the start's magnitude;
+    /// where it changes no residual at all and the parameter has shrunk below its start's magnitude, the step is √ε
+    /// times that magnitude (test "a parameter fitted near 0 keeps the standard errors of linear": the intercept of
+    /// 2x plus noise of 1e-6 and 1e-3, from (1, 1), within 1e-6 of <c>linear</c>'s standard errors). That Jacobian J
+    /// (n points by p parameters) at the returned parameters gives the covariance σ²(JᵀJ)⁻¹ = σ² R⁻¹R⁻ᵀ from
+    /// <c>Matrix.qr</c> of J, never a Cholesky factor of JᵀJ, which would square the condition number of J;
+    /// σ² = Σ rᵢ²/(n − p) = 2 · Cost/(n − p), formed from the per-row residuals scaled by an exact power of two before
+    /// squaring, so a cost in the subnormal range costs no digits (test "the residual standard error is exact where
+    /// the sum of squares is subnormal"). Each Jacobian column is first divided by an exact power of two near its
+    /// 2-norm and the covariance and standard errors multiplied back, as <c>linear</c> does for its design, which
+    /// keeps R⁻¹R⁻ᵀ finite for column norms near 1e-160 (general knowledge) and changes no digit of a fit whose
+    /// columns differ by powers of two (test "columns scaled by 2^15 and 2^-15 give the unscaled fit with the errors
+    /// rescaled"). The scaling does not widen what <c>LeastSquares</c> can fit: its
     /// own rank test runs on the unscaled Jacobian (from documentation: <c>QrDecomposition.leastSquares</c>, whose
     /// threshold is max(m, n)·ε·(the largest column norm)), so parameters whose columns differ in scale by about
     /// 1/ε or more stop the fit with <c>Converged</c> false; rescale such a model. The model is called as
@@ -647,15 +662,22 @@ module Regression =
     /// the start, not absolute (tests "parameters of 1e-23 are fitted, not left at the start" and "an exponential of
     /// amplitude 1.38e-23 is fitted"). Where a fitted parameter's power of two differs from its start's by more than
     /// 2^20 the fit runs again from the fitted values scaled afresh, repeating while such a parameter moves, up to 32
-    /// runs in all, and <c>Iterations</c> counts every run; <c>Converged</c> is false where the 32nd run still moves
-    /// one by more than 2^20 (a parameter heading for 0 or infinity). One run closes a gap of about 1e20 between the
-    /// start and the fit and a few runs close the gap of the test "a start 1e45 to 1e77 times the answer is rescaled
-    /// and restarted until it fits"; an ordinary start is one run (test "an ordinary start is one run"). A
-    /// start far below the fitted magnitude can still read as flat to the forward difference, which steps by a
-    /// relative 1.5e-8 of the parameter (general knowledge): then a Jacobian column is exactly 0 and the standard
-    /// errors are NaN, which is how such a start shows (test "a start too far from the fitted magnitude shows as NaN
-    /// standard errors": a slope of 2e-23 from a start of 1e-34 stays at the start, with <c>Converged</c> true).
-    /// Start within a few orders of magnitude of the fitted value.
+    /// runs of <c>LeastSquares.levenbergMarquardtWith</c> in all, and <c>Iterations</c> counts every run;
+    /// <c>Converged</c> is false where the 32nd run still moves one by more than 2^20 (a parameter heading for 0 or
+    /// infinity). One run closes a gap of about 1e20 between the start and the fit and a few runs close the gap of
+    /// the test "a start 1e45 to 1e77 times the answer is rescaled and restarted until it fits"; an ordinary start is
+    /// one run (test "an ordinary start is one run"). A parameter fitted within its rounding of 0, far below its
+    /// start, is restarted at its fitted magnitude, where the step test of <c>LeastSquares</c> cannot be met: such a
+    /// fit can end with <c>Converged</c> false although its parameters and standard errors match <c>linear</c>'s (the
+    /// noise of 1e-6 in the test above). <c>Converged</c> is false too where a parameter that started at a magnitude
+    /// from about 1e-301 to 1e301 ends outside it, so that the best fit lies outside the doubles (test "a parameter
+    /// driven out of the doubles' range does not converge"). A start far below the fitted magnitude can still read as
+    /// flat to the forward difference, which steps by a relative 1.5e-8 of the parameter (from documentation:
+    /// <c>LeastSquares.levenbergMarquardt</c>), and a step that changes no residual is not widened for a parameter
+    /// at or above its start's magnitude: then a Jacobian column is exactly 0 and the standard errors are NaN, which
+    /// is how such a start shows (test "a start too far from the fitted magnitude shows as NaN standard errors": a
+    /// slope of 2e-23 from a start of 1e-34 stays at the start, with <c>Converged</c> true). Start within a few orders
+    /// of magnitude of the fitted value.
     /// <c>Parameters</c> and <c>Converged</c> are kept where the parameters are not identified, but are meaningful
     /// only as the combination the data fix.
     /// NaN fields: the standard errors, covariance and residual standard error where n = p (no degrees of
@@ -664,8 +686,9 @@ module Regression =
     /// the smallest |Rₖₖ| of the column-equilibrated Jacobian is at most 1e-7 times the largest (parameters that only
     /// enter as a combination, p0·p1 or p0·e^p1; 1e-7 is the default <c>tol</c> of R's <c>qr</c>, from documentation:
     /// base/R/qr.R at trunk, line 24; the test "redundant parameters give NaN standard errors and keep the
-    /// parameters"; a forward difference lifts exact dependence only to about √ε, general knowledge) or the Jacobian is not finite (test "a Jacobian that is not finite gives NaN errors and keeps the residual
-    /// standard error"). A NaN or infinite xs or ys entry gives every field NaN but <c>DegreesOfFreedom</c>,
+    /// parameters"; a forward difference lifts exact dependence only to about √ε, general knowledge) or the Jacobian
+    /// is not finite (test "a Jacobian that is not finite gives NaN errors and keeps the residual standard error").
+    /// A NaN or infinite xs or ys entry gives every field NaN but <c>DegreesOfFreedom</c>,
     /// <c>Converged</c> false and <c>Iterations</c> 0, before the model is called. <c>LeastSquares</c> minimises a
     /// sum of squares: where its cost is not finite (squared residuals of about 1e308 in total, or a model that is
     /// NaN at the start) or reads 0 over residuals that are not 0 (squares below about 1e-308, which underflow), the
@@ -678,7 +701,8 @@ module Regression =
     /// 1e-8; on the 10-point line of "a model linear in its parameters gives the linear regression" the parameters
     /// are within 1e-8 and the standard errors and covariance within 1e-6 relative of <c>linear</c>'s, the
     /// forward-difference Jacobian limiting them to about √ε ≈ 1.5e-8 (general knowledge). Cost: that of
-    /// <c>LeastSquares.levenbergMarquardt</c> plus O(n·p²).
+    /// <c>LeastSquares.levenbergMarquardtWith</c> for each run, with one more residual call per Jacobian and one per
+    /// widened column, plus O(n·p²).
     /// </summary>
     let curve (model: float[] -> float -> float) (initial: float[]) (xs: float[]) (ys: float[]) : CurveFit =
         if xs.Length <> ys.Length then
@@ -723,15 +747,67 @@ module Regression =
             let toParameters (exponents: int[]) (q: float[]) =
                 Array.mapi (fun j v -> RegressionSupport.scaleByPowerOfTwo v exponents[j]) q
 
+            let startExponents = exponentsOf initial
+
             let run (exponents: int[]) (start: float[]) =
-                LeastSquares.levenbergMarquardt
+                let residuals (q: float[]) =
+                    let parameters = toParameters exponents q
+                    Array.map2 (fun x y -> y - model parameters x) xs ys
+
+                // The start's magnitude of each parameter in this run's units.
+                let typical =
+                    Array.init p (fun j -> RegressionSupport.scaleByPowerOfTwo 1.0 (startExponents[j] - exponents[j]))
+                let step = RegressionSupport.differenceStep
+
+                // The forward difference. Column j steps qⱼ by √ε·|qⱼ| (√ε at 0), as LeastSquares' own does. Where that
+                // changes no residual by more than 2^20 times a residual's rounding, the quotient is quantised: the
+                // step grows to the one that changes the largest residual by about √ε of the residuals' size, at most
+                // the larger of |qⱼ| and the start's magnitude. Where it changes no residual at all and the parameter
+                // has shrunk below its start's magnitude, the step is √ε times that magnitude.
+                let jacobian (q: float[]) =
+                    let r = residuals q
+                    let rounding =
+                        RegressionSupport.epsilon * Array.fold2 (fun acc v e -> max acc (abs v + abs e)) 0.0 ys r
+
+                    let difference (j: int) (h: float) =
+                        let shifted = Array.copy q
+                        shifted[j] <- q[j] + h
+                        let shiftedResiduals = residuals shifted
+                        let change = Array.fold2 (fun acc a b -> max acc (abs (a - b))) 0.0 shiftedResiduals r
+                        struct (Array.init n (fun i -> (shiftedResiduals[i] - r[i]) / h), change)
+
+                    let columns =
+                        Array.init p (fun j ->
+                            let h = if q[j] = 0.0 then step else step * abs q[j]
+                            let struct (column, change) = difference j h
+
+                            if change >= 1048576.0 * rounding then
+                                column
+                            else
+                                let widest = max (abs q[j]) typical[j]
+
+                                let widened =
+                                    if change > 0.0 then
+                                        min widest (h * (step * rounding / RegressionSupport.epsilon) / change)
+                                    elif typical[j] > abs q[j] then
+                                        step * typical[j]
+                                    else
+                                        h
+
+                                if widened > h then
+                                    let struct (wider, _) = difference j widened
+                                    wider
+                                else
+                                    column)
+
+                    Matrix.init n p (fun i j -> columns[j][i])
+
+                LeastSquares.levenbergMarquardtWith
                     LeastSquaresOptions.standard
-                    (fun q ->
-                        let parameters = toParameters exponents q
-                        Array.map2 (fun x y -> y - model parameters x) xs ys)
+                    residuals
+                    jacobian
                     (Array.mapi (fun j v -> RegressionSupport.scaleByPowerOfTwo v (-exponents[j])) start)
 
-            let startExponents = exponentsOf initial
             let mutable runExponents = startExponents
             let mutable runStart = initial
             let mutable latest = run runExponents runStart
@@ -753,9 +829,18 @@ module Regression =
 
             let result = latest
             let exponents = runExponents
-            let stillMoving = moving
             let parameters = toParameters exponents result.Parameters
             let iterations = totalIterations
+
+            // A parameter whose magnitude left [2^-1000, 2^1000] from a start inside it (a subnormal value included)
+            // heads for 0 or infinity, where the best fit lies outside the doubles.
+            let escaped =
+                Array.exists2
+                    (fun (v: float) (e: int) -> abs (RegressionSupport.exponentNear [| v |]) >= 1000 && abs e < 1000)
+                    parameters
+                    startExponents
+
+            let convergedFit = result.Converged && not moving && not escaped
 
             // A cost that overflowed, is NaN, or underflowed to 0 over residuals that are not 0, says nothing about the fit.
             let outside =
@@ -765,7 +850,7 @@ module Regression =
             if outside then
                 undefined parameters iterations
             elif dof = 0.0 then
-                { undefined parameters iterations with Converged = result.Converged && not stillMoving }
+                { undefined parameters iterations with Converged = convergedFit }
             else
                 // σ from the per-row residuals scaled by a power of two before squaring, so that a sum of squares in
                 // the subnormal range does not cost digits.
@@ -831,7 +916,7 @@ module Regression =
                     ResidualStandardError = sigma
                     DegreesOfFreedom = dof
                     Iterations = iterations
-                    Converged = result.Converged && not stillMoving
+                    Converged = convergedFit
                 }
 
 /// <summary>Pearson, Spearman and Kendall correlation of two samples, and the tests that it is 0.</summary>

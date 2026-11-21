@@ -1026,6 +1026,32 @@ let tests =
                 Expect.equal fit.DegreesOfFreedom reference.DegreesOfFreedom "degrees of freedom is n - 2 (identity)"
                 Expect.equal fit.DegreesOfFreedom 8.0 "n - 2")
 
+            testCase "a parameter fitted near 0 keeps the standard errors of linear" (fun () ->
+                // y = 2x + amp · noise from the start (1, 1): the intercept is fitted near 0, where a step relative to it
+                // changes the residuals by about their rounding. The standard errors were 0.84 and 0.97 of linear's at
+                // amp 1e-6, and 1e-4 off at amp 1e-3.
+                let xs = [| 1.0 .. 10.0 |]
+                let design = designOf [| Array.create 10 1.0; xs |]
+
+                for amp in [| 1e-6; 1e-3 |] do
+                    let ys = Array.init 10 (fun i -> 2.0 * xs[i] + amp * stiffNoise[i])
+                    let fit = Regression.curve (fun p x -> p[0] + p[1] * x) [| 1.0; 1.0 |] xs ys
+                    let reference = fitOf design ys
+
+                    for j in 0..1 do
+                        let label = sprintf "%d at amp %g" j amp
+                        expectClose 1e-6 0.0 reference.StandardErrors[j] fit.StandardErrors[j] ("standard error " + label)
+                        expectClose 1e-6 0.0 reference.Coefficients[j] fit.Parameters[j] ("parameter " + label))
+
+            testCase "a parameter driven out of the doubles' range does not converge" (fun () ->
+                // log(p) · x fitted to -1e4 · x needs p = e^-10000, below the least double: the fit ended at p of about
+                // 1e-317 with Converged true. p^0.001 · x fitted to 1e4 · x needs p = 10^4000, above the largest double.
+                let xs = [| 1.0 .. 5.0 |]
+                let down = Regression.curve (fun p x -> log p[0] * x) [| 1.0 |] xs (Array.map (fun x -> -1e4 * x) xs)
+                Expect.isFalse down.Converged (sprintf "towards 0: p %g" down.Parameters[0])
+                let up = Regression.curve (fun p x -> (p[0] ** 0.001) * x) [| 1.0 |] xs (Array.map (fun x -> 1e4 * x) xs)
+                Expect.isFalse up.Converged (sprintf "towards infinity: p %g" up.Parameters[0]))
+
             testCase "curve arguments out of range raise" (fun () ->
                 let line (p: float[]) (x: float) = p[0] + p[1] * x
 
