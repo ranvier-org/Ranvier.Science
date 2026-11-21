@@ -11,7 +11,8 @@ open Ranvier.Statistics
 
 // python -I tests/reference/special.py regression
 // each model: coefficients, standard errors, t statistics, two-sided p-values, then R-squared, adjusted
-// R-squared, residual standard error and degrees of freedom, then the covariance row by row
+// R-squared, residual standard error and degrees of freedom, then the covariance row by row (the simple model's t,
+// p-values and covariance, which SimpleRegression does not report, left out)
 let private simpleCoefficients: float[] =
     [|
         5.066666666666666
@@ -24,32 +25,12 @@ let private simpleStandardErrors: float[] =
         0.33059481135209806
     |]
 
-let private simpleT: float[] =
-    [|
-        2.469994210957852
-        3.4281643099542882
-    |]
-
-let private simpleP: float[] =
-    [|
-        0.03871079989354851
-        0.008979122165068586
-    |]
-
 let private simpleSummary: float[] =
     [|
         0.5949840913344563
         0.5443571027512634
         3.0027764929589194
         8.0
-    |]
-
-let private simpleCovariance: float[] =
-    [|
-        4.207777777777777
-        -0.6011111111111112
-        -0.6011111111111112
-        0.10929292929292929
     |]
 
 let private linearCoefficients: float[] =
@@ -220,6 +201,24 @@ let private dominantCovariance: float[] =
         -0.01668749707072443
         0.01668749707072443
     |]
+
+// stiff weights: y = 2 + 0.5 x + noise + offset on (1, x), x = 1..12, formed in doubles as the F# test forms
+// them, weight w on the sixth row and 1 elsewhere; each row: w, offset, then the intercept and slope, their
+// standard errors, t statistics and two-sided p-values, R-squared, adjusted R-squared and residual standard
+// error
+
+let private stiffCases: float[][] =
+    [|
+        [| 1000000000000000.0; 100000000.0; 99999998.61643834; 0.69726027436044; 1.562865420042535; 0.2604775700070884; 63985035.00942311; 2.676853420973888; 2.1395205639571036e-74; 0.023217791889960794; 0.41743763776367504; 0.3591814015400425; 3.1473624534858473 |]
+        [| 1000000000000.0; 10000000000.0; 9999999998.616438; 0.6972603732580515; 1.5628657051330572; 0.26047761752138754; 6398502421.3997135; 2.6768533123610907; 2.1395241737163926e-94; 0.023217796218735164; 0.4174376180294336; 0.3591813798323769; 3.1473630276029207 |]
+        [| 1000000000000000.0; 0.0; -1.3835616438355807; 0.6972602739726016; 1.5628654198332017; 0.2604775699721995; -0.8852724145520109; 2.6768534198434804; 0.39679738272279275; 0.023217791935013322; 0.4174376375582872; 0.35918140131411597; 3.1473624530642828 |]
+        [| 1.0; 100000000.0; 100000001.69393939; 0.5958041961376483; 1.019212209404248; 0.1384836693153843; 98114995.8480105; 4.3023426450432725; 2.976779636077389e-76; 0.0015556968869508286; 0.649247751557141; 0.6141725267128552; 1.6560238263347957 |]
+        [| 10000.0; 10000.0; 9998.62005158836; 0.6971411564277717; 1.5626934655352345; 0.26037017514678146; 6398.324605628113; 2.677500047902047; 2.140116447020706e-34; 0.02319203479659068; 0.41755511617954705; 0.3593106277975017; 3.146026051731554 |]
+        [| 1000000.0; 1000000.0; 999998.616474527; 0.6972590815229949; 1.5628637026753303; 0.2604764951241473; 639850.1768021847; 2.676859887840052; 2.139526358235796e-54; 0.023217534153789497; 0.4174388127503821; 0.3591826940254203; 3.1473490776007123 |]
+        [| 100000000.0; 100000000.0; 99999998.61643872; 0.6972602624358788; 1.562865402871373; 0.26047755925854815; 63985035.71242527; 2.676853485653953; 2.139520328888466e-74; 0.023217789312130456; 0.4174376495156234; 0.3591814144671857; 3.1473623197304326 |]
+    |]
+
+let private stiffNoise: float[] = [| 0.3; -1.2; 2.1; -0.7; 1.5; -2.2; 0.9; -0.4; 1.8; -1.6; 0.2; 3.1 |]
 
 let private x1: float[] = [| 1.0 .. 12.0 |]
 let private x2: float[] = [| 3.0; 1.0; 4.0; 1.0; 5.0; 9.0; 2.0; 6.0; 5.0; 3.0; 5.0; 8.0 |]
@@ -547,15 +546,122 @@ let tests =
                     // The fit is perfect, so no slope is significant.
                     Expect.isTrue (isNaN w.PValues[1]) (sprintf "weighted slope p-value at %g" c))
 
-            testCase "a dominant weight leaves R squared at the exact fraction" (fun () ->
+            testCase "a dominant weight gives every field at the exact fraction" (fun () ->
                 // Weights 1e30, 1, ..., 1 on (1, x1): the table "dominant" of the script.
                 let design = designOf [| ones; x1 |]
                 let w = Array.mapi (fun i _ -> if i = 0 then 1e30 else 1.0) ones
-                let r = expectOk "weighted" (Regression.weighted design y w)
-                expectClose 1e-9 0.0 dominantSummary[0] r.RSquared "R squared"
-                expectClose 1e-9 0.0 dominantSummary[1] r.AdjustedRSquared "adjusted R squared"
-                expectClose 1e-9 0.0 dominantCoefficients[0] r.Coefficients[0] "intercept"
-                expectClose 1e-9 0.0 dominantCoefficients[1] r.Coefficients[1] "slope")
+
+                checkFit
+                    "dominant"
+                    design
+                    y
+                    (expectOk "weighted" (Regression.weighted design y w))
+                    dominantCoefficients
+                    dominantStandardErrors
+                    dominantT
+                    dominantP
+                    dominantSummary
+                    dominantCovariance)
+
+            testCase "a weight ratio of 1e30 can read as rank-deficient" (fun () ->
+                // The documented limit: Matrix.qr's rank threshold is relative to the largest column norm, so with 1e30 on
+                // the sixth row of (1, x1) the light rows' part of the x column falls below it; on the first row it does not.
+                let design = designOf [| ones; x1 |]
+                let w = Array.init 12 (fun i -> if i = 5 then 1e30 else 1.0)
+                expectError "rank-deficient" "1e30 on the sixth row" (Regression.weighted design y w))
+
+            testCase "a dominant weight and an offset in y give the exact fractions" (fun () ->
+                // The table "stiffCases" of the script. Before the rows were ordered heaviest first and y centred on the
+                // heaviest row's value, the slope was 12% off at w = 1e15 with an offset of 1e8, 39% at w = 1e12 with
+                // 1e10, and 3.3e-9 off with weights of 1 and an offset of 1e8.
+                let design = designOf [| ones; x1 |]
+
+                for row in stiffCases do
+                    let w = row[0]
+                    let offset = row[1]
+                    let ys = Array.init 12 (fun i -> 2.0 + 0.5 * x1[i] + stiffNoise[i] + offset)
+                    let weights = Array.init 12 (fun i -> if i = 5 then w else 1.0)
+                    let label = sprintf "w %g, offset %g" w offset
+                    let fits = [ ("weighted", Regression.weighted design ys weights) ]
+                    let fits = if w = 1.0 then ("linear", Regression.linear design ys) :: fits else fits
+
+                    for name, result in fits do
+                        let r = expectOk (name + " " + label) result
+                        let check (expected: float) (actual: float) (field: string) =
+                            expectClose 1e-12 0.0 expected actual (name + " " + label + " " + field)
+
+                        check row[2] r.Coefficients[0] "intercept"
+                        check row[3] r.Coefficients[1] "slope"
+                        check row[4] r.StandardErrors[0] "intercept standard error"
+                        check row[5] r.StandardErrors[1] "slope standard error"
+                        check row[6] r.TStatistics[0] "intercept t"
+                        check row[7] r.TStatistics[1] "slope t"
+                        check row[8] r.PValues[0] "intercept p-value"
+                        check row[9] r.PValues[1] "slope p-value"
+                        check row[10] r.RSquared "R squared"
+                        check row[11] r.AdjustedRSquared "adjusted R squared"
+                        check row[12] r.ResidualStandardError "residual standard error")
+
+            testCase "the essentially perfect test reads the unweighted fitted values" (fun () ->
+                // R's test compares the residual variance with (mean(f)² + var(f))·1e-30 of the unweighted fitted
+                // values. On the weighted fitted values a dominant weight shrinks every other row's part, so a fit
+                // with accurate t and p read as essentially perfect: weights 1e20 and 1 with an offset of 1e6.
+                let design = designOf [| ones; x1 |]
+                let ys = Array.init 12 (fun i -> 2.0 + 0.5 * x1[i] + stiffNoise[i] + 1e6)
+                let weights = Array.init 12 (fun i -> if i = 5 then 1e20 else 1.0)
+                let r = expectOk "weighted" (Regression.weighted design ys weights)
+
+                for j in 0..1 do
+                    Expect.isFalse (isNaN r.TStatistics[j]) (sprintf "t %d is kept" j)
+                    Expect.isFalse (isNaN r.PValues[j]) (sprintf "p-value %d is kept" j)
+
+                // The test does not depend on the scale of the weights.
+                let scaled = expectOk "weighted, weights over 1e40" (Regression.weighted design ys (scaleBy 1e-40 weights))
+                expectClose 1e-14 0.0 r.TStatistics[1] scaled.TStatistics[1] "slope t at weights over 1e40")
+
+            testCase "simple regression gives NaN standard errors where 1 - R squared is rounding" (fun () ->
+                // y = 1 + 2x + amp · noise, x = 0..9. The residual variance n · var_y · (1 - R²) keeps ε · var_y
+                // absolute, so the standard errors lose about ε / (1 - R²) relative: at amp 1e-5 (1 - R² about 6e-12)
+                // they are within 1e-4 of linear's; at amp 1e-8, where R² rounds to 1, they read 0 before this check.
+                let xs = [| 0.0 .. 9.0 |]
+                let noise = stiffNoise[.. 9]
+                let design = designOf [| Array.create 10 1.0; xs |]
+                let ysAt (amp: float) = Array.init 10 (fun i -> 1.0 + 2.0 * xs[i] + amp * noise[i])
+                let near = Regression.simple (comoments xs (ysAt 1e-5))
+                let l = fitOf design (ysAt 1e-5)
+                let unexplained = 1.0 - l.RSquared
+                Expect.isTrue (unexplained > 1e-12 && unexplained < 1e-11) (sprintf "1 - R² at amp 1e-5 is %g" unexplained)
+                expectClose 1e-4 0.0 l.StandardErrors[1] near.SlopeStandardError "slope standard error at amp 1e-5"
+                expectClose 1e-4 0.0 l.StandardErrors[0] near.InterceptStandardError "intercept standard error at amp 1e-5"
+                expectClose 1e-4 0.0 l.ResidualStandardError near.ResidualStandardError "residual standard error at amp 1e-5"
+
+                let flat = Regression.simple (comoments xs (ysAt 1e-8))
+                Expect.isTrue (isNaN flat.SlopeStandardError) "slope standard error at amp 1e-8"
+                Expect.isTrue (isNaN flat.InterceptStandardError) "intercept standard error at amp 1e-8"
+                Expect.isTrue (isNaN flat.ResidualStandardError) "residual standard error at amp 1e-8"
+                expectClose 1e-12 0.0 (fitOf design (ysAt 1e-8)).Coefficients[1] flat.Slope "the slope is kept"
+
+                // y · 1e-165: var_y underflows to 0 beside a normal covariance, which |cov|² <= var_x var_y forbids.
+                let tiny = Regression.simple (comoments x1 (scaleBy 1e-165 y))
+                Expect.isTrue (isNaN tiny.SlopeStandardError) "slope standard error at y · 1e-165"
+                Expect.isTrue (isNaN tiny.ResidualStandardError) "residual standard error at y · 1e-165"
+                let unscaled = Regression.simple (comoments x1 y)
+                expectClose 1e-12 0.0 (unscaled.Slope * 1e-165) tiny.Slope "the slope at y · 1e-165 is kept")
+
+            testCase "polynomial names itself and reads every x" (fun () ->
+                // Degree 0 never reads x, but a NaN x is still NaN data.
+                let nanX = Array.mapi (fun i e -> if i = 0 then nan else e) x1
+                let r = expectOk "degree 0" (Regression.polynomial 0 nanX y)
+                Expect.isTrue (Array.forall isNaN r.Coefficients) "coefficients at degree 0 with a NaN x"
+                Expect.isTrue (isNaN r.ResidualStandardError) "residual standard error at degree 0 with a NaN x"
+                let xs = [| 1.0; 2.0; 1.0; 2.0; 1.0; 2.0 |]
+                expectError "polynomial:" "cubic over two x values" (Regression.polynomial 3 xs (Array.map ((*) 2.0) xs))
+
+                // The documented limits of raw powers: at x1 · 1e80 the fourth powers overflow, so every field is NaN;
+                // at x1 · 1e-159 they underflow and the full-rank design reads as rank-deficient.
+                let huge = expectOk "degree 4 at 1e80" (Regression.polynomial 4 (scaleBy 1e80 x1) y)
+                Expect.isTrue (Array.forall isNaN huge.Coefficients) "powers that overflow give NaN coefficients"
+                expectError "rank-deficient" "degree 4 at 1e-159" (Regression.polynomial 4 (scaleBy 1e-159 x1) y))
 
             testCase "a quadratic fitted to exactly linear data gives NaN t and p, and a noisy fit keeps its t and p" (fun () ->
                 // y = 1 + 2x is exactly linear, so the quadratic's residual variance is rounding noise: essentially perfect.
