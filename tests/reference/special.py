@@ -2406,6 +2406,51 @@ def section_correlation() -> None:
     emit("kendallTiedCases", [row_values(kendall_row, COR_TIED_X, COR_TIED_Y)])
 
 
+def offset_sample(offset: float, spread: float) -> list[float]:
+    """50 doubles offset + i * spread, formed as the F# test forms them."""
+    return [offset + float(i) * spread for i in range(50)]
+
+
+def type7_exact(sorted_values: list[Fraction], p: Fraction) -> Fraction:
+    h = (len(sorted_values) - 1) * p
+    lo = h.numerator // h.denominator
+    f = h - lo
+    if lo + 1 >= len(sorted_values):
+        return sorted_values[lo]
+    return (1 - f) * sorted_values[lo] + f * sorted_values[lo + 1]
+
+
+def bandwidth_pair(xs: list[float]) -> tuple[float, float]:
+    """(Silverman, Scott) bandwidths of R's bw.nrd0 and bw.nrd, exact in rationals and 60-digit decimals, rounded to a
+    double once. The sample is the exact value of each double; the minimum of s and IQR/1.34 is taken exactly."""
+    with localcontext() as ctx:
+        ctx.prec = 60
+        values = sorted(Fraction(x) for x in xs)
+        n = len(values)
+        mean = sum(values) / n
+        variance = sum((v - mean) ** 2 for v in values) / (n - 1)
+        s = Decimal(variance.numerator).sqrt() / Decimal(variance.denominator).sqrt()
+        iqr = type7_exact(values, Fraction(3, 4)) - type7_exact(values, Fraction(1, 4))
+        h = Decimal(iqr.numerator) / Decimal(iqr.denominator) / Decimal("1.34")
+        lo = min(s, h)
+        decay = Decimal(n) ** (Decimal(-1) / Decimal(5))
+        return float(Decimal("0.9") * lo * decay), float(Decimal("1.06") * lo * decay)
+
+
+def section_resampling() -> None:
+    print("// python -I tests/reference/special.py resampling")
+    print("// each row: the offset, the spread, then the Silverman and Scott bandwidths of offset + i * spread, i < 50")
+    print()
+    rows = []
+    for offset, spread in OFFSET_CASES:
+        silverman, scott = bandwidth_pair(offset_sample(offset, spread))
+        rows.append((offset, spread, silverman, scott))
+    print_cases("offsetBandwidthCases", "struct (float * float * float * float)[]", rows)
+
+
+OFFSET_CASES = [(1.0, 1e-3), (1e9, 1e-3), (1e9, 1e-6), (1e6, 1e-9)]
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -2429,6 +2474,7 @@ SECTIONS = {
     "ranks": section_ranks,
     "regression": section_regression,
     "correlation": section_correlation,
+    "resampling": section_resampling,
 }
 
 if __name__ == "__main__":

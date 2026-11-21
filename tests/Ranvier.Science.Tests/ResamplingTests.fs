@@ -194,6 +194,34 @@ let tests =
                 expectClose 1e-14 0.0 (0.9 * 1e-300 * 4.0 ** -0.2) (Density.silvermanBandwidth (Array.create 4 1e-300)) "constant 1e-300"
                 expectClose 1e-14 0.0 (0.9 * 1e300 * 4.0 ** -0.2) (Density.silvermanBandwidth (Array.create 4 1e300)) "constant 1e300")
 
+            testCase "bandwidths of offset data match exact rational arithmetic" (fun () ->
+                // python -I tests/reference/special.py resampling: the exact bandwidths of the 50 doubles
+                // offset + i * spread (rationals and 60-digit decimals, rounded once). Scaling by a power of two is
+                // exact, so each is within 1e-13 relative; a scale that rounds each value loses 1e-5 and 6% on the
+                // last three rows.
+                let cases: struct (float * float * float * float)[] =
+                    [|
+                        struct (1.0, 0.001, 0.0059996784578804415, 0.007066287961503631)
+                        struct (1000000000.0, 0.001, 0.005999678643355716, 0.007066288179952288)
+                        struct (1000000000.0, 1e-06, 6.000046719992836e-06, 7.066721692436007e-06)
+                        struct (1000000.0, 1e-09, 5.999614148126862e-09, 7.0662122189049706e-09)
+                    |]
+
+                for struct (offset, spread, silverman, scott) in cases do
+                    let xs = Array.init 50 (fun i -> offset + float i * spread)
+                    let label = sprintf "offset %g spread %g" offset spread
+                    expectClose 1e-13 0.0 silverman (Density.silvermanBandwidth xs) ("Silverman, " + label)
+                    expectClose 1e-13 0.0 scott (Density.scottBandwidth xs) ("Scott, " + label))
+
+            testCase "seeded resamples are equal on both targets" (fun () ->
+                // The literals were printed on .NET (net10.0, Release) from sample, 500 resamples and Generator.create 4;
+                // the mocha run must reproduce them bit for bit, since Generator.integer is exact on both targets.
+                let struct (ci, _) = Bootstrap.percentile 0.05 500 Array.average sample (Generator.create 4)
+                Expect.equal ci.Lower 9.619593195213923 "lower bound"
+                Expect.equal ci.Upper 10.130849775037131 "upper bound"
+                let struct (se, _) = Bootstrap.standardError 500 Array.average sample (Generator.create 4)
+                Expect.equal se 0.13206862661689628 "standard error")
+
             testCase "the estimate of one point is a normal density" (fun () ->
                 let f = Density.gaussianKernel 0.5 [| 2.0 |]
 
@@ -252,6 +280,9 @@ let tests =
                 let v = far 1e308
                 Expect.isFalse (isNaN v) "not NaN"
                 Expect.isTrue (v >= 0.0 && v < 1e-307) "below 1e-307"
+                // A subnormal bandwidth whose peak is finite: 1 / h overflows but 1 / (h sqrt (2 pi)) = 9.97e307.
+                let subnormal = Density.gaussianKernel 4e-309 [| 0.0 |]
+                expectClose 1e-9 0.0 (1.0 / (4e-309 * sqrt (2.0 * Math.PI))) (subnormal 0.0) "peak at h = 4e-309"
                 // A peak above the largest double is infinity, not a finite wrong number.
                 let narrow = Density.gaussianKernel 1e-310 [| 0.0 |]
                 Expect.equal (narrow 0.0) infinity "overflowing peak")

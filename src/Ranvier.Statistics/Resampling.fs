@@ -96,14 +96,17 @@ module Bootstrap =
 /// <remarks>
 /// The bandwidths are R's <c>bw.nrd0</c> (Silverman) and <c>bw.nrd</c> (Scott), from documentation
 /// (<c>bandwidths.R</c> in wch/r-source trunk, <c>src/library/stats/R</c>, lines 23 to 37, read on 2026-11-21). Both
-/// are a multiple of min(s, IQR/1.34) · n^(−1/5), with s the sample standard deviation (divisor n − 1), the IQR the
-/// type-7 interquartile range and n the count. Both need at least two observations, as R does (line 25: "need at
-/// least 2 data points"): one point has no spread, its s is NaN, and raising names the cause. Both are NaN for data
-/// that holds a NaN or an infinity, and raise nothing for it. The spread is computed on the data divided by its
-/// largest magnitude and scaled back at the end, so a sample near 1e300 or 1e-300 gives the bandwidth that scaling
-/// the sample gives (measured here by the "Resampling" test "bandwidths scale with the data without overflow or
-/// underflow", at scales 1e300, 1e-300 and 1e-150 and at ±1.5e308), where a squared deviation or the IQR would
-/// otherwise underflow to 0 or overflow to infinity.
+/// are a multiple of min(s, IQR/1.34) · n^(−1/5), with s the sample standard deviation (divisor n − 1, by a corrected
+/// two-pass formula), the IQR the type-7 interquartile range and n the count. Both need at least two observations, as
+/// R does (line 25: "need at least 2 data points"): one point has no spread, its s is NaN, and raising names the
+/// cause. Both are NaN for data that holds a NaN or an infinity, and raise nothing for it. The spread is computed on
+/// the data multiplied by an exact power of two near its 2-norm and scaled back at the end, so no value is rounded by
+/// the scaling and a sample near 1e300 or 1e-300 gives the bandwidth that scaling the sample gives (measured here by
+/// the "Resampling" test "bandwidths scale with the data without overflow or underflow", at scales 1e300, 1e-300 and
+/// 1e-150 and at ±1.5e308, and by "bandwidths of offset data match exact rational arithmetic", whose four rows
+/// (offsets 1 to 1e9, spreads 1e-9 to 1e-3) agree with exact rational arithmetic to 1e-13 relative, from
+/// tests/reference/special.py resampling), where a squared deviation or the IQR would otherwise underflow to 0 or
+/// overflow to infinity.
 /// </remarks>
 module Density =
     let private minimumObservations (sample: float[]) : unit =
@@ -111,6 +114,22 @@ module Density =
             raise (ArgumentException("A bandwidth needs at least 2 observations.", nameof sample))
 
     let private isFinite (x: float) : bool = not (Double.IsNaN x || Double.IsInfinity x)
+
+    // The sample standard deviation, divisor n − 1, by the corrected two-pass formula: the deviations from the
+    // rounded mean are exact for values within a factor of two of it, and subtracting (Σd)²/n removes the effect of the
+    // mean's rounding, so a small spread about a large offset keeps its digits where a one-pass update loses them.
+    let private standardDeviation (xs: float[]) : float =
+        let n = float xs.Length
+        let mean = Array.sum xs / n
+        let mutable squares = 0.0
+        let mutable total = 0.0
+
+        for x in xs do
+            let d = x - mean
+            squares <- squares + d * d
+            total <- total + d
+
+        sqrt ((squares - total * total / n) / (n - 1.0))
 
     // factor · min(s, IQR/1.34) · n^(−1/5) for `factor`; when the minimum is 0 and `fallbacks` is set, s, then |x₁|,
     // then 1 take its place, as in bw.nrd0.
@@ -126,13 +145,16 @@ module Density =
             if scale = 0.0 then
                 if fallbacks then weight else 0.0
             else
-                let scaled = Array.map (fun x -> x / scale) sample
-                let s = Moments.sampleStandardDeviation (Array.fold (fun m x -> Moments.add true m x) Moments.zero scaled)
+                // Scaling by an exact power of two near the 2-norm changes no digit of any value, so the spread is
+                // that of the sample itself, even for a small spread about a large offset.
+                let exponent = RegressionSupport.exponentNear sample
+                let scaled = Array.map (fun x -> RegressionSupport.scaleByPowerOfTwo x (-exponent)) sample
+                let s = standardDeviation scaled
                 let lo = min s (Describe.interquartileRange scaled / 1.34)
 
-                if lo > 0.0 then weight * lo * scale
+                if lo > 0.0 then RegressionSupport.scaleByPowerOfTwo (weight * lo) exponent
                 elif not fallbacks then 0.0
-                elif s > 0.0 then weight * s * scale
+                elif s > 0.0 then RegressionSupport.scaleByPowerOfTwo (weight * s) exponent
                 else weight * abs sample[0]
 
     /// <summary>Silverman's rule of thumb, R's <c>bw.nrd0</c>: 0.9 · min(s, IQR/1.34) · n^(−1/5), where, if that
@@ -156,7 +178,7 @@ module Density =
     /// ArgumentOutOfRangeException unless the bandwidth is finite and greater than 0 (NaN raises) and
     /// ArgumentException for an empty sample. A NaN in the sample, or a NaN x, gives NaN, and an infinite xᵢ
     /// contributes 0 to the sum at a finite x. The terms are added in order, so the rounding grows with n. The sum is
-    /// divided by n, by the bandwidth and by √(2π) in turn, so no intermediate overflows or underflows needlessly: a
+    /// divided by n, by √(2π) and by the bandwidth in turn, so no intermediate overflows or underflows needlessly: a
     /// peak above the largest double is infinity, and where x − xᵢ overflows the true value is below 1e-307, so the
     /// 0 returned is within the smallest normal double of it. Cost: O(n) per evaluation. Pinned by "the estimate of
     /// one point is a normal density", "the estimate averages the kernels of its points", "the estimate integrates
@@ -179,4 +201,4 @@ module Density =
                 let u = (x - xi) / bandwidth
                 sum <- sum + exp (-0.5 * u * u)
 
-            sum / count / bandwidth / normaliser
+            sum / count / normaliser / bandwidth
