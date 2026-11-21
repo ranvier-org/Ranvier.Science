@@ -49,7 +49,7 @@ module SequentialTest =
     /// p-value 0, when x̄ ≠ θ₀ and σ = 0 for a constant stream whose mean is at least 2⁻⁴⁸⁰ (about 3.2e-145) in
     /// magnitude. A NaN or infinite observation, an overflow that leaves ln Λ NaN, or, where x̄ ≠ θ₀, a spread the
     /// moments cannot resolve (below about 1.5e-154 or above about 1.3e154, where their sum of squares leaves the
-    /// normal doubles, or a constant stream nearer 0; test "a spread the moments cannot resolve gives a NaN p-value,
+    /// normal doubles, or a constant stream nearer 0 whose mean is not exactly 0; test "a spread the moments cannot resolve gives a NaN p-value,
     /// not a rejection") makes the p-value NaN for good. The flag is that of <c>Moments.add</c>.
     /// </summary>
     let add (compensated: bool) (t: SequentialTest) (x: float) : SequentialTest =

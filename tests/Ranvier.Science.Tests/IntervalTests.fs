@@ -230,6 +230,20 @@ let tests =
                 Expect.equal student.Lower 2.0 "student lower"
                 Expect.equal student.Upper 2.0 "student upper")
 
+            testCase "a sample of exact zeros is a constant sample" (fun () ->
+                let zeros = moments [| 0.0; 0.0; 0.0; 0.0 |]
+                let fives = moments [| 5.0; 5.0; 5.0; 5.0 |]
+                let ramp = moments [| 1.0; 2.0; 3.0; 4.0 |]
+                let student = MeanInterval.student 0.05 zeros
+                Expect.equal student.Lower 0.0 "student lower"
+                Expect.equal student.Upper 0.0 "student upper"
+
+                // The zeros beside 1..4 are the fives beside 1..4 reflected: the mirror image of the interval.
+                let welch = DifferenceInterval.welch 0.05 zeros ramp
+                let reference = DifferenceInterval.welch 0.05 fives ramp
+                Expect.isFalse (isNaN welch.Lower || isNaN welch.Upper) "welch: finite"
+                Expect.isLessThan (abs (welch.Lower + reference.Upper)) 1e-12 "welch lower is the negated reference upper"
+                Expect.isLessThan (abs (welch.Upper + reference.Lower)) 1e-12 "welch upper is the negated reference lower")
             testCase "a spread the moments cannot resolve gives NaN bounds, not a zero-width interval" (fun () ->
                 // The sleep groups scaled by 1e-200 (the squared deviations underflow to 0) and 1e-162 (a subnormal
                 // sum of squares), and shifted by 10 and scaled by 1e155 without compensation (it overflows).

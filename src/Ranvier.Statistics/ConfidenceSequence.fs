@@ -64,8 +64,10 @@ module ConfidenceSequence =
     /// mean ± radius at the moments' count and population standard deviation. NaN bounds for an empty sample;
     /// a zero-width interval at the observation for a sample of one. From two observations, a spread below about
     /// 1.5e-154 or above about 1.3e154, where the moments' sum of squares leaves the normal doubles, gives NaN bounds,
-    /// and so does a constant sample whose mean is below 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude, where an underflowed
-    /// spread cannot be told from none (test "a spread the moments cannot resolve gives NaN bounds"). Raises
+    /// and so does a constant sample whose mean is below 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude but not exactly 0, where
+    /// an underflowed spread cannot be told from none (test "a spread the moments cannot resolve gives NaN bounds"); a
+    /// sample of zeros is constant and gives [0, 0] (test "a sample of exact zeros gives bounds of 0, as a constant
+    /// sample does"). Raises
     /// ArgumentOutOfRangeException unless 0 &lt; alpha &lt; 1 and rho is finite and greater than 0.
     /// </summary>
     /// <remarks>

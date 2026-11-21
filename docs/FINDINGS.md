@@ -465,7 +465,11 @@ Breaking, in source or in behaviour:
 
 - `ConfidenceSequence.ofMomentsAfter` is removed (I4). The burn-in belongs to the sequence: `SequenceSettings`, built by
   `ConfidenceSequence.settings` or `tunedFor`, and `ConfidenceSequence.interval`, which shows NaN bounds below the
-  burn-in; `standardBurnIn` is 30. `radius`, `ofMoments` and `rhoTightestAt` are unchanged.
+  burn-in; `standardBurnIn` is 30. `radius` and `rhoTightestAt` are unchanged; `ofMoments` changes only as the next
+  bullet states.
+- `ConfidenceSequence.ofMoments` and `FixedSample.ofMoments` give NaN bounds where the moments cannot resolve the spread
+  (a spread below about 1.5e-154 or above about 1.3e154, or a constant sample with 0 < |mean| < 2⁻⁴⁸⁰). A sample of zeros
+  still gives [0, 0].
 - `UnitInfo.equivalent` is removed and `UnitInfo.sameUnit` changes rule (I1): equal dimensions and scales within
   `1e-12 · max(|a.Scale|, |b.Scale|)`, symmetric in its arguments, where 0.1.0 compared the scales exactly. The formula
   checker uses `sameUnit`.

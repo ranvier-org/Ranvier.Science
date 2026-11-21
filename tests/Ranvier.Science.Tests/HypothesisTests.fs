@@ -410,6 +410,47 @@ let tests =
                 Expect.isTrue (isNaN pooledEqual.Statistic) "pooled equal means: NaN statistic"
                 Expect.isTrue (isNaN pooledEqual.PValue) "pooled equal means: NaN p-value")
 
+            testCase "a sample of exact zeros is a constant sample" (fun () ->
+                // By the shift symmetry, zeros beside 1..4 is the constant-5 case with the sign flipped; the references
+                // are the library's own constant-5 calls.
+                let zeros = constant 4 0.0
+                let fives = constant 4 5.0
+                let ramp = moments [| 1.0; 2.0; 3.0; 4.0 |]
+
+                let near (message: string) (actual: float) (expected: float) =
+                    Expect.isFalse (isNaN actual) (message + ": not NaN")
+                    Expect.isTrue (actual = expected || abs (actual - expected) <= 1e-12) (message + ": " + string actual + " against " + string expected)
+
+                let mirrored (message: string) (actual: TestResult) (expected: TestResult) =
+                    near (message + " statistic") actual.Statistic (-expected.Statistic)
+                    near (message + " dof") actual.DegreesOfFreedom expected.DegreesOfFreedom
+                    near (message + " p-value") actual.PValue expected.PValue
+
+                let mirror alt =
+                    match alt with
+                    | Less -> Greater
+                    | Greater -> Less
+                    | other -> other
+
+                for alt in [| TwoSided; Less; Greater |] do
+                    let label = string alt
+                    mirrored ("welchT " + label) (HypothesisTest.welchT alt zeros ramp) (HypothesisTest.welchT (mirror alt) fives ramp)
+                    mirrored ("pooledT " + label) (HypothesisTest.pooledT alt zeros ramp) (HypothesisTest.pooledT (mirror alt) fives ramp)
+
+                let anova = HypothesisTest.oneWayAnova [| zeros; ramp |]
+                let reference = HypothesisTest.oneWayAnova [| fives; ramp |]
+                near "oneWayAnova statistic" anova.Statistic reference.Statistic
+                near "oneWayAnova dof" anova.DegreesOfFreedom reference.DegreesOfFreedom
+                near "oneWayAnova denominator dof" anova.DenominatorDegreesOfFreedom reference.DenominatorDegreesOfFreedom
+                near "oneWayAnova p-value" anova.PValue reference.PValue
+
+                for alt in [| TwoSided; Less; Greater |] do
+                    let against = HypothesisTest.varianceRatio alt ramp zeros
+                    let expected = HypothesisTest.varianceRatio alt ramp fives
+                    Expect.equal against.Statistic expected.Statistic ("varianceRatio statistic " + string alt)
+                    Expect.equal against.PValue expected.PValue ("varianceRatio p-value " + string alt)
+                    Expect.equal against.DegreesOfFreedom expected.DegreesOfFreedom ("varianceRatio dof " + string alt))
+
             testCase "a spread the moments cannot resolve gives NaN, not an infinite statistic" (fun () ->
                 // The sleep groups scaled by 1e-200 (the squares of the deviations underflow to 0, so the moments read
                 // as constant) and by 1e-162 (the sum of squares is subnormal and has lost bits).

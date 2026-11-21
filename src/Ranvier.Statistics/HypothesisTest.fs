@@ -99,7 +99,7 @@ module internal TestSupport =
 /// not an infinite statistic" and "a spread of 1e-150 gives the scale-free statistics"). A constant sample whose mean
 /// is at least 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude has an exactly zero spread, which gives an infinite statistic and
 /// a p-value of 0 where the means differ (a non-zero difference over 0), and a NaN statistic where they agree; a
-/// constant sample nearer 0, zeros included, gives NaN. The p-value is a tail probability of the null distribution
+/// constant sample nearer 0 gives NaN unless its mean is exactly 0, so a sample of zeros is constant. The p-value is a tail probability of the null distribution
 /// with the relative error of <c>Continuous.cdf</c> and <c>Continuous.survival</c>, at most 1e-12 where it is at least
 /// 1e-300; each function names the test that pins it against the script <c>tests/reference/special.py</c>, section
 /// parametric. That bound is relative to the mean and variance the moments hold. <c>Moments</c> adds its own loss

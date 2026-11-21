@@ -38,8 +38,9 @@ module MeanInterval =
     /// observations of unknown variance. NaN bounds for a count below 2. A constant sample whose mean is at least
     /// 2⁻⁴⁸⁰ (about 3.2e-145) in magnitude gives [mean, mean]; a spread below about 1.5e-154 or above about 1.3e154,
     /// where the moments' sum of squares leaves the normal doubles, gives NaN bounds, and so does a constant sample
-    /// nearer 0, where an underflowed spread cannot be told from none (test "a spread the moments cannot resolve gives
-    /// NaN bounds, not a zero-width interval"). Relative error at most 1e-12 over the samples of the tests "the
+    /// nearer 0 but not exactly 0, where an underflowed spread cannot be told from none (test "a spread the moments
+    /// cannot resolve gives NaN bounds, not a zero-width interval"); a sample of zeros is constant and gives [0, 0].
+    /// Relative error at most 1e-12 over the samples of the tests "the
     /// Student interval against the reference" (ten observations, α 0.05 and 0.01), which pins it, and "small samples
     /// give NaN bounds" at the edge; the coverage of the 95% interval on 2,000 seeded samples is pinned by "the Student
     /// interval covers at its level".
@@ -288,5 +289,5 @@ module DifferenceInterval =
 
             let dof = na + nb - 2.0
             let variance = (sumOfSquares na a + sumOfSquares nb b) / dof
-            let half =IntervalSupport.tUpper alpha dof * sqrt (variance * (1.0 / na + 1.0 / nb))
+            let half = IntervalSupport.tUpper alpha dof * sqrt (variance * (1.0 / na + 1.0 / nb))
             IntervalSupport.around (Moments.mean a - Moments.mean b) half

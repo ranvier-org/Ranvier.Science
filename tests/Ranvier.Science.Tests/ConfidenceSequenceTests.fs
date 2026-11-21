@@ -168,6 +168,15 @@ let tests =
                     Expect.isTrue (Double.IsNaN f.Lower && Double.IsNaN f.Upper) (sprintf "fixed-sample bounds at %g" scale)
             }
 
+            test "a sample of exact zeros gives bounds of 0, as a constant sample does" {
+                let m = Array.fold (Moments.add true) Moments.zero (Array.zeroCreate 50)
+                let s = ConfidenceSequence.ofMoments 0.05 1.0 m
+                let f = FixedSample.ofMoments 0.05 m
+                Expect.equal s.Lower 0.0 "sequence lower"
+                Expect.equal s.Upper 0.0 "sequence upper"
+                Expect.equal f.Lower 0.0 "fixed-sample lower"
+                Expect.equal f.Upper 0.0 "fixed-sample upper"
+            }
             test "a sample of one reached by removal gives a zero-width interval" {
                 let xs = Array.init 1000 (fun k -> sqrt (float k) + 0.1)
                 let mutable m = Array.fold (Moments.add true) Moments.zero xs

@@ -175,6 +175,15 @@ let tests =
                     Expect.isTrue (Double.IsNaN (SequentialTest.pValue t)) ("NaN p-value at " + string scale)
                     Expect.isFalse (SequentialTest.rejects t) ("no rejection at " + string scale))
 
+            testCase "zeros through the burn-in leave the test as a constant burn-in does" (fun () ->
+                // Zeros against a null of 1, then ordinary data: the constant-5 burn-in against a null of 6 with the same
+                // data shifted by 5 is the same test, and it is not NaN.
+                let data = stream 0.0 40 3
+                let zeros = Array.fold (SequentialTest.add true) (SequentialTest.create s 1.0) (Array.append (Array.zeroCreate 35) data)
+                let fives = Array.fold (SequentialTest.add true) (SequentialTest.create s 6.0) (Array.append (Array.create 35 5.0) (Array.map (fun x -> x + 5.0) data))
+                Expect.isFalse (Double.IsNaN (SequentialTest.pValue zeros)) "not NaN"
+                Expect.equal (SequentialTest.pValue zeros) (SequentialTest.pValue fives) "the p-value of the shifted constant burn-in"
+                Expect.equal (SequentialTest.rejects zeros) (SequentialTest.rejects fives) "the decision of the shifted constant burn-in")
             testCase "zero spread away from theta0 rejects with p-value 0" (fun () ->
                 let t = fold (Array.create 40 1.0)
                 Expect.equal (SequentialTest.pValue t) 0.0 "p-value"
