@@ -1034,4 +1034,68 @@ let tests =
                 expectClose 1e-6 0.0 plain.StandardErrors[1] (scaled.StandardErrors[1] * high) "slope standard error"
                 expectClose 1e-6 0.0 (Matrix.get plain.Covariance 0 1) (Matrix.get scaled.Covariance 0 1) "covariance"
                 expectClose 1e-6 0.0 plain.ResidualStandardError scaled.ResidualStandardError "residual standard error")
+
+            testCase "parameters of 1e-23 are fitted, not left at the start" (fun () ->
+                // LeastSquares' step test has an absolute floor of 1e-20 on the size of the parameters; curve scales
+                // each parameter by a power of two from its start so that the floor is relative.
+                let xs = [| 1.0 .. 8.0 |]
+                let shape = [| 0.3; -0.2; 0.5; -0.4; 0.1; 0.2; -0.3; 0.4 |]
+                let ys = Array.mapi (fun i x -> 1e-23 * (2.0 * x + shape[i])) xs
+                // Least squares through the origin: Σxy / Σx² (the normal equation of one parameter).
+                let slope = Array.sum (Array.map2 (*) xs ys) / Array.sumBy (fun x -> x * x) xs
+                let line (p: float[]) (x: float) = p[0] * x
+
+                for start in [| 1e-23; 1.0 |] do
+                    let fit = Regression.curve line [| start |] xs ys
+                    expectClose 1e-8 0.0 slope fit.Parameters[0] (sprintf "slope from %g" start)
+                    Expect.isTrue fit.Converged (sprintf "converged from %g" start)
+                    Expect.isFalse (isNaN fit.StandardErrors[0]) (sprintf "standard error from %g" start)
+
+                // A start far above the fitted magnitude is rescaled and restarted once.
+                let fit = Regression.curve line [| 1e-14 |] xs ys
+                expectClose 1e-8 0.0 slope fit.Parameters[0] "slope from 1e-14")
+
+            testCase "an exponential of amplitude 1.38e-23 is fitted" (fun () ->
+                let xs = Array.init 21 (fun i -> 0.25 * float i)
+                let ys = Array.map (fun x -> 1.38e-23 * exp (-1.3 * x)) xs
+                let fit = Regression.curve (fun p x -> p[0] * exp (-p[1] * x)) [| 1e-23; 1.0 |] xs ys
+                expectClose 1e-8 0.0 1.38e-23 fit.Parameters[0] "amplitude"
+                expectClose 1e-8 0.0 1.3 fit.Parameters[1] "rate"
+                Expect.isTrue fit.Converged "converged")
+
+            testCase "redundant parameters give NaN standard errors and keep the parameters" (fun () ->
+                let xs = [| 1.0 .. 10.0 |]
+                let shape = [| 0.3; -0.2; 0.5; -0.4; 0.1; 0.2; -0.3; 0.4; -0.1; 0.2 |]
+                // Only the product p0 · p1 is identified.
+                let product = Array.mapi (fun i x -> 2.0 * x + 0.01 * shape[i]) xs
+                let a = Regression.curve (fun p x -> p[0] * p[1] * x) [| 1.0; 1.5 |] xs product
+                Expect.isTrue (Array.forall isNaN a.StandardErrors) "p0 p1 x: standard errors"
+                Expect.isTrue (isNaN (Matrix.get a.Covariance 0 1)) "p0 p1 x: covariance"
+                let slope = Array.sum (Array.map2 (*) xs product) / Array.sumBy (fun x -> x * x) xs
+                expectClose 1e-6 0.0 slope (a.Parameters[0] * a.Parameters[1]) "p0 p1 x: the product is fitted"
+                Expect.isTrue a.Converged "p0 p1 x: converged"
+                // Only p0 · e^p1 is identified, at noise 1e-12 relative.
+                let curve = Array.mapi (fun i x -> 1.3 * exp (0.8 - 0.1 * x) * (1.0 + 1e-12 * shape[i])) xs
+                let b = Regression.curve (fun p x -> p[0] * exp (p[1] - p[2] * x)) [| 1.0; 1.0; 0.2 |] xs curve
+                Expect.isTrue (Array.forall isNaN b.StandardErrors) "p0 exp(p1 - p2 x): standard errors"
+                Expect.isTrue (isNaN (Matrix.get b.Covariance 0 0)) "p0 exp(p1 - p2 x): covariance"
+                Expect.isFalse (Array.exists isNaN b.Parameters) "p0 exp(p1 - p2 x): parameters kept"
+                // An identifiable exponential keeps finite standard errors.
+                let fine = Array.mapi (fun i x -> 2.5 * exp (-0.3 * x) * (1.0 + 1e-3 * shape[i])) xs
+                let c = Regression.curve (fun p x -> p[0] * exp (-p[1] * x)) [| 1.0; 1.0 |] xs fine
+                Expect.isTrue (Array.forall (fun v -> not (isNaN v) && v > 0.0) c.StandardErrors) "identifiable: standard errors")
+
+            testCase "the residual standard error is exact where the sum of squares is subnormal" (fun () ->
+                // y = e^(-345 - x/2) · (1 + 1e-8 · shape): residuals about 1e-159, squares near 1e-318, subnormal.
+                let xs = [| 1.0 .. 10.0 |]
+                let shape = [| 0.3; -0.2; 0.5; -0.4; 0.1; 0.2; -0.3; 0.4; -0.1; 0.2 |]
+                let model (p: float[]) (x: float) = exp (p[0] - p[1] * x)
+                let ys = Array.mapi (fun i x -> model [| -345.0; 0.5 |] x * (1.0 + 1e-8 * shape[i])) xs
+                let fit = Regression.curve model [| -344.0; 0.45 |] xs ys
+                Expect.isTrue fit.Converged "converged"
+                // The residuals at the fitted parameters, multiplied by 2^520 (exact) before squaring.
+                let big = power 520
+                let scaled = Array.mapi (fun i x -> (ys[i] - model fit.Parameters x) * big) xs
+                let reference = sqrt (Array.sumBy (fun r -> r * r) scaled / 8.0) / big
+                expectClose 1e-12 0.0 reference fit.ResidualStandardError "residual standard error")
         ]

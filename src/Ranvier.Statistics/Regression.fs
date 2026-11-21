@@ -67,7 +67,9 @@ type LinearRegression =
 /// <summary>A nonlinear least-squares fit from <c>Regression.curve</c>.</summary>
 /// <remarks>
 /// A field that is undefined for the data is NaN: the standard errors, covariance and <c>ResidualStandardError</c>
-/// where the degrees of freedom are 0, where the Jacobian at the fit is rank-deficient, and every field but
+/// where the degrees of freedom are 0, and the standard errors and covariance where the parameters are not
+/// identified (min|Rₖₖ|/max|Rₖₖ| of the column-equilibrated Jacobian at most 1e-7, as R's <c>qr</c> tolerance), and
+/// every field but
 /// <c>DegreesOfFreedom</c> where the data hold a NaN or infinity. <c>Converged</c> is <c>LeastSquares</c>' own flag
 /// and is false where the cost left the range of the doubles.
 /// </remarks>
@@ -79,7 +81,8 @@ type CurveFit =
         StandardErrors: float[]
         /// σ² (JᵀJ)⁻¹ at the fitted parameters, J the forward-difference Jacobian of the model.
         Covariance: Matrix
-        /// The square root of 2 · cost / (n − p), with n the number of points and p the number of parameters.
+        /// The square root of Σ rᵢ² / (n − p) over the residuals at the fit, which is √(2 · cost / (n − p)), with n the
+        /// number of points and p the number of parameters.
         ResidualStandardError: float
         /// n − p.
         DegreesOfFreedom: float
@@ -91,6 +94,10 @@ type CurveFit =
 
 module internal RegressionSupport =
     let epsilon = 2.220446049250313e-16
+
+    /// The ratio of the smallest to the largest |Rₖₖ| of a column-equilibrated Jacobian at or below which parameters
+    /// count as not identified: 1e-7, the default <c>tol</c> of R's <c>qr</c> (from documentation: base/R/qr.R at trunk, line 24).
+    let identifiability = 1e-7
 
     // 2^e for 0 <= e <= 1000, by squaring: every intermediate is an exact power of two below 2^1024.
     let private twoPower (e: int) : float =
@@ -549,7 +556,9 @@ module Regression =
     /// <c>LeastSquaresOptions.standard</c> on the residuals yᵢ − model(p, xᵢ), from the initial parameters. Its
     /// forward-difference Jacobian J (n points by p parameters) at the returned parameters gives the covariance
     /// σ²(JᵀJ)⁻¹ = σ² R⁻¹R⁻ᵀ from <c>Matrix.qr</c> of J, never a Cholesky factor of JᵀJ, which would square the
-    /// condition number of J; σ² = 2 · Cost/(n − p). Each Jacobian column is first divided by an exact power of two
+    /// condition number of J; σ² = Σ rᵢ²/(n − p) = 2 · Cost/(n − p), formed from the per-row residuals scaled by an
+    /// exact power of two before squaring, so a cost in the subnormal range costs no digits (test "the residual
+    /// standard error is exact where the sum of squares is subnormal"). Each Jacobian column is first divided by an exact power of two
     /// near its 2-norm and the covariance and standard errors multiplied back, as <c>linear</c> does for its design,
     /// so the covariance does not depend on the units of the parameters (test "columns scaled by 2^15 and 2^-15 give
     /// the unscaled fit with the errors rescaled"). The scaling does not widen what <c>LeastSquares</c> can fit: its
@@ -559,12 +568,23 @@ module Regression =
     /// <c>model parameters x</c> with a fresh parameter array and must return a finite number. The fit is local: a
     /// model with several minima gives the one the initial parameters lead to, and <c>Converged</c> is false where
     /// <c>LeastSquares</c> stopped short of its tolerance, which bounds the change of the cost and of the parameters,
-    /// not their error. Where the columns of J are nearly dependent but not exactly, the standard errors are large
-    /// and carry no meaning (general knowledge).
+    /// not their error. That tolerance has an absolute floor, ‖δ‖ ≤ 1e-10·(‖p‖ + 1e-10) on the step in p, so
+    /// each parameter is scaled by the exact power of two nearest its initial magnitude (1 for a start of 0) and
+    /// <c>LeastSquares</c> runs on the scaled values q, which are about 1 at the start; the floor is then in units of
+    /// the start, not absolute (tests "parameters of 1e-23 are fitted, not left at the start" and "an exponential of
+    /// amplitude 1.38e-23 is fitted"). Where a fitted parameter's power of two differs from its start's by more than
+    /// 2^20 the fit is restarted once from the fitted values scaled afresh, and <c>Iterations</c> counts both runs. A
+    /// start more than about 1e8 times the fitted magnitude can still read as flat to the forward difference, which
+    /// steps by a relative 1.5e-8 of the parameter (general knowledge): start within a few orders of magnitude.
+    /// <c>Parameters</c> and <c>Converged</c> are kept where the parameters are not identified, but are meaningful
+    /// only as the combination the data fix.
     /// NaN fields: the standard errors, covariance and residual standard error where n = p (no degrees of
     /// freedom), and the standard errors and covariance where R has a zero or non-finite diagonal entry (a parameter
-    /// the model does not use: the test "a parameter the model ignores gives NaN errors and keeps the others") or
-    /// the Jacobian is not finite (test "a Jacobian that is not finite gives NaN errors and keeps the residual
+    /// the model does not use: the test "a parameter the model ignores gives NaN errors and keeps the others"), where
+    /// the smallest |Rₖₖ| of the column-equilibrated Jacobian is at most 1e-7 times the largest (parameters that only
+    /// enter as a combination, p0·p1 or p0·e^p1; 1e-7 is the default <c>tol</c> of R's <c>qr</c>, from documentation:
+    /// base/R/qr.R at trunk, line 24; the test "redundant parameters give NaN standard errors and keep the
+    /// parameters"; a forward difference lifts exact dependence only to about √ε, general knowledge) or the Jacobian is not finite (test "a Jacobian that is not finite gives NaN errors and keeps the residual
     /// standard error"). A NaN or infinite xs or ys entry gives every field NaN but <c>DegreesOfFreedom</c>,
     /// <c>Converged</c> false and <c>Iterations</c> 0, before the model is called. <c>LeastSquares</c> minimises a
     /// sum of squares: where its cost is not finite (squared residuals of about 1e308 in total, or a model that is
@@ -616,11 +636,36 @@ module Regression =
         if Array.exists (fun v -> not (isFinite v)) xs || Array.exists (fun v -> not (isFinite v)) ys then
             undefined (Array.create p nan) 0
         else
-            let result =
+            // LeastSquares runs on q with p = 2^e · q, e the power of two nearest each parameter's magnitude (0 for 0),
+            // so that its step test, which has an absolute floor, sees parameters of about 1.
+            let exponentsOf (values: float[]) = Array.map (fun v -> RegressionSupport.exponentNear [| v |]) values
+
+            let toParameters (exponents: int[]) (q: float[]) =
+                Array.mapi (fun j v -> RegressionSupport.scaleByPowerOfTwo v exponents[j]) q
+
+            let run (exponents: int[]) (start: float[]) =
                 LeastSquares.levenbergMarquardt
                     LeastSquaresOptions.standard
-                    (fun q -> Array.map2 (fun x y -> y - model q x) xs ys)
-                    initial
+                    (fun q ->
+                        let parameters = toParameters exponents q
+                        Array.map2 (fun x y -> y - model parameters x) xs ys)
+                    (Array.mapi (fun j v -> RegressionSupport.scaleByPowerOfTwo v (-exponents[j])) start)
+
+            let startExponents = exponentsOf initial
+            let first = run startExponents initial
+            let firstParameters = toParameters startExponents first.Parameters
+            let foundExponents = exponentsOf firstParameters
+            // A parameter that moved by more than 2^20 from the magnitude it was scaled by is scaled afresh, once.
+            let restart = Array.exists2 (fun a b -> abs (a - b) > 20) startExponents foundExponents
+
+            let result, exponents, earlier =
+                if restart then
+                    run foundExponents firstParameters, foundExponents, first.Iterations
+                else
+                    first, startExponents, 0
+
+            let parameters = toParameters exponents result.Parameters
+            let iterations = result.Iterations + earlier
 
             // A cost that overflowed, is NaN, or underflowed to 0 over residuals that are not 0, says nothing about the fit.
             let outside =
@@ -628,13 +673,25 @@ module Regression =
                 || (result.Cost = 0.0 && Array.exists (fun r -> r <> 0.0) result.Residuals)
 
             if outside then
-                undefined result.Parameters result.Iterations
+                undefined parameters iterations
             elif dof = 0.0 then
-                { undefined result.Parameters result.Iterations with Converged = result.Converged }
+                { undefined parameters iterations with Converged = result.Converged }
             else
-                let sigma = sqrt result.Cost * sqrt (2.0 / dof)
-                let sigmaExponent = RegressionSupport.exponentNear [| sigma |]
-                let scaledSigma = RegressionSupport.scaleByPowerOfTwo sigma (-sigmaExponent)
+                // σ from the per-row residuals scaled by a power of two before squaring, so that a sum of squares in
+                // the subnormal range does not cost digits.
+                let sigmaExponent = RegressionSupport.exponentNear result.Residuals
+
+                let scaledSigma =
+                    sqrt (
+                        Array.sumBy
+                            (fun r ->
+                                let s = RegressionSupport.scaleByPowerOfTwo r (-sigmaExponent)
+                                s * s)
+                            result.Residuals
+                        / dof
+                    )
+
+                let sigma = RegressionSupport.scaleByPowerOfTwo scaledSigma sigmaExponent
                 let jacobian = result.Jacobian
                 let column (j: int) = Array.init n (fun i -> Matrix.get jacobian i j)
                 let finite = Seq.forall (fun j -> Array.forall isFinite (column j)) (seq { 0 .. p - 1 })
@@ -643,37 +700,47 @@ module Regression =
                     if not finite then
                         Error "the Jacobian is not finite."
                     else
-                        let exponents = Array.init p (fun j -> RegressionSupport.exponentNear (column j))
+                        let columnExponents = Array.init p (fun j -> RegressionSupport.exponentNear (column j))
 
                         let scaled =
                             Matrix.init n p (fun i j ->
-                                RegressionSupport.scaleByPowerOfTwo (Matrix.get jacobian i j) (-exponents[j]))
+                                RegressionSupport.scaleByPowerOfTwo (Matrix.get jacobian i j) (-columnExponents[j]))
 
-                        RegressionSupport.unscaledCovariance (QrDecomposition.r (Matrix.qr scaled))
-                        |> Result.map (fun unscaled -> exponents, unscaled)
+                        let r = QrDecomposition.r (Matrix.qr scaled)
 
+                        match RegressionSupport.unscaledCovariance r with
+                        | Error message -> Error message
+                        | Ok unscaled ->
+                            let diagonal = Array.init p (fun j -> abs (Matrix.get r j j))
+
+                            if not (Array.min diagonal > RegressionSupport.identifiability * Array.max diagonal) then
+                                Error "the parameters are not identified."
+                            else
+                                Ok(columnExponents, unscaled)
+
+                // The Jacobian is with respect to q, so a covariance entry of p carries 2^(e_j + e_l) and a standard error 2^e_j.
                 let covarianceAt (j: int) (l: int) =
                     match covariance with
                     | Error _ -> nan
-                    | Ok(exponents, unscaled) ->
+                    | Ok(columnExponents, unscaled) ->
                         RegressionSupport.scaleByPowerOfTwo
                             (scaledSigma * scaledSigma * Matrix.get unscaled j l)
-                            (2 * sigmaExponent - exponents[j] - exponents[l])
+                            (2 * sigmaExponent - columnExponents[j] - columnExponents[l] + exponents[j] + exponents[l])
 
                 {
-                    Parameters = result.Parameters
+                    Parameters = parameters
                     StandardErrors =
                         Array.init p (fun j ->
                             match covariance with
                             | Error _ -> nan
-                            | Ok(exponents, unscaled) ->
+                            | Ok(columnExponents, unscaled) ->
                                 RegressionSupport.scaleByPowerOfTwo
                                     (scaledSigma * sqrt (Matrix.get unscaled j j))
-                                    (sigmaExponent - exponents[j]))
+                                    (sigmaExponent - columnExponents[j] + exponents[j]))
                     Covariance = Matrix.init p p covarianceAt
                     ResidualStandardError = sigma
                     DegreesOfFreedom = dof
-                    Iterations = result.Iterations
+                    Iterations = iterations
                     Converged = result.Converged
                 }
 
@@ -682,7 +749,7 @@ module Regression =
 /// Every function raises <c>ArgumentException</c> unless the two arrays have one length. A NaN or infinite entry, a
 /// constant sample (the correlation is 0/0) and fewer than 2 pairs give NaN, or a <c>TestResult</c> of NaN fields, and
 /// raise nothing. <c>pearsonTest</c> and <c>spearmanTest</c>, which have n − 2 degrees of freedom, also give NaN
-/// fields below 3 pairs, where R's <c>cor.test</c> raises; <c>kendallTest</c> has none and runs from 2 pairs. Where
+/// fields below 3 pairs, where R's <c>cor.test</c> raises, and <c>kendallTest</c> below 4 (see there). Where
 /// |r| = 1 the t statistic is ±∞, a one-sided p-value is 0 or 1 and the two-sided one is 0.
 /// </remarks>
 module Correlation =
@@ -799,7 +866,7 @@ module Correlation =
         let s = n0 - pairs tx - pairs ty + pairs joint - 2.0 * discordant
         struct (s, n0 - pairs tx, n0 - pairs ty, tx, ty)
 
-    // R's variance of S under independence, with the tie corrections (stats/R/cor.test.R, lines 113 to 131).
+    // R's variance of S under independence, with the tie corrections (stats/R/cor.test.R, lines 113 to 128).
     let private varianceOfS (n: float) (tx: float[]) (ty: float[]) : float =
         let total (f: float -> float) (runs: float[]) = Array.sumBy f runs
         let pair t = t * (t - 1.0)
@@ -808,9 +875,9 @@ module Correlation =
         let v0 = n * (n - 1.0) * (2.0 * n + 5.0)
         let v1 = total pair tx * total pair ty
         let v2 = total triple tx * total triple ty
-        // v2 is 0 below 3 pairs, where every tie group has at most 2 members, and the divisor would be 0 at n = 2.
-        let third = if n > 2.0 then v2 / (9.0 * n * (n - 1.0) * (n - 2.0)) else 0.0
-        (v0 - total weighted tx - total weighted ty) / 18.0 + v1 / (2.0 * n * (n - 1.0)) + third
+        (v0 - total weighted tx - total weighted ty) / 18.0
+        + v1 / (2.0 * n * (n - 1.0))
+        + v2 / (9.0 * n * (n - 1.0) * (n - 2.0))
 
     // The t statistic of a correlation on dof degrees of freedom, with (1 − r)(1 + r) for 1 − r² so that it does not
     // cancel near |r| = 1.
@@ -879,9 +946,9 @@ module Correlation =
     /// <summary>
     /// The test that Spearman's correlation is 0 by the t approximation: t = r√((n − 2)/(1 − r²)) on n − 2 degrees of
     /// freedom, with r the Spearman correlation: R's <c>cor.test</c> for <c>method = "spearman"</c> uses that
-    /// approximation only where it does not use the exact permutation distribution of S, which it does by default
-    /// for n up to 1290 without ties (from documentation: stats/R/cor.test.R at trunk, lines 143 to 176, read there);
-    /// this does not use it.
+    /// approximation for n above 1290, with ties, or with <c>exact = FALSE</c>, and otherwise uses the AS 89 algorithm
+    /// for its p-value (from documentation: stats/R/cor.test.R at trunk, lines 143 to 175, read there); this never
+    /// uses AS 89, and with ties it is R's own answer.
     /// NaN fields below 3 pairs, for a constant sample and for a non-finite entry. Statistic and p-value within 1e-12
     /// relative of exact fractions for the tied 8 pairs of the test "Spearman with ties against the reference". Cost
     /// O(n log n).
@@ -896,16 +963,19 @@ module Correlation =
 
     /// <summary>
     /// The test that Kendall's tau is 0 by the normal approximation: z = S/√var(S), S = C − D, with R's variance of S
-    /// under independence corrected for ties in x and in y (stats/R/cor.test.R at trunk, lines 113 to 131, read there),
+    /// under independence corrected for ties in x and in y (stats/R/cor.test.R at trunk, lines 113 to 133, read there),
     /// no continuity correction, and the p-value from the standard normal on the alternative's side. This is R's
     /// <c>cor.test(method = "kendall", exact = FALSE)</c>; R's default for n below 50 without ties is the exact
-    /// distribution of S (from documentation: stats/R/cor.test.R, line 93), which this does not use. The degrees of freedom are NaN. NaN fields for a constant sample,
-    /// fewer than 2 pairs and a non-finite entry. Cost O(n log n).
+    /// distribution of S (from documentation: stats/R/cor.test.R, line 93), which this does not use. The normal
+    /// approximation is poor at a handful of pairs (for perfect agreement it gives a two-sided p of 0.317 at n = 2 and
+    /// 0.117 at n = 3, where the exact values are 1 and 1/3; general knowledge, by counting the permutations), and at
+    /// n = 2 R's variance is 0/0: the result has NaN fields below 4 pairs. The degrees of freedom are NaN. NaN fields
+    /// also for a constant sample and for a non-finite entry. Cost O(n log n).
     /// </summary>
     let kendallTest (alternative: Alternative) (xs: float[]) (ys: float[]) : TestResult =
         checkLengths "kendallTest" xs ys
 
-        if unusable xs ys then
+        if unusable xs ys || xs.Length < 4 then
             TestSupport.nanResult
         else
             let struct (s, d1, d2, tx, ty) = kendallCounts xs ys
