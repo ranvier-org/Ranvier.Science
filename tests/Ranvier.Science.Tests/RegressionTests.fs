@@ -181,6 +181,46 @@ let private weightedCovariance: float[] =
         0.09114746920513703
     |]
 
+let private dominantCoefficients: float[] =
+    [|
+        4.798418972332016
+        1.2015810276679841
+    |]
+
+let private dominantStandardErrors: float[] =
+    [|
+        0.12918009548968615
+        0.12918009548968615
+    |]
+
+let private dominantT: float[] =
+    [|
+        37.14518830584954
+        9.301595753688845
+    |]
+
+let private dominantP: float[] =
+    [|
+        4.761018419524502e-12
+        3.0737555316669824e-06
+    |]
+
+let private dominantSummary: float[] =
+    [|
+        0.8963941899658091
+        0.8860336089623899
+        2.9058343926980013
+        10.0
+    |]
+
+let private dominantCovariance: float[] =
+    [|
+        0.01668749707072443
+        -0.01668749707072443
+        -0.01668749707072443
+        0.01668749707072443
+    |]
+
 let private x1: float[] = [| 1.0 .. 12.0 |]
 let private x2: float[] = [| 3.0; 1.0; 4.0; 1.0; 5.0; 9.0; 2.0; 6.0; 5.0; 3.0; 5.0; 8.0 |]
 let private y: float[] = [| 6.0; 5.0; 9.0; 7.0; 13.0; 18.0; 11.0; 15.0; 16.0; 13.0; 16.0; 22.0 |]
@@ -378,7 +418,7 @@ let tests =
 
                 expectClose 1e-12 0.0 1.0 r.RSquared "a perfect fit has R squared 1")
 
-            testCase "a perfect fit gives R squared 1 and standard errors of 0" (fun () ->
+            testCase "a perfect fit gives R squared 1, standard errors of 0 and NaN t and p" (fun () ->
                 // Columns e1 and e2 of a 3-row design need no reflection, so y = (2, 3, 0) leaves residuals of exactly 0.
                 let design = designOf [| [| 1.0; 0.0; 0.0 |]; [| 0.0; 1.0; 0.0 |] |]
                 let r = fitOf design [| 2.0; 3.0; 0.0 |]
@@ -389,8 +429,10 @@ let tests =
                 Expect.equal r.ResidualStandardError 0.0 "residual standard error"
                 Expect.equal r.StandardErrors[0] 0.0 "first standard error"
                 Expect.equal r.StandardErrors[1] 0.0 "second standard error"
-                Expect.equal r.PValues[0] 0.0 "a zero standard error over a non-zero coefficient has p-value 0"
-                Expect.equal r.PValues[1] 0.0 "second p-value")
+                // R's summary.lm calls this an essentially perfect fit: the t statistics and p-values are NaN.
+                Expect.isTrue (isNaN r.TStatistics[0]) "t of an essentially perfect fit is NaN"
+                Expect.isTrue (isNaN r.PValues[0]) "p-value of an essentially perfect fit is NaN"
+                Expect.isTrue (isNaN r.PValues[1]) "second p-value")
 
             testCase "a zero coefficient with a zero standard error has a NaN t statistic and p-value" (fun () ->
                 let design = designOf [| [| 1.0; 0.0; 0.0 |]; [| 0.0; 1.0; 0.0 |] |]
@@ -427,29 +469,112 @@ let tests =
                 let w = Array.init 12 (fun i -> if i < 2 then 1.0 else 0.0)
                 expectError "positive weights" "two positive weights, three columns" (Regression.weighted design y w))
 
-            testCase "a non-finite input is an Error" (fun () ->
+            testCase "a non-finite input gives NaN fields" (fun () ->
                 let design = designOf [| ones; x1 |]
                 let withY (v: float) = Array.mapi (fun i e -> if i = 3 then v else e) y
-                expectError "NaN" "NaN in y" (Regression.linear design (withY nan))
-                expectError "infinite" "infinity in y" (Regression.linear design (withY infinity))
+
+                let allNaN (message: string) (columns: int) (rows: int) (result: Result<LinearRegression, string>) =
+                    let r = expectOk message result
+                    Expect.equal r.Coefficients.Length columns (message + " coefficient count")
+                    Expect.equal r.Residuals.Length rows (message + " residual count")
+
+                    for part, values in
+                        [ "coefficient", r.Coefficients
+                          "standard error", r.StandardErrors
+                          "t", r.TStatistics
+                          "p-value", r.PValues
+                          "residual", r.Residuals ] do
+                        Expect.isTrue (Array.forall isNaN values) (message + ": every " + part + " is NaN")
+
+                    for j in 0 .. columns - 1 do
+                        for k in 0 .. columns - 1 do
+                            Expect.isTrue (isNaN (Matrix.get r.Covariance j k)) (message + ": covariance is NaN")
+
+                    for part, v in
+                        [ "R squared", r.RSquared
+                          "adjusted R squared", r.AdjustedRSquared
+                          "residual standard error", r.ResidualStandardError
+                          "degrees of freedom", r.DegreesOfFreedom ] do
+                        Expect.isTrue (isNaN v) (message + ": " + part + " is NaN")
+
+                allNaN "NaN in y" 2 12 (Regression.linear design (withY nan))
+                allNaN "infinity in y" 2 12 (Regression.linear design (withY infinity))
 
                 let infiniteDesign =
                     Matrix.init 12 2 (fun i j -> if i = 5 && j = 1 then infinity else 1.0 + float (i * j))
 
-                expectError "infinite" "infinity in the design" (Regression.linear infiniteDesign y)
-
+                allNaN "infinity in the design" 2 12 (Regression.linear infiniteDesign y)
                 let nanDesign = Matrix.init 12 2 (fun i j -> if i = 5 && j = 0 then nan else 1.0 + float (i * j))
-                expectError "NaN" "NaN in the design" (Regression.linear nanDesign y)
+                allNaN "NaN in the design" 2 12 (Regression.linear nanDesign y)
                 let nanWeights = Array.mapi (fun i w -> if i = 2 then nan else w) weights
-                expectError "NaN" "NaN weight" (Regression.weighted design y nanWeights)
+                allNaN "NaN weight" 2 12 (Regression.weighted design y nanWeights)
                 let infiniteWeights = Array.mapi (fun i w -> if i = 2 then infinity else w) weights
-                expectError "infinite" "infinite weight" (Regression.weighted design y infiniteWeights)
-                expectError "NaN" "NaN in polynomial ys" (Regression.polynomial 1 x1 (withY nan))
+                allNaN "infinite weight" 2 12 (Regression.weighted design y infiniteWeights)
+                allNaN "NaN in polynomial ys" 2 12 (Regression.polynomial 1 x1 (withY nan))
 
-                expectError
-                    "NaN"
+                allNaN
                     "NaN in polynomial xs"
+                    2
+                    12
                     (Regression.polynomial 1 (Array.mapi (fun i e -> if i = 0 then nan else e) x1) y))
+
+            testCase "NaN comoments give a simple regression of NaN fields" (fun () ->
+                let nanX = Array.mapi (fun i e -> if i = 3 then nan else e) x1
+                let nanY = Array.mapi (fun i e -> if i = 3 then nan else e) y
+
+                for message, m in [ "NaN in x", comoments nanX y; "NaN in y", comoments x1 nanY ] do
+                    let r = Regression.simple m
+                    Expect.isTrue (isNaN r.Slope && isNaN r.Intercept) (message + ": line")
+
+                    Expect.isTrue
+                        (isNaN r.SlopeStandardError && isNaN r.InterceptStandardError)
+                        (message + ": standard errors")
+
+                    Expect.isTrue (isNaN r.RSquared && isNaN r.ResidualStandardError) (message + ": R squared and sigma"))
+
+            testCase "a constant y gives a NaN R squared, linear and weighted" (fun () ->
+                // The total sum of squares about the mean of a constant is exactly 0, not a rounding residue.
+                let design = designOf [| ones; x1 |]
+
+                for c in [ 2.9; 7.3; 0.7; 1e-3; -4.1; 1e10 ] do
+                    let ys = Array.create 12 c
+                    let l = fitOf design ys
+                    Expect.isTrue (isNaN l.RSquared) (sprintf "linear R squared at %g" c)
+                    Expect.isTrue (isNaN l.AdjustedRSquared) (sprintf "linear adjusted R squared at %g" c)
+                    let w = expectOk "weighted" (Regression.weighted design ys weights)
+                    Expect.isTrue (isNaN w.RSquared) (sprintf "weighted R squared at %g" c)
+                    Expect.isTrue (isNaN w.AdjustedRSquared) (sprintf "weighted adjusted R squared at %g" c)
+                    // The fit is perfect, so no slope is significant.
+                    Expect.isTrue (isNaN w.PValues[1]) (sprintf "weighted slope p-value at %g" c))
+
+            testCase "a dominant weight leaves R squared at the exact fraction" (fun () ->
+                // Weights 1e30, 1, ..., 1 on (1, x1): the table "dominant" of the script.
+                let design = designOf [| ones; x1 |]
+                let w = Array.mapi (fun i _ -> if i = 0 then 1e30 else 1.0) ones
+                let r = expectOk "weighted" (Regression.weighted design y w)
+                expectClose 1e-9 0.0 dominantSummary[0] r.RSquared "R squared"
+                expectClose 1e-9 0.0 dominantSummary[1] r.AdjustedRSquared "adjusted R squared"
+                expectClose 1e-9 0.0 dominantCoefficients[0] r.Coefficients[0] "intercept"
+                expectClose 1e-9 0.0 dominantCoefficients[1] r.Coefficients[1] "slope")
+
+            testCase "a quadratic fitted to exactly linear data gives NaN t and p, and a noisy fit keeps its t and p" (fun () ->
+                // y = 1 + 2x is exactly linear, so the quadratic's residual variance is rounding noise: essentially perfect.
+                let xs = [| 1.0 .. 8.0 |]
+                let exact = Array.map (fun x -> 1.0 + 2.0 * x) xs
+                let r = expectOk "polynomial" (Regression.polynomial 2 xs exact)
+
+                for j in 0..2 do
+                    Expect.isTrue (isNaN r.TStatistics[j]) (sprintf "t %d" j)
+                    Expect.isTrue (isNaN r.PValues[j]) (sprintf "p-value %d" j)
+                    Expect.isFalse (isNaN r.StandardErrors[j]) (sprintf "the standard error %d is kept" j)
+
+                expectClose 0.0 1e-9 1.0 r.Coefficients[0] "intercept"
+                expectClose 0.0 1e-9 0.0 r.Coefficients[2] "quadratic coefficient"
+                let noisy = fitOf (designOf [| ones; x1; x2 |]) y
+
+                for j in 0..2 do
+                    Expect.isFalse (isNaN noisy.TStatistics[j]) (sprintf "noisy t %d" j)
+                    Expect.isFalse (isNaN noisy.PValues[j]) (sprintf "noisy p-value %d" j))
 
             testCase "constant x gives a NaN slope" (fun () ->
                 let r = Regression.simple (comoments (Array.create 6 3.0) [| 1.0; 2.0; 4.0; 3.0; 5.0; 9.0 |])
@@ -730,4 +855,32 @@ let tests =
                 expectClose 1e-12 0.0 plain.SlopeStandardError r.SlopeStandardError "slope standard error"
                 expectClose 1e-12 0.0 (plain.InterceptStandardError * s) r.InterceptStandardError "intercept standard error"
                 expectClose 1e-12 0.0 (plain.ResidualStandardError * s) r.ResidualStandardError "residual standard error")
+
+            testCase "simple regression at the edges of the spreads Comoments can hold" (fun () ->
+                // The comoments store squares: x · 1e155 overflows M2x without compensation and x · 1e-160 leaves a
+                // subnormal variance. Each gives NaN fields where it gave a wrong line.
+                let unrounded (xs: float[]) (ys: float[]) =
+                    Array.fold2 (Comoments.add false) Comoments.zero xs ys
+
+                let allNaN (message: string) (r: SimpleRegression) =
+                    Expect.isTrue
+                        (isNaN r.Slope
+                         && isNaN r.Intercept
+                         && isNaN r.SlopeStandardError
+                         && isNaN r.InterceptStandardError
+                         && isNaN r.RSquared
+                         && isNaN r.ResidualStandardError)
+                        message
+
+                    Expect.equal r.Count 12.0 (message + ": count")
+
+                allNaN "x · 1e155" (Regression.simple (unrounded (scaleBy 1e155 x1) y))
+                allNaN "y · 1e155" (Regression.simple (unrounded x1 (scaleBy 1e155 y)))
+                allNaN "x · 1e-160" (Regression.simple (unrounded (scaleBy 1e-160 x1) y))
+                allNaN "y · 1e-160" (Regression.simple (unrounded x1 (scaleBy 1e-160 y)))
+                // Inside the domain (spreads about 1e150) the line is the scaled one.
+                let inside = Regression.simple (unrounded (scaleBy 1e150 x1) (scaleBy 1e150 y))
+                let plain = Regression.simple (comoments x1 y)
+                expectClose 1e-12 0.0 plain.Slope inside.Slope "slope at 1e150"
+                expectClose 1e-12 0.0 plain.RSquared inside.RSquared "R squared at 1e150")
         ]

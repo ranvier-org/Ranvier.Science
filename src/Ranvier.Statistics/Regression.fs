@@ -32,7 +32,13 @@ type SimpleRegression =
 /// <remarks>
 /// With as many observations as coefficients the degrees of freedom are 0 and every field that needs the residual
 /// variance (the standard errors, t statistics, p-values, <c>AdjustedRSquared</c>, <c>ResidualStandardError</c> and
-/// the covariance) is NaN. <c>RSquared</c> and <c>AdjustedRSquared</c> are NaN where the total sum of squares is 0.
+/// the covariance) is NaN. <c>RSquared</c> and <c>AdjustedRSquared</c> are NaN where the total sum of squares is 0,
+/// which is exactly the case of a constant y in a model with a constant column. Where the residual variance is below
+/// (mean(f)² + var(f)) · 1e-30, with f the fitted values (an essentially perfect fit), the t statistics and p-values
+/// are NaN and the coefficients and standard errors are kept; that is the test at which R's <c>summary.lm</c> warns
+/// "essentially perfect fit: summary may be unreliable" (from documentation: stats/R/lm.R of the R sources at trunk,
+/// lines 345 to 348, read there), and this library has no warnings. A NaN or infinite entry in the data gives
+/// every field NaN, the covariance included, and raises nothing.
 /// </remarks>
 type LinearRegression =
     {
@@ -40,7 +46,7 @@ type LinearRegression =
         Coefficients: float[]
         /// The standard error of each coefficient, the square root of the diagonal of <c>Covariance</c>.
         StandardErrors: float[]
-        /// Each coefficient over its standard error: ±∞ for a non-zero coefficient with a zero standard error, NaN for 0 over 0.
+        /// Each coefficient over its standard error: ±∞ for a non-zero coefficient with a zero standard error, NaN for 0 over 0 and at an essentially perfect fit.
         TStatistics: float[]
         /// The two-sided p-value of each t statistic, from the Student t with <c>DegreesOfFreedom</c> degrees of freedom.
         PValues: float[]
@@ -158,8 +164,6 @@ module internal RegressionSupport =
 module Regression =
     let private isFinite (x: float) : bool = not (Double.IsNaN x || Double.IsInfinity x)
 
-    let private describe (x: float) : string = if Double.IsNaN x then "a NaN" else "an infinite value"
-
     let private hypot (a: float) (b: float) : float =
         let high = max (abs a) (abs b)
         let low = min (abs a) (abs b)
@@ -169,8 +173,12 @@ module Regression =
     /// The line through the pairs of the comoments: slope C / M2x, the intercept ȳ − slope · x̄, the residual variance
     /// n(var_y − cov²/var_x)/(n − 2) evaluated as n · var_y · (1 − R²)/(n − 2) with R² the squared correlation, the
     /// slope standard error s/√(n·var_x), the intercept standard error s·√(1/n + x̄²/(n·var_x)) and R² =
-    /// cov²/(var_x·var_y). Every root and ratio is formed apart, so no product of spreads overflows or underflows
-    /// where the answer is a double. Where var_x is at most (8ε|x̄|)², ε = 2⁻⁵², x counts as constant: every field but the
+    /// cov²/(var_x·var_y), with the roots and ratios formed apart. Domain: the comoments store the squares of the
+    /// spreads, so var_x, var_y and cov must be finite and, where not 0, normal doubles (spreads from about 1e-154 to
+    /// 1e154); every field but the degrees of freedom and the count is NaN outside it (tests "simple regression at the
+    /// edges of the spreads Comoments can hold" and "NaN comoments give a simple regression of NaN fields"). A
+    /// spread whose square underflows to exactly 0 reads as a constant and is not detected. Relative error of every
+    /// field at most 1e-12 over the 10 pairs of the test "simple regression against exact fractions". Where var_x is at most (8ε|x̄|)², ε = 2⁻⁵², x counts as constant: every field but the
     /// degrees of freedom and the count is NaN. A <c>Comoments</c> emptied back to a constant x by <c>remove</c> or
     /// <c>unmerge</c> keeps a rounding-level M2x whose slope would be a large finite number. The threshold reads that
     /// residue as zero where it is of the order of the rounding of the mean: it does for twelve pairs removed within
@@ -204,7 +212,10 @@ module Regression =
             let meanX = Comoments.meanX m
             let limit = 8.0 * RegressionSupport.epsilon * abs meanX
 
-            if not (varianceX > limit * limit) then
+            // A spread that overflowed, or whose square is subnormal and so has lost bits, is no spread.
+            let unusable (v: float) = not (isFinite v) || (v <> 0.0 && abs v < 2.2250738585072014e-308)
+
+            if not (varianceX > limit * limit) || unusable varianceX || unusable (Comoments.varianceY m) || unusable (Comoments.covariance m) then
                 undefined
             else
                 let varianceY = Comoments.varianceY m
@@ -250,24 +261,14 @@ module Regression =
                 )
             )
 
-    // The first non-finite input as an Error, before any factorisation (Matrix.qr reads NaN data as Ok with NaN).
-    let private findNonFinite (name: string) (design: Matrix) (y: float[]) (weights: float[]) : string option =
-        let mutable found: string option = None
+    // Whether any entry of the design, y or the weights is NaN or infinite.
+    let private anyNonFinite (design: Matrix) (y: float[]) (weights: float[]) : bool =
+        let mutable found = Array.exists (fun v -> not (isFinite v)) y || Array.exists (fun v -> not (isFinite v)) weights
 
         for i in 0 .. Matrix.rowCount design - 1 do
             for j in 0 .. Matrix.columnCount design - 1 do
-                let v = Matrix.get design i j
-
-                if found.IsNone && not (isFinite v) then
-                    found <- Some(sprintf "%s: the design holds %s at row %d, column %d." name (describe v) i j)
-
-        for i in 0 .. y.Length - 1 do
-            if found.IsNone && not (isFinite y[i]) then
-                found <- Some(sprintf "%s: y holds %s at index %d." name (describe y[i]) i)
-
-        for i in 0 .. weights.Length - 1 do
-            if found.IsNone && not (isFinite weights[i]) then
-                found <- Some(sprintf "%s: the weights hold %s at index %d." name (describe weights[i]) i)
+                if not (isFinite (Matrix.get design i j)) then
+                    found <- true
 
         found
 
@@ -275,9 +276,21 @@ module Regression =
         let rows = Matrix.rowCount design
         let columns = Matrix.columnCount design
 
-        match findNonFinite name design y weights with
-        | Some message -> Error message
-        | None ->
+        if anyNonFinite design y weights then
+            Ok
+                {
+                    Coefficients = Array.create columns nan
+                    StandardErrors = Array.create columns nan
+                    TStatistics = Array.create columns nan
+                    PValues = Array.create columns nan
+                    RSquared = nan
+                    AdjustedRSquared = nan
+                    ResidualStandardError = nan
+                    DegreesOfFreedom = nan
+                    Covariance = Matrix.init columns columns (fun _ _ -> nan)
+                    Residuals = Array.create rows nan
+                }
+        else
             // Row factors r = √(w / 4^k), with 4^k above the largest weight, so every r lies in [0, 1]. A row of factor 0
             // takes no part in the fit.
             let largestWeight = Array.max weights
@@ -324,23 +337,41 @@ module Regression =
                             first <> 0.0 && Array.forall (fun i -> Matrix.get design i j = first) kept
 
                         let constant = Seq.exists isConstant (seq { 0 .. columns - 1 })
+                        // Deviations from the first kept observation, formed on the scaled y: a constant y gives exact
+                        // zeros, so its total sum of squares is exactly 0 and not a rounding residue of a computed mean.
+                        let reference = RegressionSupport.scaleByPowerOfTwo y[kept[0]] (-yExponent)
+
+                        let deviation =
+                            Array.map (fun i -> RegressionSupport.scaleByPowerOfTwo y[i] (-yExponent) - reference) kept
+
                         let squares = Array.sumBy (fun i -> factor[i] * factor[i]) kept
 
                         let centre =
                             if constant then
-                                Array.fold2 (fun acc i v -> acc + factor[i] * v) 0.0 kept b / squares
+                                Array.fold2 (fun acc i d -> acc + factor[i] * factor[i] * d) 0.0 kept deviation / squares
                             else
                                 0.0
 
                         let mutable tss = 0.0
 
                         for r in 0 .. count - 1 do
-                            let d = b[r] - factor[kept[r]] * centre
+                            let d = if constant then factor[kept[r]] * (deviation[r] - centre) else b[r]
                             tss <- tss + d * d
 
-                        // The variance of the scaled problem; a value that overflowed is no variance.
-                        let variance =
-                            if dof > 0 && isFinite (rss / float dof) then rss / float dof else nan
+                        let variance = if dof > 0 then rss / float dof else nan
+
+                        // R's test for an essentially perfect fit, on the scaled fitted values.
+                        let essentiallyPerfect =
+                            dof > 0
+                            && (let mean = Array.sum fitted / float count
+
+                                let spread =
+                                    if count > 1 then
+                                        Array.sumBy (fun f -> (f - mean) * (f - mean)) fitted / float (count - 1)
+                                    else
+                                        0.0
+
+                                variance < (mean * mean + spread) * 1e-30)
 
                         let rSquared =
                             if tss > 0.0 then
@@ -377,10 +408,14 @@ module Regression =
                                 Coefficients = Array.init columns (fun j -> RegressionSupport.scaleByPowerOfTwo beta[j] (unit j))
                                 StandardErrors =
                                     Array.init columns (fun j -> RegressionSupport.scaleByPowerOfTwo (scaledError j) (unit j))
-                                TStatistics = Array.init columns (fun j -> beta[j] / scaledError j)
+                                TStatistics =
+                                    Array.init columns (fun j -> if essentiallyPerfect then nan else beta[j] / scaledError j)
                                 PValues =
                                     Array.init columns (fun j ->
-                                        PValue.student TwoSided (float dof) (beta[j] / scaledError j))
+                                        if essentiallyPerfect then
+                                            nan
+                                        else
+                                            PValue.student TwoSided (float dof) (beta[j] / scaledError j))
                                 RSquared = rSquared
                                 AdjustedRSquared = adjusted
                                 ResidualStandardError =
@@ -410,9 +445,12 @@ module Regression =
     /// would read as rank-deficient without it; a power of two is exact, so a design that is already well scaled gives
     /// the same digits. The same scaling of y keeps a sum of squares from overflowing at data near 1e200 or
     /// underflowing near 1e-200: t, p and R² are formed from the scaled quantities, and a standard error or covariance
-    /// beyond the doubles reads ±∞ or 0, not a finite wrong number. An <c>Error</c> names the first NaN or infinite
-    /// entry of the design or y, before any factorisation. Raises <c>ArgumentException</c> unless y has one entry per
-    /// row, the design has at least one column and at least as many rows as columns. Cost O(m·n²).
+    /// beyond the doubles reads ±∞ or 0, not a finite wrong number. A NaN or infinite entry of the design or y gives
+    /// <c>Ok</c> with every field NaN, before any factorisation. Raises <c>ArgumentException</c> unless y has one
+    /// entry per row, the design has at least one column and at least as many rows as columns. Relative error of
+    /// every field at most 1e-12 over well-conditioned designs: the integer designs (1, x1, x2) and (x1, x2) of 12 rows
+    /// in the tests "linear regression against exact fractions" and "regression without a constant against exact
+    /// fractions", against exact fractions; the residuals within 1e-12 absolute there. Cost O(m·n²).
     /// </summary>
     let linear (design: Matrix) (y: float[]) : Result<LinearRegression, string> =
         checkShape "linear" design y
@@ -425,9 +463,13 @@ module Regression =
     /// first divided by an exact power of four above the largest, so a weight scale near 1e300 or 1e-300 neither
     /// overflows nor underflows a sum; the coefficients, covariance, t, p and R² do not depend on the scale of the
     /// weights, and σ² scales with it. <c>Residuals</c> are y − Xβ unweighted, for every row. Returns <c>Error</c> when
-    /// fewer rows have a positive weight than the design has columns, when a weight is NaN or infinite, and as
-    /// <c>linear</c> does. Raises <c>ArgumentException</c> as <c>linear</c> does, and when the weights are not as long
-    /// as y, and <c>ArgumentOutOfRangeException</c> for a negative weight. Cost O(m·n²).
+    /// fewer rows have a positive weight than the design has columns, and as <c>linear</c> does. A NaN or +∞ weight, or
+    /// a NaN or infinite entry of the design or y, gives <c>Ok</c> with every field NaN. Raises <c>ArgumentException</c>
+    /// as <c>linear</c> does, and when the weights are not as long as y, and <c>ArgumentOutOfRangeException</c> for a
+    /// negative weight (−∞ included). Relative error of every field at most 1e-12 over well-conditioned designs: the
+    /// 12 rows, (1, x1) and weights 1, 2, 3 with one 0 of the test "weighted regression against exact fractions", and
+    /// a weight of 1e30 on one row in "a dominant weight leaves R squared at the exact fraction" (1e-9 there). Cost
+    /// O(m·n²).
     /// </summary>
     let weighted (design: Matrix) (y: float[]) (weights: float[]) : Result<LinearRegression, string> =
         checkShape "weighted" design y
@@ -449,9 +491,11 @@ module Regression =
     /// The least-squares polynomial of the given degree, y = c₀ + c₁x + … + c_d xᵈ, coefficients in ascending powers,
     /// by <c>linear</c> on the raw Vandermonde design (columns 1, x, …, xᵈ). The conditioning of that design grows
     /// quickly with the degree and with the distance of x from 0; centre and scale x first for a high degree. Returns
-    /// <c>Error</c> as <c>linear</c> does, including for fewer than degree + 1 distinct x values. Raises
-    /// <c>ArgumentOutOfRangeException</c> for a negative degree, and <c>ArgumentException</c> unless xs and ys have one
-    /// length and at least degree + 1 entries. Cost O(n·d²).
+    /// <c>Error</c> as <c>linear</c> does, including for fewer than degree + 1 distinct x values, and a NaN or
+    /// infinite x or y gives <c>Ok</c> with every field NaN. Raises <c>ArgumentOutOfRangeException</c> for a negative
+    /// degree, and <c>ArgumentException</c> unless xs and ys have one length and at least degree + 1 entries.
+    /// Coefficients within 1e-12 absolute of the exact ones for the degree 2 polynomial through 8 integer points of the
+    /// test "polynomial regression recovers exact coefficients"; no bound is shown for higher degrees. Cost O(n·d²).
     /// </summary>
     let polynomial (degree: int) (xs: float[]) (ys: float[]) : Result<LinearRegression, string> =
         if degree < 0 then

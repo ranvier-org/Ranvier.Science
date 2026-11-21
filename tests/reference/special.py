@@ -34,7 +34,7 @@ Sections:
             mass times 1 + 1e-7), chi-squared statistics as exact fractions, chi-squared tails in decimal arithmetic
     regression
             the least-squares fits of RegressionTests.fs: y on x1 over the first 10 rows, y on (1, x1, x2), y on (x1, x2)
-            without a constant, and y on (1, x1) with weights; coefficients, standard errors, t statistics, two-sided
+            without a constant, y on (1, x1) with weights, and y on (1, x1) with weights 1e30, 1, ..., 1; coefficients, standard errors, t statistics, two-sided
             p-values, R-squared, adjusted R-squared, residual standard error and the covariance
 
 Every value is computed in decimal arithmetic at DIGITS significant digits from the exact value of each double input
@@ -2220,6 +2220,7 @@ REG_X1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 REG_X2 = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8]
 REG_Y = [6, 5, 9, 7, 13, 18, 11, 15, 16, 13, 16, 22]
 REG_WEIGHTS = [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 0]
+REG_DOMINANT = [1e30] + [1] * 11
 
 
 def gauss_jordan_inverse(a: list[list[Fraction]]) -> list[list[Fraction]]:
@@ -2311,6 +2312,7 @@ def section_regression() -> None:
         "linear": ([[1] * 12, REG_X1, REG_X2], REG_Y, None),
         "noConstant": ([REG_X1, REG_X2], REG_Y, None),
         "weighted": ([[1] * 12, REG_X1], REG_Y, REG_WEIGHTS),
+        "dominant": ([[1] * 12, REG_X1], REG_Y, REG_DOMINANT),
     }
     for name, args in models.items():
         emit_floats(name + "Coefficients", regression_floats(args, "coefficients"))
