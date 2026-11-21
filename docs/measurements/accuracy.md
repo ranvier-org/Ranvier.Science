@@ -3,14 +3,13 @@
 This file lists each accuracy bound that a doc comment in `Ranvier.Numerics`, `Ranvier.Quantities` or `Ranvier.Statistics`
 states as a contract, with the kernel, the domain it holds over, the test that asserts it and where the test's reference
 value comes from. Every bound in the tables below is asserted by a test that runs on .NET and, compiled through Fickl, on
-JavaScript, *measured here* on 2026-11-21 at HEAD e9a13d2 plus the one test this task added, by the two suite commands run
+JavaScript, *measured here* on 2026-11-21 at the commit that adds this file (the branch's previous commit plus the one test this task added), by the two suite commands run
 from the repository root: `dotnet run -c Release --project tests/Ranvier.Science.Tests` (794 tests, 0 failed) and
 `dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release` followed by
 `npx mocha dist/tests/Main.fs.js` (789 passing). A bound is asserted on each target separately: a kernel that calls `exp`,
 `log` or a trigonometric function can differ in the last digits between targets, and only the kernels built from
 `+ − × ÷` and `sqrt` are claimed bit-equal across them (section 5.3 of `docs/superpowers/specs/2026-11-20-toolkit-design.md`;
-the targets are in its section 5.1 and are not repeated here). Exceptions to "asserted on both targets" are marked in the
-row.
+the targets are in its section 5.1 and are not repeated here). Two kinds of row are exceptions to "asserted by a test" and say so in the row: the entries of the "Stated but not pinned" table, which no test asserts or asserts only in part, and the rows whose bound is asserted at one case only (`Aggregate.momentsBy`, the `Window` dominant-item row, `Integrate.gaussLegendre`'s tested n). The tables of measured figures that are not guarantees record what a test pins on a tested set, not a bound.
 
 How to read the tables. **Bound** is the doc comment's figure: "relative 1e-12" is `|actual − expected| ≤ 1e-12 · |expected|`,
 "absolute" is without the factor, and "max(a, b)" is the larger of two. **Domain** is where the doc comment states the bound
@@ -35,7 +34,7 @@ from the exact value of each double input.
 The bounds were collected from the doc comments (`///` blocks) of every `.fs` file under `src/Ranvier.Numerics`,
 `src/Ranvier.Quantities` and `src/Ranvier.Statistics` that match any of these wordings, case-insensitively: "error at most",
 "round trip", "relative error", "within", "absolute error", "ulp", "relative 1e-", "at most 1e-", "bound", "accura" (which
-takes "accuracy", "accurate" and "accurately"). The figure is the number of doc-comment blocks (a run of consecutive `///`
+takes "accuracy", "accurate" and "accurately"), and, added in the fix round, "agree" and "to 1e-". Those last two matched 4 further Statistics blocks and no Numerics or Quantities block; one of them, the `Density` module remarks, states a bound (its row is below), and the others (`Describe.quantileSorted`, `Describe.quantiles`, `Correlation.kendallTest`) do not. The figure is the number of doc-comment blocks (a run of consecutive `///`
 lines) that match at least one wording, *measured here* by a script that scans the files; most blocks match several
 wordings:
 
@@ -120,11 +119,7 @@ states them.
 
 `Ranvier.Quantities` states no accuracy bound. Its three matching doc-comment blocks are `Quantity.deriveWithin` (a
 tolerance argument that the caller supplies), and `Run.createWith` and `Run.ode` (a clock tolerance of 1e-9 that is part of
-the definition of when a run advances). Nothing was left unpinned and nothing needs a row.
-
-| Kernel | Bound | Domain | Test | Reference |
-|---|---|---|---|---|
-| (none) | none stated | none | none | none |
+the definition of when a run advances). Nothing was left unpinned, and no table is given for it.
 
 ## Ranvier.Statistics
 
@@ -137,7 +132,6 @@ listed in the note under the table.
 | Kernel | Bound | Domain | Test | Reference |
 |---|---|---|---|---|
 | `NormalQuantile.ofProbability` | relative 1.2e-9 | 0 < p < 1, p ≠ ½ (the quantile at ½ is 0, which has no relative error) | `ConfidenceSequenceTests.fs`: `normal quantile relative error is within 1.2e-9 against Continuous.quantile` (added by this task: 999 thousandths, 10⁻³ to 10⁻³⁰⁰, 1 − 10⁻³ to 1 − 10⁻¹⁵, and p either side of Acklam's switch at 0.02425; it fails at 1e-9, first at p = 0.004 with relative error 1.07e-9, *measured here* by running it with the bound at 1e-9) | `Continuous.quantile` of the standard normal, itself pinned to 1e-12 by `ContinuousTests.fs`: `normal quantile against the reference` (`special.py normal`). The existing `normal quantile` test in the same file asserts absolute tolerances of 1e-8 to 1e-12 at five points, not this relative bound |
-| `Continuous.density` and `logDensity` (module remarks) | relative 2e-13 for shapes and degrees of freedom 0.5 to 100; 1.2e-12 for the gamma at shape 1000 and 1.1e-10 for the chi-squared at 1e5 degrees of freedom (scan not kept); the test asserts 1e-12, 2e-12 at gamma 1000 and 2e-10 at chi-squared 1e5 | the ends of each stated range; the gamma, chi-squared, beta, Student t and F | `ContinuousTests.fs`: `the stated domains at their edges against the reference` | `special.py dist-edges` |
 | `Continuous.cdf` | relative 1e-12 where the value is at least 1e-300; exactly 0 and 1 outside the support | normal, uniform, exponential, Cauchy, logistic at the tested parameters; log-normal for \|mu\| up to 50 at sigma 0.1 and above; Weibull for shape up to 20; gamma, chi-squared, beta, Student t and F for shapes and degrees of freedom 0.5 to 100, and at the stated wider ends (gamma 0.01 to 1000, chi-squared 0.05 to 1e5, beta 0.2 to 500, t 0.05 to 1000, F with one of d1, d2 up to 1000 and the other 0.5 to 100) | `ContinuousTests.fs`: `normal cdf and survival against the reference`, `logNormal against the reference`, `weibull survival at a large shape and a scale that is not a power of two`, `gamma against the reference`, `chi-squared against the reference`, `beta against the reference`, `Student t against the reference`, `F against the reference`, `where a plain form would cancel or round 1 - x, against the reference`, `the stated domains at their edges against the reference` | `special.py normal`, `lognormal`, `weibull`, `dist-gamma`, `dist-chi-squared`, `dist-beta`, `dist-student-t`, `dist-fisher-f`, `dist-regimes`, `dist-edges`; closed forms for the exponential, uniform, Cauchy and logistic. The doc's dense scan (10 792 points, worst 1.5e-13) is scan not kept |
 | `Continuous.survival` | relative 1e-12 where the value is at least 1e-300; 1 at and below the support's lower end, exactly 0 at and above its upper end | as `cdf` | the same tests | as `cdf` |
 | `Continuous.quantile` | the round trip: `cdf` at the result within relative 1e-12 of p for p ≤ ½, and `survival` within relative 1e-12 of 1 − p for p > ½, down to p = 1e-300; near 1 for the beta with a small b, where adjacent doubles move the survival by more than 1e-12 of itself, the result is within one double of the root | the domain of `cdf`, where the quantile is a normal double and the doubles beside it resolve p | `ContinuousTests.fs`: `quantile round trips`, `quantile round trips for the incomplete-function families`, `quantile round trips at the edges of the stated domains`, `gamma and chi-squared quantile round trips within 1e-14 of 1`, `log-normal quantile round trip at a large mu` | the round trip through `cdf` and `survival`, pinned by the rows above |
@@ -158,7 +152,7 @@ listed in the note under the table.
 | `HypothesisTest.fisherExact` | p-value relative 1e-12 | the tea-tasting table and the tables of the second test | `HypothesisTests.fs`: `Fisher's tea-tasting table`, `Fisher against exact fractions` | the closed form of the tea table; exact fractions, `special.py counts` |
 | `HypothesisTest.mannWhitney` | p-value relative 1e-12 against the approximating formula (R computes it exactly for fewer than 50 observations per sample, so this is not R's value there) | three data sets: ties, U on each side of its mean, U at its mean | `HypothesisTests.fs`: `Mann–Whitney against the reference` | `special.py ranks` |
 | `HypothesisTest.wilcoxonSignedRank` | p-value relative 1e-12 against the approximating formula | three data sets (ties and a zero, a zero without ties, V at its mean), and 100000 differences of ±1 | `HypothesisTests.fs`: `Wilcoxon on the sleep differences`, `Wilcoxon against the reference`, `the continuity correction and the tie correction by closed forms` | `special.py ranks`; closed forms for the ±1 case |
-| `HypothesisTest.kolmogorovSmirnov` | p-value relative 1e-12 against the Kolmogorov series (at most 3 terms for λ from 0.04 to 6) | the series on each side of the switch at λ = 1.18 (λ of 0.52, 1.17, 1.19), small and large λ | `HypothesisTests.fs`: `one-sample Kolmogorov–Smirnov`, `the Kolmogorov series on each side of the switch at lambda 1.18`, `Kolmogorov–Smirnov at small and large lambda` | `special.py ranks`, which also asserts the term count on a grid of step 0.001 (*measured here*: the doc comment's figure, run by `python -I tests/reference/special.py ranks`) |
+| `HypothesisTest.kolmogorovSmirnov` | p-value relative 1e-12 against the Kolmogorov series (at most 3 terms for λ from 0.04 to 6) | the series on each side of the switch at λ = 1.18 (λ of 0.52, 1.17, 1.19), small and large λ | `HypothesisTests.fs`: `one-sample Kolmogorov–Smirnov`, `the Kolmogorov series on each side of the switch at lambda 1.18`, `Kolmogorov–Smirnov at small and large lambda` | `special.py ranks`, which also asserts the term count on a grid of step 0.001 (the check is in the script; *measured here* on 2026-11-21 by `python -I tests/reference/special.py ranks`, which exited 0, the script exiting non-zero if the double series needs more than 3 terms) |
 | `HypothesisTest.kolmogorovSmirnovTwoSample` | p-value relative 1e-12 against the series | λ of 0.89 and 1.73, with a tied value | `HypothesisTests.fs`: `two-sample Kolmogorov–Smirnov` | `special.py ranks` |
 | `MeanInterval.student` | bound relative 1e-12 | ten observations, α 0.05 and 0.01; the doc reports the largest relative error as 1.5e-16 (*measured here* on .NET by a one-off F# script, not kept) | `IntervalTests.fs`: `the Student interval against the reference`, `small samples give NaN bounds`; the coverage of the 95% interval on 2,000 seeded samples by `the Student interval covers at its level` | `special.py intervals` |
 | `MeanInterval.knownSigma` | bound relative 1e-12 | ten observations, σ 3, α 0.05 | `IntervalTests.fs`: `the known-sigma interval against the reference` | `special.py intervals` |
@@ -173,6 +167,7 @@ listed in the note under the table.
 | `Correlation.pearsonTest` | statistic and p-value within 1e-12 relative of exact fractions | the 8 pairs of the test | `CorrelationTests.fs`: `Pearson, Spearman and Kendall against exact fractions` | exact fractions, `special.py correlation` |
 | `Correlation.spearmanTest` | statistic and p-value within 1e-12 relative of exact fractions | the tied 8 pairs of the test | `CorrelationTests.fs`: `Spearman with ties against the reference` | exact average ranks, `special.py correlation` |
 | `Density.gaussianKernel` | where x − xᵢ overflows the true value is below 1e-307, so the 0 returned is within the smallest normal double of it | extreme scales | `ResamplingTests.fs`: `the estimate at extreme scales is exact or honestly zero` | the closed form of the normal density |
+| `Density.silvermanBandwidth` and `scottBandwidth` (module remarks) | relative 1e-13 against exact rational arithmetic, *measured here* by the test | four rows: offsets 1 to 1e9 with spreads 1e-9 to 1e-3, 50 doubles offset + i·spread | `ResamplingTests.fs`: `bandwidths of offset data match exact rational arithmetic` | `special.py resampling` (rationals and 60-digit decimals, rounded once) |
 
 Rows stating a bound that no doc comment gives, but that a test pins (recorded as "stated in no doc comment"):
 
@@ -181,6 +176,14 @@ Rows stating a bound that no doc comment gives, but that a test pins (recorded a
 | `Correlation.pearson` | stated in no doc comment (the doc comment gives only that exactly linear data read ±1 or a few ulps inside it, 0.9999999999999998 for the integers 1 to 5 against 2x + 1); the test asserts relative 1e-12 | the 8 permutation pairs of the test; scales 1e200 and 1e-200 | `CorrelationTests.fs`: `Pearson, Spearman and Kendall against exact fractions`, `Pearson at the scales of 1e200 and 1e-200`, `perfect correlation gives an infinite t and a p-value of 0` | exact fractions, `special.py correlation` |
 | `Correlation.spearman` | stated in no doc comment; the tests assert relative 1e-12 (and 1e-14 on a monotone cube) | untied permutations; the tied 8 pairs | `CorrelationTests.fs`: `Pearson, Spearman and Kendall against exact fractions`, `Spearman with ties against the reference` | exact average ranks; Pearson on untied data (identity); `special.py correlation` |
 | `Correlation.kendall` and `kendallTest` | stated in no doc comment; the tests assert tau-b relative 1e-12 against the reference and 1e-14 against a direct pair count, and z within 1e-12 | untied and tied 8 pairs; 39 generated samples of sizes 2 to 40 with ties | `CorrelationTests.fs`: `Pearson, Spearman and Kendall against exact fractions`, `Kendall tau-b matches a direct count`, `Kendall over generated samples with ties matches the direct count and variance` | the direct pair count written in the test (`countPairs`); `special.py correlation` |
+
+### Measured figures that the doc comment says are not bounds
+
+The `Continuous` module remarks say `density` and `logDensity` carry no bound beyond the accuracy of the functions they call; the figures below are measured on the stated ranges.
+
+| Kernel | Bound | Domain | Test | Reference |
+|---|---|---|---|---|
+| `Continuous.density` and `logDensity` (module remarks) | measured, not a bound: relative 2e-13 for shapes and degrees of freedom 0.5 to 100; 1.2e-12 for the gamma at shape 1000 and 1.1e-10 for the chi-squared at 1e5 degrees of freedom (scan not kept); the test asserts 1e-12, 2e-12 at gamma 1000 and 2e-10 at chi-squared 1e5 | the ends of each stated range; the gamma, chi-squared, beta, Student t and F | `ContinuousTests.fs`: `the stated domains at their edges against the reference` | `special.py dist-edges` |
 
 ### Limits of the contract bounds, as the branch has them now
 
