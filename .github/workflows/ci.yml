@@ -39,6 +39,9 @@ jobs:
         run: dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests -c Release
       - name: JavaScript tests
         run: npx mocha dist/tests/Main.fs.js
+      # Every snippet of docs/GUIDE.md must equal the body of its test in GuideTests.fs.
+      - name: Guide snippets
+        run: python3 -I tests/guide-snippets.py
       - name: Pack
         run: |
           dotnet pack src/Ranvier.Numerics -c Release -o artifacts/packages
