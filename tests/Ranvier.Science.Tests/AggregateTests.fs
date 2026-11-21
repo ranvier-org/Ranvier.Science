@@ -778,6 +778,22 @@ let tests =
                 Expect.isLessThanOrEqual (abs (Moments.mean m.Value.Value - 2.0)) bound "the mean is within n * epsilon * the largest magnitude")
         }
 
+        test "removing a dominant row from a sum leaves an error within n · ε times the largest magnitude" {
+            // The bound of maintainedBy with the constant 1: four rows held, the largest 1e16, removed again before
+            // any re-fold. Without compensation 1e16 + 1 + 2 + 3 rounds at the spacing 2 of the doubles near 1e16.
+            withGraph (fun () ->
+                let epsilon = 2.220446049250313e-16
+
+                for policy in [ FloatPolicy.fast; FloatPolicy.standard ] do
+                    let rows = rowsOf [| 1e16; 1.0; 2.0; 3.0 |]
+                    let s = rows.Rows |> Aggregate.sumBy policy valueOf
+                    s.Value.Value |> ignore
+                    rows.Remove 0 |> ignore
+                    let label = sprintf "compensated %b" policy.Compensated
+                    Expect.equal (s.Refolds ()) 0 (label + ": no re-fold yet")
+                    Expect.isLessThanOrEqual (abs (s.Value.Value - 6.0)) (4.0 * epsilon * 1e16) (label + ": within the bound"))
+        }
+
         test "removing a dominant row matches the fold once the floor-0 re-fold has run" {
             withGraph (fun () ->
                 let rows = rowsOf [| 1e16; 1.0; 2.0; 3.0 |]

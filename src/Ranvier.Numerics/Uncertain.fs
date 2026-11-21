@@ -272,7 +272,9 @@ module Uncertain =
     /// |cᵢ|, so that no square underflows or overflows: the result is +∞ only when the root exceeds the largest double.
     /// 0 for an exact value and when every contribution is 0, NaN when a contribution is NaN, otherwise +∞ when one is
     /// infinite. For n contributions the relative error is at most about (n/2 + 3)·2⁻⁵³ (general knowledge: a
-    /// first-order rounding bound of the scaled sum; not measured). O(n) in the number of sources.
+    /// first-order rounding bound of the scaled sum), which the test "standardUncertainty of 1000 contributions is
+    /// within its stated bound" pins with the constant 1 against <c>tests/reference/special.py numerics</c>. O(n) in
+    /// the number of sources.
     let standardUncertainty (u: Uncertain) : float =
         let c = u.Contributions
         let mutable largest = 0.0

@@ -124,15 +124,16 @@ module Histogram =
 
     let private sameEdges (name: string) (a: Histogram) (b: Histogram) =
         if a.Edges <> b.Edges then
-            raise (
-                ArgumentException(
-                    $"The histograms have different edges; they have {a.Edges.Length} and {b.Edges.Length} edges.",
-                    name
-                )
-            )
+            let detail =
+                if a.Edges.Length <> b.Edges.Length then
+                    $"they have {a.Edges.Length} and {b.Edges.Length} edges"
+                else
+                    "the edge values differ"
 
-    /// The histogram whose every count is the sum of the two. Raises `ArgumentException` naming both edge counts unless
-    /// the edges are equal. O(bins).
+            raise (ArgumentException($"The histograms have different edges; {detail}.", name))
+
+    /// The histogram whose every count is the sum of the two. Raises `ArgumentException` unless the edges are equal,
+    /// naming both edge counts where they differ and saying that the edge values differ otherwise. O(bins).
     let merge (a: Histogram) (b: Histogram) : Histogram =
         sameEdges "b" a b
 
@@ -142,9 +143,9 @@ module Histogram =
             Overflow = a.Overflow + b.Overflow
             Missing = a.Missing + b.Missing }
 
-    /// The histogram of whole without part, the inverse of `merge`. Raises `ArgumentException` naming both edge counts
-    /// unless the edges are equal, and `InvalidOperationException` when any count of part exceeds the same count of
-    /// whole. O(bins).
+    /// The histogram of whole without part, the inverse of `merge`. Raises `ArgumentException` unless the edges are
+    /// equal, as `merge` does, and `InvalidOperationException` when any count of part exceeds the same count of whole.
+    /// O(bins).
     let unmerge (whole: Histogram) (part: Histogram) : Histogram =
         sameEdges "part" whole part
         let counts = Array.map2 (-) whole.Counts part.Counts

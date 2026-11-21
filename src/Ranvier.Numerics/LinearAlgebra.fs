@@ -768,8 +768,9 @@ module Matrix =
     /// otherwise only + − × ÷, `sqrt`, `abs` and comparisons. A matrix whose largest |entry| is at least 2^1000 is
     /// factored multiplied by the exact power of two 2^-k that takes it below 2^1000, as `lu` does, so the reflections
     /// and the column norms of the rank threshold do not overflow; `QrDecomposition.leastSquares` and
-    /// `QrDecomposition.r` undo the scale. A matrix holding a NaN or infinite entry gives a decomposition that reads
-    /// NaN everywhere. A matrix with no columns is accepted. Raises `ArgumentException` unless the matrix has at least
+    /// `QrDecomposition.r` undo the scale. As for `lu`, that scaling is exact except for an entry it takes below the
+    /// normal doubles, which loses up to k bits. A matrix holding a NaN or infinite entry gives a decomposition that
+    /// reads NaN everywhere. A matrix with no columns is accepted. Raises `ArgumentException` unless the matrix has at least
     /// as many rows as columns. Cost O(mn²).
     let qr (a: Matrix) : QrDecomposition =
         let m = a.RowCount
@@ -852,7 +853,8 @@ module Matrix =
     /// off-diagonal entries is at most ε·‖A‖_F, with ε = 2⁻⁵² and both norms taken through `Vector.norm`. A matrix whose
     /// largest |entry| is at least 2^1000 is rotated multiplied by the exact power of two 2^-k that takes it below
     /// 2^1000, as `lu` does, and its values are multiplied back by 2^k, so the norms and the rotations do not overflow
-    /// and a value beyond the doubles reads ±∞. Returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤
+    /// and a value beyond the doubles reads ±∞; as for `lu`, that scaling is exact except for an entry it takes below
+    /// the normal doubles, which loses up to k bits. Returns `Error "not symmetric …"` unless |aᵢⱼ − aⱼᵢ| ≤
     /// 1e-12·max|aᵢⱼ| for every pair, and `Error "did not converge …"` when 100 sweeps leave the off-diagonal norm
     /// above the threshold. Each eigenvector's component of largest magnitude is positive, the lowest index on an
     /// exact tie; equal eigenvalues keep the order of their diagonal positions. A 0 × 0 matrix gives `Ok` with empty

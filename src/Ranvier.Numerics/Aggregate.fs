@@ -40,7 +40,11 @@ module Aggregate =
     /// re-fold. The state is not checked for cancellation: between re-folds a removal subtracts from totals that may
     /// have held a larger magnitude, so for an accumulator whose totals are sums of the projected values each running
     /// total carries an absolute error of order n·ε (ε = 2⁻⁵²) times the largest magnitude it has held since the last
-    /// re-fold (general knowledge), and the re-fold rule bounds how long the error persists. A caller whose rows can be
+    /// re-fold, n the rows it has held (general knowledge: a first-order rounding bound of the running sum), and the
+    /// re-fold rule bounds how long the error persists. The tests "removing a dominant row from a sum leaves an error
+    /// within n · ε times the largest magnitude" (<c>sumBy</c>, both policies) and "removing a dominant row leaves an
+    /// error within the stated bound" (<c>momentsBy</c>) pin it with the constant 1 for four rows after removing 1e16;
+    /// no test pins it at other sizes. A caller whose rows can be
     /// many orders of magnitude larger than the rest uses a from-scratch fold, <c>Projection.fold</c> with the same
     /// <c>add</c>, which is free of that error. <c>FloatPolicy.withRefoldFloor 0</c> ends the error at most N − 1
     /// further removals later, once the removals since the last re-fold reach the row count, and behaves as

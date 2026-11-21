@@ -51,8 +51,8 @@ module Comoments =
     /// Raises InvalidOperationException when the count is zero. Returns <c>zero</c> when the count reaches zero. At a
     /// count of one the spreads and the co-moment are exactly zero and the means equal the remaining pair within
     /// rounding. Above a count of one the sums of squares are zero only up to rounding after a removal: pairs left with
-    /// one x value can keep a small positive M2x, so <c>slope</c>, <c>intercept</c> and <c>correlation</c> read large
-    /// finite numbers where a fresh fold of those pairs reads NaN.
+    /// one x value can keep a small positive M2x, so <c>slope</c> and <c>intercept</c> read large finite numbers and
+    /// <c>correlation</c> a plausible value in [−1, 1] where a fresh fold of those pairs reads NaN.
     /// </summary>
     let remove (compensated: bool) (m: Comoments) (x: float) (y: float) : Comoments =
         if m.N <= 0.0 then
@@ -103,7 +103,7 @@ module Comoments =
     /// Raises InvalidOperationException when `part` has more pairs than `whole`; returns `zero` when the counts are equal,
     /// and `whole` itself when `part` is empty. At a remaining count of one the spreads and the co-moment are exactly zero.
     /// Above it the sums of squares are zero only up to rounding, as after `remove`: pairs left with one x value can read
-    /// a large finite slope, intercept and correlation where a fresh fold reads NaN.
+    /// a large finite slope and intercept, and a plausible correlation in [−1, 1], where a fresh fold reads NaN.
     let unmerge (compensated: bool) (whole: Comoments) (part: Comoments) : Comoments =
         let n = whole.N - part.N
 

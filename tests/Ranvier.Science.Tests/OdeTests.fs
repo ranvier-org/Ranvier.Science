@@ -147,6 +147,21 @@ let tests =
                 overflow 0.0
             }
 
+            test "a right-hand side that is not finite at a finite state names the right-hand side" {
+                // From a set first step, the first call is k1 at the start, and each attempt makes six more calls, k2 to
+                // k7, k7 at the attempt's new state (k1 is reused after a rejection). Returning +infinity on every
+                // attempt's k7 leaves each new state finite and each error estimate infinite, so the step shrinks until
+                // it underflows at t = 1, and the Error names the right-hand side, not the state.
+                let calls = ref 0
+
+                let f (_: float) (y: float[]) =
+                    calls.Value <- calls.Value + 1
+                    if calls.Value > 1 && (calls.Value - 1) % 6 = 0 then [| infinity |] else [| -y[0] |]
+
+                Ode.solve { OdeOptions.standard with InitialStep = 0.1 } f 1.0 [| 1.0 |] 2.0
+                |> expectError "the right-hand side is not finite at t = 1" "an infinite k7"
+            }
+
             test "a NaN in y0 names the condition" {
                 Ode.solve OdeOptions.standard (fun _ y -> [| -y[0] |]) 0.0 [| nan |] 1.0
                 |> expectError "the state is not finite at t = 0" "NaN y0"

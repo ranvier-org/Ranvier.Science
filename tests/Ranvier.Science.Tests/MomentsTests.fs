@@ -61,6 +61,19 @@ let tests =
                 Expect.equal (Moments.mean m) (1e9 + 499.5) "mean"
             }
 
+            test "an offset of 1e6 costs at most ε · |mean| / sd of the sample variance" {
+                // python -I tests/reference/special.py numerics: the exact sample variance of the 1000 doubles
+                // 1e6 + ((i · 7919) mod 1000) / 500 − 1 (spread about 1). The one-pass update loses up to about
+                // ε · |mean| / sd relative, 3.8e-10 here, with ε = 2^-52; both flags stay within it.
+                let offsetSampleVariance = 0.33366666666688666
+                let xs = Array.init 1000 (fun i -> 1e6 + (float ((i * 7919) % 1000) / 500.0 - 1.0))
+                let bound = 2.220446049250313e-16 * 1e6 / sqrt offsetSampleVariance
+
+                for c in [ true; false ] do
+                    let v = Moments.sampleVariance (ofArray c xs)
+                    Expect.isTrue (rel v offsetSampleVariance <= bound) (sprintf "compensated %b: %.17g within %g" c v bound)
+            }
+
             test "folding twice gives the same bits" {
                 let xs = Array.init 5000 (fun k -> sqrt (float k) + 0.1)
                 Expect.isTrue (ofArray true xs = ofArray true xs) "states equal"

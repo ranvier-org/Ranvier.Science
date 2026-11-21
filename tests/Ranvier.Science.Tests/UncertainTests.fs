@@ -288,6 +288,24 @@ let tests =
                 Expect.equal (Uncertain.standardUncertainty (Uncertain.source infinity 1.0)) infinity "+∞ propagates"
             }
 
+            test "standardUncertainty of 1000 contributions is within its stated bound" {
+                // python -I tests/reference/special.py numerics: √Σc² of the exact contributions, c from the
+                // minimal-standard LCG (16807 mod 2^31 − 1, exact in doubles) from the seed 20261121, times 10.
+                let rootSumOfSquares = 183.213919982673
+                let contributions: float[] = Array.zeroCreate 1000
+                let mutable state = 20261121.0
+
+                for i in 0..999 do
+                    state <- (state * 16807.0) % 2147483647.0
+                    contributions[i] <- state / 2147483647.0 * 10.0
+
+                let total = contributions |> Array.fold (fun acc c -> acc + Uncertain.source c 0.0) (Uncertain.exact 0.0)
+                Expect.equal (Uncertain.contributions total).Length 1000 "one contribution per source"
+                let bound = (1000.0 / 2.0 + 3.0) * 1.1102230246251565e-16
+                let actual = Uncertain.standardUncertainty total
+                Expect.isTrue (rel actual rootSumOfSquares <= bound) (sprintf "%.17g within (n/2 + 3)·2^-53 of %.17g" actual rootSumOfSquares)
+            }
+
             test "map and map2" {
                 let x = Uncertain.source 0.1 3.0
                 let y = Uncertain.source 0.2 4.0

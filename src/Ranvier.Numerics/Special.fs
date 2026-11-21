@@ -589,7 +589,10 @@ module Special =
     /// a = +∞ or x < 0, even with the other argument NaN. Relative error at most 1e-12 over 0 < a ≤ 1000 where
     /// P(a, x) ≥ 1e-300, pinned by the `Special` tests against `tests/reference/special.py` (measured here). Cost: one
     /// series or continued fraction, or for a < 1 below a + 1 with P(a, x) > ½ two series and a continued fraction at
-    /// a + 1, each of at most 10 000 terms, NaN past them.
+    /// a + 1, each of at most 10 000 terms, NaN past them. With no uniform asymptotic (Temme) expansion, those terms
+    /// run out near x = a for a above about 1e6, where P and Q are NaN: the Poisson cdf they serve is NaN near its mean
+    /// from a mean of about 1.674e6 (from documentation: `Discrete.cdf`, which pins it). A later version could lift
+    /// that limit with Temme's expansion (general knowledge).
     let gammaLowerRegularized (a: float) (x: float) : float =
         checkIncompleteGammaArguments a x
 
@@ -603,7 +606,8 @@ module Special =
     /// finite and x ≥ 0, accurate where P(a, x) is near 1: 1 at x = 0, 0 at x = +∞, NaN when a or x is NaN. Raises
     /// `ArgumentOutOfRangeException` when a ≤ 0, a = +∞ or x < 0, even with the other argument NaN. Relative error at
     /// most 1e-12 over 0 < a ≤ 1000 where Q(a, x) ≥ 1e-300, pinned by the `Special` tests against
-    /// `tests/reference/special.py` (measured here). Cost: as `gammaLowerRegularized`.
+    /// `tests/reference/special.py` (measured here). Cost: as `gammaLowerRegularized`, and NaN near x = a for a above
+    /// about 1e6, as `gammaLowerRegularized` states.
     let gammaUpperRegularized (a: float) (x: float) : float =
         checkIncompleteGammaArguments a x
 

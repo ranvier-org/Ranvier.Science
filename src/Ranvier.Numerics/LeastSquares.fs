@@ -5,7 +5,8 @@ open System
 /// Options of `LeastSquares.levenbergMarquardt`.
 type LeastSquaresOptions =
     {
-        /// Relative tolerance of the step and cost tests; at least 0 and not NaN.
+        /// Tolerance of the step and cost tests, relative, with an absolute floor of Tolerance² on the step
+        /// (‖δ‖ ≤ T(‖p‖ + T)); at least 0 and not NaN.
         Tolerance: float
         /// The cap on iterations (one Jacobian each); at least 1.
         MaximumIterations: int
@@ -242,7 +243,8 @@ module LeastSquares =
     /// (then `Iterations` is 0 and the Jacobian is NaN), and when the Jacobian at the accepted parameters holds a NaN
     /// or infinite entry, the caller's or the forward difference alike: the fit then stops there without a trial, and
     /// `Iterations` is 0 when that is the start. Tolerance bounds the relative change of the cost and of the
-    /// parameters between iterations, not the error of the parameters: a flat valley can stop the fit well short of
+    /// parameters between iterations, with the absolute floor Tolerance² on the step (parameters near Tolerance or
+    /// below end the fit at that floor), not the error of the parameters: a flat valley can stop the fit well short of
     /// the minimum.
     ///
     /// Raises `ArgumentOutOfRangeException` for a negative or NaN tolerance or a cap below 1, and `ArgumentException`

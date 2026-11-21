@@ -83,6 +83,14 @@ let tests =
                     [ "merge", (fun () -> Histogram.merge empty four |> ignore)
                       "unmerge", (fun () -> Histogram.unmerge empty four |> ignore) ] do
                     Expect.throwsC call (fun e -> Expect.stringContains e.Message "3 and 4 edges" $"{name} names both lengths")
+
+                // Edges of one length that differ in value: the message says so rather than naming two equal lengths.
+                let wider = Histogram.uniform 0.0 2.0 2
+
+                for name, call in
+                    [ "merge", (fun () -> Histogram.merge empty wider |> ignore)
+                      "unmerge", (fun () -> Histogram.unmerge empty wider |> ignore) ] do
+                    Expect.throwsC call (fun e -> Expect.stringContains e.Message "the edge values differ" $"{name} names the values")
             }
 
             test "copies in and out" {

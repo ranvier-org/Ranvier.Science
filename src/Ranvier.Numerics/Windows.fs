@@ -136,7 +136,7 @@ module internal Refold =
 /// order count·ε times that item's square (ε = 2^-52; general knowledge), until the next re-fold, at most one capacity
 /// of pushes later: at capacity 3, after 1e20, 1, 2, 3 the compensated mean reads 1366.33 where the items' mean is 2
 /// (measured here by the "Window" test list, "a dominant item's error lasts until the next re-fold, within the stated
-/// bound"). A fresh fold of <c>items</c> is exact after such a departure.
+/// bound"). A fresh fold of <c>items</c> is free of that error after such a departure.
 /// A window built by <c>Window.create</c> keeps a non-finite value until the next re-fold. <c>Window.moments</c>
 /// re-folds in place of each removal from a non-finite value, and of a removal that leaves a finite value non-finite,
 /// so a NaN or infinite observation, or an overflow, stops affecting the value once its items have left; while the
@@ -236,9 +236,9 @@ module Window =
 /// of <c>TimeWindow.moments</c> carries an absolute error of order count·ε times the largest |item| since the last
 /// re-fold, and the variance of order count·ε times that item's square (ε = 2^-52; general knowledge), until the
 /// removals since the last re-fold reach the item count (measured here by the "Window" test list, "a dominant item's
-/// error lasts until the next re-fold, within the stated bound"). A fresh fold of <c>items</c> is exact after such a
-/// departure. The window holds functions, so it has no equality: a memo of one cuts off only by returning the
-/// previous instance.
+/// error lasts until the next re-fold, within the stated bound"). A fresh fold of <c>items</c> is free of that error
+/// after such a departure. The window holds functions, so it has no equality: a memo of one cuts off only by returning
+/// the previous instance.
 /// </remarks>
 [<NoEquality; NoComparison>]
 type TimeWindow<'T, 'A> =

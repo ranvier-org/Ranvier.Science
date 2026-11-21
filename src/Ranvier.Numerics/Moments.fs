@@ -102,7 +102,13 @@ module Moments =
     let mean (m: Moments) : float =
         if m.N = 0.0 then nan else Sum.value m.Mean
 
-    /// The population variance, (1/n)·Σy² − mean², never negative; NaN when the count is zero.
+    /// <summary>
+    /// The population variance, Σ(x − mean)² / n, from the sum of squared deviations that Welford's update keeps;
+    /// never negative; NaN when the count is zero. The update subtracts a running mean from each observation, so for
+    /// data with an offset the relative error reaches about ε·|mean|/sd (ε = 2⁻⁵², sd the standard deviation; general
+    /// knowledge), whichever the flag: the test "an offset of 1e6 costs at most ε · |mean| / sd of the sample variance"
+    /// pins that bound at an offset of 1e6 and a spread of about 1 against <c>tests/reference/special.py numerics</c>.
+    /// </summary>
     let variance (m: Moments) : float =
         if m.N = 0.0 then
             nan
@@ -110,7 +116,8 @@ module Moments =
             let v = Sum.value m.M2 / m.N
             if v < 0.0 then 0.0 else v
 
-    /// The sample variance, Σ(x − mean)² / (n − 1), never negative; NaN when the count is below 2.
+    /// The sample variance, Σ(x − mean)² / (n − 1), never negative; NaN when the count is below 2. For data with an
+    /// offset its relative error reaches about ε·|mean|/sd, as <c>variance</c> states.
     let sampleVariance (m: Moments) : float =
         if m.N < 2.0 then
             nan
