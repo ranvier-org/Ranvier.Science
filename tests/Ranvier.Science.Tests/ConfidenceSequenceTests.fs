@@ -71,6 +71,21 @@ let tests =
                 Expect.isLessThanOrEqual (abs (NormalQuantile.ofProbability 1e-10 + 6.361340902)) 1e-8 "1e-10 within 1e-8 of -6.361340902"
             }
 
+            test "normal quantile relative error is within 1.2e-9 against Continuous.quantile" {
+                // Pins the bound stated on NormalQuantile.ofProbability. The reference is Continuous.quantile of the standard
+                // normal, itself pinned to 1e-12 by ContinuousTests "normal quantile against the reference"; Acklam's
+                // published bound is 1.15e-9 (general knowledge). p = 0.5 is left out: its quantile is 0, which has no
+                // relative error.
+                let d = Continuous.normal 0.0 1.0
+                let thousandths = [ for k in 1..999 -> float k / 1000.0 ]
+                let tails = [ for j in 3..300 -> pown 10.0 (-j) ]
+                let nearOne = [ for j in 3..15 -> 1.0 - pown 10.0 (-j) ]
+                let switches = [ 0.02424; 0.02425; 0.02426; 0.97574; 0.97575; 0.97576 ]
+
+                for p in (thousandths @ tails @ nearOne @ switches) |> List.filter (fun p -> p <> 0.5) do
+                    expectClose 1.2e-9 0.0 (Continuous.quantile d p) (NormalQuantile.ofProbability p) (sprintf "p = %.17g" p)
+            }
+
             test "the fixed-sample interval accepts a very small alpha" {
                 let m = Array.fold (Moments.add true) Moments.zero [| 1.0; 2.0; 4.0 |]
                 let f = FixedSample.ofMoments 1e-17 m
