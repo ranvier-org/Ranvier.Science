@@ -214,13 +214,17 @@ let tests =
                     expectClose 1e-13 0.0 scott (Density.scottBandwidth xs) ("Scott, " + label))
 
             testCase "seeded resamples are equal on both targets" (fun () ->
-                // The literals were printed on .NET (net10.0, Release) from sample, 500 resamples and Generator.create 4;
-                // the mocha run must reproduce them bit for bit, since Generator.integer is exact on both targets.
-                let struct (ci, _) = Bootstrap.percentile 0.05 500 Array.average sample (Generator.create 4)
-                Expect.equal ci.Lower 9.619593195213923 "lower bound"
-                Expect.equal ci.Upper 10.130849775037131 "upper bound"
-                let struct (se, _) = Bootstrap.standardError 500 Array.average sample (Generator.create 4)
-                Expect.equal se 0.13206862661689628 "standard error")
+                // The sample is the integers 0 to 199 in the order i * 37 mod 200 (37 is coprime to 200): exact on every
+                // platform, with no exp, log or trigonometry, so the literals do not depend on the libm. The bootstrap
+                // itself uses Generator.integer (exact), type-7 quantiles and sums. The literals were printed on .NET
+                // (net10.0, Release, Windows) for 500 resamples and Generator.create 4; the mocha run must reproduce
+                // them bit for bit.
+                let exact = Array.init 200 (fun i -> float ((i * 37) % 200))
+                let struct (ci, _) = Bootstrap.percentile 0.05 500 Array.average exact (Generator.create 4)
+                Expect.equal ci.Lower 91.055125 "lower bound"
+                Expect.equal ci.Upper 107.255 "upper bound"
+                let struct (se, _) = Bootstrap.standardError 500 Array.average exact (Generator.create 4)
+                Expect.equal se 4.240561452445175 "standard error")
 
             testCase "the estimate of one point is a normal density" (fun () ->
                 let f = Density.gaussianKernel 0.5 [| 2.0 |]
