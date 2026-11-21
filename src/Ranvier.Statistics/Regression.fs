@@ -64,6 +64,31 @@ type LinearRegression =
         Residuals: float[]
     }
 
+/// <summary>A nonlinear least-squares fit from <c>Regression.curve</c>.</summary>
+/// <remarks>
+/// A field that is undefined for the data is NaN: the standard errors, covariance and <c>ResidualStandardError</c>
+/// where the degrees of freedom are 0, where the Jacobian at the fit is rank-deficient, and every field but
+/// <c>DegreesOfFreedom</c> where the data hold a NaN or infinity. <c>Converged</c> is <c>LeastSquares</c>' own flag
+/// and is false where the cost left the range of the doubles.
+/// </remarks>
+type CurveFit =
+    {
+        /// The fitted parameters, the best accepted by <c>LeastSquares.levenbergMarquardt</c>.
+        Parameters: float[]
+        /// The square root of each diagonal entry of <c>Covariance</c>.
+        StandardErrors: float[]
+        /// σ² (JᵀJ)⁻¹ at the fitted parameters, J the forward-difference Jacobian of the model.
+        Covariance: Matrix
+        /// The square root of 2 · cost / (n − p), with n the number of points and p the number of parameters.
+        ResidualStandardError: float
+        /// n − p.
+        DegreesOfFreedom: float
+        /// The iterations <c>LeastSquares.levenbergMarquardt</c> started.
+        Iterations: int
+        /// Whether <c>LeastSquares.levenbergMarquardt</c> met a convergence test, and the cost stayed in the doubles.
+        Converged: bool
+    }
+
 module internal RegressionSupport =
     let epsilon = 2.220446049250313e-16
 
@@ -518,3 +543,378 @@ module Regression =
                 power)
 
         linear design ys
+
+    /// <summary>
+    /// Nonlinear least squares of ys on a model of xs: <c>LeastSquares.levenbergMarquardt</c> with
+    /// <c>LeastSquaresOptions.standard</c> on the residuals yᵢ − model(p, xᵢ), from the initial parameters. Its
+    /// forward-difference Jacobian J (n points by p parameters) at the returned parameters gives the covariance
+    /// σ²(JᵀJ)⁻¹ = σ² R⁻¹R⁻ᵀ from <c>Matrix.qr</c> of J, never a Cholesky factor of JᵀJ, which would square the
+    /// condition number of J; σ² = 2 · Cost/(n − p). Each Jacobian column is first divided by an exact power of two
+    /// near its 2-norm and the covariance and standard errors multiplied back, as <c>linear</c> does for its design,
+    /// so the covariance does not depend on the units of the parameters (test "columns scaled by 2^15 and 2^-15 give
+    /// the unscaled fit with the errors rescaled"). The scaling does not widen what <c>LeastSquares</c> can fit: its
+    /// own rank test runs on the unscaled Jacobian (from documentation: <c>QrDecomposition.leastSquares</c>, whose
+    /// threshold is max(m, n)·ε·(the largest column norm)), so parameters whose columns differ in scale by about
+    /// 1/ε or more stop the fit with <c>Converged</c> false; rescale such a model. The model is called as
+    /// <c>model parameters x</c> with a fresh parameter array and must return a finite number. The fit is local: a
+    /// model with several minima gives the one the initial parameters lead to, and <c>Converged</c> is false where
+    /// <c>LeastSquares</c> stopped short of its tolerance, which bounds the change of the cost and of the parameters,
+    /// not their error. Where the columns of J are nearly dependent but not exactly, the standard errors are large
+    /// and carry no meaning (general knowledge).
+    /// NaN fields: the standard errors, covariance and residual standard error where n = p (no degrees of
+    /// freedom), and the standard errors and covariance where R has a zero or non-finite diagonal entry (a parameter
+    /// the model does not use: the test "a parameter the model ignores gives NaN errors and keeps the others") or
+    /// the Jacobian is not finite (test "a Jacobian that is not finite gives NaN errors and keeps the residual
+    /// standard error"). A NaN or infinite xs or ys entry gives every field NaN but <c>DegreesOfFreedom</c>,
+    /// <c>Converged</c> false and <c>Iterations</c> 0, before the model is called. <c>LeastSquares</c> minimises a
+    /// sum of squares: where its cost is not finite (squared residuals of about 1e308 in total, or a model that is
+    /// NaN at the start) or reads 0 over residuals that are not 0 (squares below about 1e-308, which underflow), the
+    /// fit is outside the doubles' range: the standard errors, covariance and residual standard error are NaN and
+    /// <c>Converged</c> is false, with the parameters as <c>LeastSquares</c> left them (test "residuals whose squares
+    /// leave the double range give NaN errors and no convergence"). Raises <c>ArgumentException</c> unless xs and ys
+    /// have one length, the initial parameters are not empty and there are at least as many points as parameters.
+    /// On the 21 points of the test "curve fitting recovers exact parameters" (y = 2.5 e^(−1.3x), from the start
+    /// (1, 1)) the parameters are within 1e-8 relative of the exact ones and the residual standard error is below
+    /// 1e-8; on the 10-point line of "a model linear in its parameters gives the linear regression" the parameters
+    /// are within 1e-8 and the standard errors and covariance within 1e-6 relative of <c>linear</c>'s, the
+    /// forward-difference Jacobian limiting them to about √ε ≈ 1.5e-8 (general knowledge). Cost: that of
+    /// <c>LeastSquares.levenbergMarquardt</c> plus O(n·p²).
+    /// </summary>
+    let curve (model: float[] -> float -> float) (initial: float[]) (xs: float[]) (ys: float[]) : CurveFit =
+        if xs.Length <> ys.Length then
+            raise (
+                ArgumentException(
+                    sprintf "curve needs xs and ys of one length; the lengths are %d and %d." xs.Length ys.Length
+                )
+            )
+
+        if initial.Length = 0 then
+            raise (ArgumentException "curve needs at least one parameter; the initial vector is empty.")
+
+        if xs.Length < initial.Length then
+            raise (
+                ArgumentException(
+                    sprintf "curve needs at least as many points as parameters; there are %d points and %d parameters." xs.Length initial.Length
+                )
+            )
+
+        let n = xs.Length
+        let p = initial.Length
+        let dof = float (n - p)
+
+        let undefined (parameters: float[]) (iterations: int) : CurveFit =
+            {
+                Parameters = parameters
+                StandardErrors = Array.create p nan
+                Covariance = Matrix.init p p (fun _ _ -> nan)
+                ResidualStandardError = nan
+                DegreesOfFreedom = dof
+                Iterations = iterations
+                Converged = false
+            }
+
+        if Array.exists (fun v -> not (isFinite v)) xs || Array.exists (fun v -> not (isFinite v)) ys then
+            undefined (Array.create p nan) 0
+        else
+            let result =
+                LeastSquares.levenbergMarquardt
+                    LeastSquaresOptions.standard
+                    (fun q -> Array.map2 (fun x y -> y - model q x) xs ys)
+                    initial
+
+            // A cost that overflowed, is NaN, or underflowed to 0 over residuals that are not 0, says nothing about the fit.
+            let outside =
+                not (isFinite result.Cost)
+                || (result.Cost = 0.0 && Array.exists (fun r -> r <> 0.0) result.Residuals)
+
+            if outside then
+                undefined result.Parameters result.Iterations
+            elif dof = 0.0 then
+                { undefined result.Parameters result.Iterations with Converged = result.Converged }
+            else
+                let sigma = sqrt result.Cost * sqrt (2.0 / dof)
+                let sigmaExponent = RegressionSupport.exponentNear [| sigma |]
+                let scaledSigma = RegressionSupport.scaleByPowerOfTwo sigma (-sigmaExponent)
+                let jacobian = result.Jacobian
+                let column (j: int) = Array.init n (fun i -> Matrix.get jacobian i j)
+                let finite = Seq.forall (fun j -> Array.forall isFinite (column j)) (seq { 0 .. p - 1 })
+
+                let covariance =
+                    if not finite then
+                        Error "the Jacobian is not finite."
+                    else
+                        let exponents = Array.init p (fun j -> RegressionSupport.exponentNear (column j))
+
+                        let scaled =
+                            Matrix.init n p (fun i j ->
+                                RegressionSupport.scaleByPowerOfTwo (Matrix.get jacobian i j) (-exponents[j]))
+
+                        RegressionSupport.unscaledCovariance (QrDecomposition.r (Matrix.qr scaled))
+                        |> Result.map (fun unscaled -> exponents, unscaled)
+
+                let covarianceAt (j: int) (l: int) =
+                    match covariance with
+                    | Error _ -> nan
+                    | Ok(exponents, unscaled) ->
+                        RegressionSupport.scaleByPowerOfTwo
+                            (scaledSigma * scaledSigma * Matrix.get unscaled j l)
+                            (2 * sigmaExponent - exponents[j] - exponents[l])
+
+                {
+                    Parameters = result.Parameters
+                    StandardErrors =
+                        Array.init p (fun j ->
+                            match covariance with
+                            | Error _ -> nan
+                            | Ok(exponents, unscaled) ->
+                                RegressionSupport.scaleByPowerOfTwo
+                                    (scaledSigma * sqrt (Matrix.get unscaled j j))
+                                    (sigmaExponent - exponents[j]))
+                    Covariance = Matrix.init p p covarianceAt
+                    ResidualStandardError = sigma
+                    DegreesOfFreedom = dof
+                    Iterations = result.Iterations
+                    Converged = result.Converged
+                }
+
+/// <summary>Pearson, Spearman and Kendall correlation of two samples, and the tests that it is 0.</summary>
+/// <remarks>
+/// Every function raises <c>ArgumentException</c> unless the two arrays have one length. A NaN or infinite entry, a
+/// constant sample (the correlation is 0/0) and fewer than 2 pairs give NaN, or a <c>TestResult</c> of NaN fields, and
+/// raise nothing. <c>pearsonTest</c> and <c>spearmanTest</c>, which have n − 2 degrees of freedom, also give NaN
+/// fields below 3 pairs, where R's <c>cor.test</c> raises; <c>kendallTest</c> has none and runs from 2 pairs. Where
+/// |r| = 1 the t statistic is ±∞, a one-sided p-value is 0 or 1 and the two-sided one is 0.
+/// </remarks>
+module Correlation =
+    let private isFinite (x: float) : bool = not (Double.IsNaN x || Double.IsInfinity x)
+
+    let private checkLengths (name: string) (xs: float[]) (ys: float[]) : unit =
+        if xs.Length <> ys.Length then
+            raise (
+                ArgumentException(
+                    sprintf "%s needs two samples of one length; the lengths are %d and %d." name xs.Length ys.Length
+                )
+            )
+
+    // Whether there are too few pairs or a value is not finite, so that the answer is NaN.
+    let private unusable (xs: float[]) (ys: float[]) : bool =
+        xs.Length < 2 || Array.exists (fun v -> not (isFinite v)) xs || Array.exists (fun v -> not (isFinite v)) ys
+
+    // Pearson r of the pairs from their comoments, each sample first divided by an exact power of two near its 2-norm
+    // (r does not change), so that the squares in the comoments neither overflow nor underflow.
+    let private pearsonOf (xs: float[]) (ys: float[]) : float =
+        let ex = RegressionSupport.exponentNear xs
+        let ey = RegressionSupport.exponentNear ys
+
+        Array.fold2
+            (fun m x y ->
+                Comoments.add
+                    true
+                    m
+                    (RegressionSupport.scaleByPowerOfTwo x (-ex))
+                    (RegressionSupport.scaleByPowerOfTwo y (-ey)))
+            Comoments.zero
+            xs
+            ys
+        |> Comoments.correlation
+
+    // The sizes of the runs of equal values in a sorted array.
+    let private runLengths (sorted: float[]) : float[] =
+        let runs = ResizeArray<float>()
+        let mutable start = 0
+
+        for i in 1 .. sorted.Length do
+            if i = sorted.Length || sorted[i] <> sorted[start] then
+                runs.Add(float (i - start))
+                start <- i
+
+        runs.ToArray()
+
+    // The number of pairs i < j with values[i] > values[j], by a bottom-up merge sort that takes the left element on a tie.
+    let private countInversions (values: float[]) : float =
+        let n = values.Length
+        let mutable source = Array.copy values
+        let mutable target: float[] = Array.zeroCreate n
+        let mutable inversions = 0.0
+        let mutable width = 1
+
+        while width < n do
+            let mutable low = 0
+
+            while low < n do
+                let middle = min (low + width) n
+                let high = min (low + 2 * width) n
+                let mutable i = low
+                let mutable j = middle
+                let mutable k = low
+
+                while i < middle || j < high do
+                    if j >= high || (i < middle && source[i] <= source[j]) then
+                        target[k] <- source[i]
+                        i <- i + 1
+                    else
+                        target[k] <- source[j]
+                        inversions <- inversions + float (middle - i)
+                        j <- j + 1
+
+                    k <- k + 1
+
+                low <- low + 2 * width
+
+            let swap = source
+            source <- target
+            target <- swap
+            width <- width * 2
+
+        inversions
+
+    // Knight's counts for finite samples of at least 2 pairs: S = concordant − discordant, n0 − n1 and n0 − n2 (n0 all
+    // pairs, n1 the pairs tied in x, n2 those tied in y), and the tie-group sizes of x and of y.
+    let private kendallCounts (xs: float[]) (ys: float[]) : struct (float * float * float * float[] * float[]) =
+        let n = xs.Length
+
+        let order =
+            Array.init n id
+            |> Array.sortWith (fun a b ->
+                let c = compare xs[a] xs[b]
+                if c <> 0 then c else compare ys[a] ys[b])
+
+        let sortedX = Array.map (fun i -> xs[i]) order
+        let sortedY = Array.map (fun i -> ys[i]) order
+        let tx = runLengths sortedX
+        let ty = runLengths (Array.sort ys)
+
+        // Runs of pairs equal in both coordinates, within the order by x then y.
+        let joint = ResizeArray<float>()
+        let mutable start = 0
+
+        for i in 1..n do
+            if i = n || sortedX[i] <> sortedX[start] || sortedY[i] <> sortedY[start] then
+                joint.Add(float (i - start))
+                start <- i
+
+        let pairs (runs: seq<float>) = Seq.sumBy (fun t -> t * (t - 1.0) / 2.0) runs
+        let n0 = float n * (float n - 1.0) / 2.0
+        let discordant = countInversions sortedY
+        let s = n0 - pairs tx - pairs ty + pairs joint - 2.0 * discordant
+        struct (s, n0 - pairs tx, n0 - pairs ty, tx, ty)
+
+    // R's variance of S under independence, with the tie corrections (stats/R/cor.test.R, lines 113 to 131).
+    let private varianceOfS (n: float) (tx: float[]) (ty: float[]) : float =
+        let total (f: float -> float) (runs: float[]) = Array.sumBy f runs
+        let pair t = t * (t - 1.0)
+        let triple t = t * (t - 1.0) * (t - 2.0)
+        let weighted t = t * (t - 1.0) * (2.0 * t + 5.0)
+        let v0 = n * (n - 1.0) * (2.0 * n + 5.0)
+        let v1 = total pair tx * total pair ty
+        let v2 = total triple tx * total triple ty
+        // v2 is 0 below 3 pairs, where every tie group has at most 2 members, and the divisor would be 0 at n = 2.
+        let third = if n > 2.0 then v2 / (9.0 * n * (n - 1.0) * (n - 2.0)) else 0.0
+        (v0 - total weighted tx - total weighted ty) / 18.0 + v1 / (2.0 * n * (n - 1.0)) + third
+
+    // The t statistic of a correlation on dof degrees of freedom, with (1 − r)(1 + r) for 1 − r² so that it does not
+    // cancel near |r| = 1.
+    let private tStatistic (r: float) (dof: float) : float =
+        r * sqrt (dof / ((1.0 - r) * (1.0 + r)))
+
+    let private tTest (alternative: Alternative) (r: float) (n: int) : TestResult =
+        if Double.IsNaN r || n < 3 then
+            TestSupport.nanResult
+        else
+            let dof = float (n - 2)
+            TestSupport.tResult alternative (tStatistic r dof) dof
+
+    /// <summary>
+    /// Pearson's product-moment correlation, <c>Comoments.correlation</c> of the pairs folded with compensation: C /
+    /// (√M2x · √M2y), clamped to [−1, 1]: exactly linear data give ±1 or a value a few ulps inside it (0.9999999999999998
+    /// for the integers 1 to 5 against 2x + 1; measured here, the test "perfect correlation gives an infinite t and a
+    /// p-value of 0"). Each sample is
+    /// first divided by an exact power of two near its 2-norm, which leaves r unchanged and keeps the squares of the
+    /// comoments from overflowing or underflowing (test "Pearson at the scales of 1e200 and 1e-200"). NaN for a
+    /// constant sample, fewer than 2 pairs or a non-finite entry. Cost O(n).
+    /// </summary>
+    let pearson (xs: float[]) (ys: float[]) : float =
+        checkLengths "pearson" xs ys
+        if unusable xs ys then nan else pearsonOf xs ys
+
+    /// <summary>
+    /// Spearman's rank correlation: Pearson's r of the average ranks of each sample (<c>Describe.ranks</c>, tied values
+    /// sharing the mean of their positions), which is the coefficient with the tie correction built in. A NaN is
+    /// checked before ranking, which raises on NaN, so a NaN entry gives NaN. NaN for a constant sample (all ranks
+    /// equal), fewer than 2 pairs or a non-finite entry. Cost O(n log n).
+    /// </summary>
+    let spearman (xs: float[]) (ys: float[]) : float =
+        checkLengths "spearman" xs ys
+        if unusable xs ys then nan else pearsonOf (Describe.ranks xs) (Describe.ranks ys)
+
+    /// <summary>
+    /// Kendall's tau-b, (C − D)/√((n₀ − n₁)(n₀ − n₂)), with C and D the concordant and discordant pairs, n₀ = n(n − 1)/2
+    /// and n₁, n₂ the pairs tied in x and in y, by Knight's algorithm (Knight, "A computer method for calculating
+    /// Kendall's tau with ungrouped data", JASA 61, 1966; general knowledge): sort by x then y and count the
+    /// inversions of y in a merge sort. The counts are exact while n(n − 1)/2 is below 2⁵³, about 1.3e8 pairs. NaN
+    /// where every x or every y is tied (n₀ − n₁ or n₀ − n₂ is 0), for fewer than 2 pairs or a non-finite entry.
+    /// Cost O(n log n).
+    /// </summary>
+    let kendall (xs: float[]) (ys: float[]) : float =
+        checkLengths "kendall" xs ys
+
+        if unusable xs ys then
+            nan
+        else
+            let struct (s, d1, d2, _, _) = kendallCounts xs ys
+            if d1 = 0.0 || d2 = 0.0 then nan else s / sqrt (d1 * d2)
+
+    /// <summary>
+    /// The test that Pearson's correlation is 0, for normally distributed pairs: t = r√((n − 2)/(1 − r²)) on n − 2
+    /// degrees of freedom, the p-value from the Student t distribution on the alternative's side (two-sided is twice
+    /// the smaller tail, at most 1), as R's <c>cor.test</c> does. At |r| = 1 the statistic is ±∞ and the p-values are
+    /// those of an infinite statistic. NaN fields below 3 pairs, for a constant sample and for a non-finite entry.
+    /// Statistic and p-value within 1e-12 relative of exact fractions for the 8 pairs of the test "Pearson,
+    /// Spearman and Kendall against exact fractions" (measured here: that test). Cost O(n).
+    /// </summary>
+    let pearsonTest (alternative: Alternative) (xs: float[]) (ys: float[]) : TestResult =
+        checkLengths "pearsonTest" xs ys
+        if unusable xs ys then TestSupport.nanResult else tTest alternative (pearsonOf xs ys) xs.Length
+
+    /// <summary>
+    /// The test that Spearman's correlation is 0 by the t approximation: t = r√((n − 2)/(1 − r²)) on n − 2 degrees of
+    /// freedom, with r the Spearman correlation: R's <c>cor.test</c> for <c>method = "spearman"</c> uses that
+    /// approximation only where it does not use the exact permutation distribution of S, which it does by default
+    /// for n up to 1290 without ties (from documentation: stats/R/cor.test.R at trunk, lines 143 to 176, read there);
+    /// this does not use it.
+    /// NaN fields below 3 pairs, for a constant sample and for a non-finite entry. Statistic and p-value within 1e-12
+    /// relative of exact fractions for the tied 8 pairs of the test "Spearman with ties against the reference". Cost
+    /// O(n log n).
+    /// </summary>
+    let spearmanTest (alternative: Alternative) (xs: float[]) (ys: float[]) : TestResult =
+        checkLengths "spearmanTest" xs ys
+
+        if unusable xs ys then
+            TestSupport.nanResult
+        else
+            tTest alternative (pearsonOf (Describe.ranks xs) (Describe.ranks ys)) xs.Length
+
+    /// <summary>
+    /// The test that Kendall's tau is 0 by the normal approximation: z = S/√var(S), S = C − D, with R's variance of S
+    /// under independence corrected for ties in x and in y (stats/R/cor.test.R at trunk, lines 113 to 131, read there),
+    /// no continuity correction, and the p-value from the standard normal on the alternative's side. This is R's
+    /// <c>cor.test(method = "kendall", exact = FALSE)</c>; R's default for n below 50 without ties is the exact
+    /// distribution of S (from documentation: stats/R/cor.test.R, line 93), which this does not use. The degrees of freedom are NaN. NaN fields for a constant sample,
+    /// fewer than 2 pairs and a non-finite entry. Cost O(n log n).
+    /// </summary>
+    let kendallTest (alternative: Alternative) (xs: float[]) (ys: float[]) : TestResult =
+        checkLengths "kendallTest" xs ys
+
+        if unusable xs ys then
+            TestSupport.nanResult
+        else
+            let struct (s, d1, d2, tx, ty) = kendallCounts xs ys
+
+            if d1 = 0.0 || d2 = 0.0 then
+                TestSupport.nanResult
+            else
+                let z = s / sqrt (varianceOfS (float xs.Length) tx ty)
+
+                { TestSupport.nanResult with
+                    Statistic = z
+                    PValue = PValue.normal alternative z }

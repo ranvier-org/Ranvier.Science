@@ -883,4 +883,155 @@ let tests =
                 let plain = Regression.simple (comoments x1 y)
                 expectClose 1e-12 0.0 plain.Slope inside.Slope "slope at 1e150"
                 expectClose 1e-12 0.0 plain.RSquared inside.RSquared "R squared at 1e150")
+
+            testCase "curve fitting recovers exact parameters" (fun () ->
+                // ys = 2.5 e^(-1.3 x) exactly, so the minimum is at (2.5, 1.3) with zero residuals.
+                let xs = Array.init 21 (fun i -> 0.25 * float i)
+                let ys = Array.map (fun x -> 2.5 * exp (-1.3 * x)) xs
+                let fit = Regression.curve (fun p x -> p[0] * exp (-p[1] * x)) [| 1.0; 1.0 |] xs ys
+                expectClose 1e-8 0.0 2.5 fit.Parameters[0] "amplitude"
+                expectClose 1e-8 0.0 1.3 fit.Parameters[1] "rate"
+                Expect.isTrue fit.Converged "converged"
+                Expect.isLessThan fit.ResidualStandardError 1e-8 "residual standard error"
+                Expect.equal fit.DegreesOfFreedom 19.0 "degrees of freedom is n - p"
+                Expect.isGreaterThan fit.Iterations 0 "iterations")
+
+            testCase "a model linear in its parameters gives the linear regression" (fun () ->
+                let xs = [| 1.0 .. 10.0 |]
+                let ys = [| 6.0; 5.0; 9.0; 7.0; 13.0; 18.0; 11.0; 15.0; 16.0; 13.0 |]
+                let fit = Regression.curve (fun p x -> p[0] + p[1] * x) [| 0.0; 0.0 |] xs ys
+                let reference = fitOf (designOf [| Array.create 10 1.0; xs |]) ys
+                Expect.isTrue fit.Converged "converged"
+
+                for j in 0..1 do
+                    expectClose 1e-8 0.0 reference.Coefficients[j] fit.Parameters[j] (sprintf "parameter %d" j)
+                    // The forward-difference Jacobian costs about 1e-8 of relative accuracy in the covariance.
+                    expectClose 1e-6 0.0 reference.StandardErrors[j] fit.StandardErrors[j] (sprintf "standard error %d" j)
+
+                    for k in 0..1 do
+                        expectClose
+                            1e-6
+                            0.0
+                            (Matrix.get reference.Covariance j k)
+                            (Matrix.get fit.Covariance j k)
+                            (sprintf "covariance %d %d" j k)
+
+                expectClose 1e-8 0.0 reference.ResidualStandardError fit.ResidualStandardError "residual standard error"
+                Expect.equal fit.DegreesOfFreedom reference.DegreesOfFreedom "degrees of freedom is n - 2 (identity)"
+                Expect.equal fit.DegreesOfFreedom 8.0 "n - 2")
+
+            testCase "curve arguments out of range raise" (fun () ->
+                let line (p: float[]) (x: float) = p[0] + p[1] * x
+
+                raisesArgument "xs and ys of different lengths" (fun () ->
+                    Regression.curve line [| 0.0; 0.0 |] [| 1.0; 2.0; 3.0 |] [| 1.0; 2.0 |] |> ignore)
+
+                raisesArgument "fewer points than parameters" (fun () ->
+                    Regression.curve line [| 0.0; 0.0 |] [| 1.0 |] [| 1.0 |] |> ignore)
+
+                raisesArgument "no parameters" (fun () ->
+                    Regression.curve (fun _ x -> x) [||] [| 1.0; 2.0 |] [| 1.0; 2.0 |] |> ignore))
+
+            testCase "a NaN or infinite observation gives NaN fields and raises nothing" (fun () ->
+                let line (p: float[]) (x: float) = p[0] + p[1] * x
+                let xs = [| 1.0; 2.0; 3.0; 4.0 |]
+                let ys = [| 2.0; 4.0; 5.0; 9.0 |]
+
+                let cases =
+                    [|
+                        "NaN x", Array.mapi (fun i v -> if i = 1 then nan else v) xs, ys
+                        "infinite x", Array.mapi (fun i v -> if i = 2 then infinity else v) xs, ys
+                        "NaN y", xs, Array.mapi (fun i v -> if i = 0 then nan else v) ys
+                        "infinite y", xs, Array.mapi (fun i v -> if i = 3 then -infinity else v) ys
+                    |]
+
+                for (name, badX, badY) in cases do
+                    let fit = Regression.curve line [| 0.0; 0.0 |] badX badY
+                    Expect.isTrue (Array.forall isNaN fit.Parameters) (name + ": parameters")
+                    Expect.isTrue (Array.forall isNaN fit.StandardErrors) (name + ": standard errors")
+                    Expect.isTrue (isNaN (Matrix.get fit.Covariance 0 1)) (name + ": covariance")
+                    Expect.isTrue (isNaN fit.ResidualStandardError) (name + ": residual standard error")
+                    Expect.isFalse fit.Converged (name + ": converged")
+                    Expect.equal fit.Iterations 0 (name + ": iterations")
+                    Expect.equal fit.DegreesOfFreedom 2.0 (name + ": degrees of freedom"))
+
+            testCase "as many points as parameters fit exactly with NaN errors" (fun () ->
+                let fit = Regression.curve (fun p x -> p[0] + p[1] * x) [| 0.0; 0.0 |] [| 1.0; 3.0 |] [| 5.0; 11.0 |]
+                Expect.equal fit.DegreesOfFreedom 0.0 "degrees of freedom"
+                expectClose 1e-8 0.0 2.0 fit.Parameters[0] "intercept"
+                expectClose 1e-8 0.0 3.0 fit.Parameters[1] "slope"
+                Expect.isTrue (isNaN fit.ResidualStandardError) "residual standard error"
+                Expect.isTrue (Array.forall isNaN fit.StandardErrors) "standard errors"
+                Expect.isTrue (isNaN (Matrix.get fit.Covariance 1 1)) "covariance")
+
+            testCase "a parameter the model ignores gives NaN errors and keeps the others" (fun () ->
+                // The second Jacobian column is exactly 0, so R has a zero on its diagonal: no covariance exists.
+                let xs = [| 1.0 .. 6.0 |]
+                let ys = [| 3.1; 4.9; 7.2; 8.8; 11.1; 13.0 |]
+                let fit = Regression.curve (fun p x -> p[0] * x + 0.0 * p[1]) [| 1.0; 1.0 |] xs ys
+                Expect.isTrue (isNaN fit.StandardErrors[0] && isNaN fit.StandardErrors[1]) "standard errors"
+                Expect.isTrue (isNaN (Matrix.get fit.Covariance 0 0)) "covariance"
+                Expect.isFalse (isNaN fit.ResidualStandardError) "residual standard error is still defined"
+                // Least squares through the origin: Σxy / Σx² (the normal equation of one parameter).
+                let slope = Array.sum (Array.map2 (*) xs ys) / Array.sumBy (fun x -> x * x) xs
+                expectClose 1e-6 0.0 slope fit.Parameters[0] "the slope through the origin")
+
+            testCase "a Jacobian that is not finite gives NaN errors and keeps the residual standard error" (fun () ->
+                // The model is NaN for any p above its start, so every forward-difference column is NaN, while the
+                // residuals at the start are finite: the fit stops there, short of convergence.
+                let fit =
+                    Regression.curve
+                        (fun p x -> if p[0] > 1.0 then nan else p[0] * x)
+                        [| 1.0 |]
+                        [| 1.0; 2.0; 3.0 |]
+                        [| 2.0; 3.0; 7.0 |]
+
+                Expect.isFalse fit.Converged "converged"
+                Expect.equal fit.Iterations 0 "iterations"
+                Expect.equal fit.Parameters [| 1.0 |] "parameters stay at the start"
+                Expect.isTrue (isNaN fit.StandardErrors[0]) "standard error"
+                Expect.isTrue (isNaN (Matrix.get fit.Covariance 0 0)) "covariance"
+                // Residuals 1, 1, 4: cost 9, σ = √(2 · 9 / 2) = 3.
+                expectClose 1e-14 0.0 3.0 fit.ResidualStandardError "residual standard error")
+
+            testCase "residuals whose squares leave the double range give NaN errors and no convergence" (fun () ->
+                let line (p: float[]) (x: float) = p[0] * x
+                let xs = [| 1.0 .. 8.0 |]
+                let shape = [| 0.3; -0.2; 0.5; -0.4; 0.1; 0.2; -0.3; 0.4 |]
+                let noisy (scale: float) = Array.mapi (fun i x -> scale * (2.0 * x + shape[i])) xs
+
+                let allNaN (message: string) (fit: CurveFit) =
+                    Expect.isTrue (isNaN fit.ResidualStandardError) (message + ": residual standard error")
+                    Expect.isTrue (isNaN fit.StandardErrors[0]) (message + ": standard error")
+                    Expect.isTrue (isNaN (Matrix.get fit.Covariance 0 0)) (message + ": covariance")
+                    Expect.isFalse fit.Converged (message + ": converged")
+
+                // Squares of 1e200 overflow: the cost is infinite and no step lowers it.
+                allNaN "1e200" (Regression.curve line [| 1.0 |] xs (noisy 1e200))
+                // From the start p = 2e-170, the residuals are about 1e-171 and their squares underflow: the cost reads 0
+                // with non-zero residuals.
+                allNaN "1e-170" (Regression.curve line [| 2e-170 |] xs (noisy 1e-170))
+                // A model that is NaN at the start has no cost at all.
+                allNaN "NaN model" (Regression.curve (fun _ _ -> nan) [| 1.0 |] xs (noisy 1.0)))
+
+            testCase "columns scaled by 2^15 and 2^-15 give the unscaled fit with the errors rescaled" (fun () ->
+                // The model p0 · 2^-15 + p1 · x · 2^15 is the line with p0 and p1 multiplied by 2^15 and 2^-15 (powers of
+                // two, exact), so its parameters and standard errors are the line's times 2^15 and 2^-15 and its
+                // covariance entry the line's (the factors cancel). The Jacobian columns differ in scale by 2^30.
+                let xs = [| 1.0 .. 10.0 |]
+                let ys = [| 6.0; 5.0; 9.0; 7.0; 13.0; 18.0; 11.0; 15.0; 16.0; 13.0 |]
+                let low = power -15
+                let high = power 15
+                let plain = Regression.curve (fun p x -> p[0] + p[1] * x) [| 1.0; 1.0 |] xs ys
+
+                let scaled =
+                    Regression.curve (fun p x -> p[0] * low + p[1] * (x * high)) [| high; low |] xs ys
+
+                Expect.isTrue (plain.Converged && scaled.Converged) "converged"
+                expectClose 1e-6 0.0 plain.Parameters[0] (scaled.Parameters[0] * low) "intercept"
+                expectClose 1e-6 0.0 plain.Parameters[1] (scaled.Parameters[1] * high) "slope"
+                expectClose 1e-6 0.0 plain.StandardErrors[0] (scaled.StandardErrors[0] * low) "intercept standard error"
+                expectClose 1e-6 0.0 plain.StandardErrors[1] (scaled.StandardErrors[1] * high) "slope standard error"
+                expectClose 1e-6 0.0 (Matrix.get plain.Covariance 0 1) (Matrix.get scaled.Covariance 0 1) "covariance"
+                expectClose 1e-6 0.0 plain.ResidualStandardError scaled.ResidualStandardError "residual standard error")
         ]

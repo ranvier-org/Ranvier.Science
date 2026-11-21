@@ -147,6 +147,14 @@ Methods:
                 of R's summary.lm). The standard errors are Decimal.sqrt of the exact covariance diagonal, t = b / se,
                 and the two-sided p-value 2 min(cdf, survival) of the Student t at n - p degrees of freedom from
                 student_t_cdf and student_t_sf.
+    correlation
+            Pearson's r from the exact sums as a fraction (r^2 = C^2 / (Sxx Syy), the sign of C, the root by
+            Decimal.sqrt), t = r sqrt((n - 2) / (1 - r^2)) with t^2 an exact fraction, and the Student t tails at n - 2
+            degrees of freedom; Spearman's r the same on the average ranks (exact fractions, average_ranks, independent
+            of Describe.ranks); Kendall's tau-b = (C - D) / sqrt((n0 - n1)(n0 - n2)) counted over all pairs, with n0 =
+            n(n - 1)/2 and n1, n2 the pairs tied in x and in y, and z = (C - D) / sqrt(var S), var S the tie-corrected
+            variance of R's cor.test.R (read as the raw file at trunk, lines 113 to 131): (v0 - vt - vu)/18 +
+            v1/(2n(n - 1)) + v2/(9n(n - 1)(n - 2)), with no continuity correction, and the normal tails.
 
 For real w > 0 the error of each truncated series is at most its first omitted term in magnitude (general knowledge:
 DLMF 5.11(ii), not read here); the script asserts that term is below 1e-60, which holds for every w >= 40.
@@ -2326,6 +2334,78 @@ def section_regression() -> None:
         emit_floats(name + "Covariance", regression_floats(args, "covariance"))
 
 
+COR_X = [1, 2, 3, 4, 5, 6, 7, 8]
+COR_Y = [2, 1, 4, 3, 7, 8, 6, 5]
+COR_TIED_X = [1, 2, 2, 3, 4, 5, 5, 6]
+COR_TIED_Y = [1, 3, 2, 2, 5, 4, 6, 6]
+
+
+def pearson_exact(xs, ys) -> tuple[int, Fraction]:
+    """(the sign of the co-moment, r^2) of Pearson's correlation, both exact."""
+    n = len(xs)
+    mx, my = sum(xs, Fraction(0)) / n, sum(ys, Fraction(0)) / n
+    c = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    sign = (c > 0) - (c < 0)
+    return sign, c * c / (sxx * syy)
+
+
+def correlation_t_row(xs, ys) -> tuple:
+    """(r, t, Less, Greater, TwoSided) of Pearson's correlation of the exact values, the t on n - 2 degrees of
+    freedom. The sign carries to r and t; t^2 = r^2 (n - 2) / (1 - r^2) is an exact fraction."""
+    n = len(xs)
+    sign, r2 = pearson_exact([Fraction(v) for v in xs], [Fraction(v) for v in ys])
+    r = sign * dec(r2).sqrt()
+    t = sign * dec(r2 * (n - 2) / (1 - r2)).sqrt()
+    return (r, t) + t_tails(n - 2, t)
+
+
+def spearman_row(xs, ys) -> tuple:
+    return correlation_t_row(average_ranks([Fraction(v) for v in xs]), average_ranks([Fraction(v) for v in ys]))
+
+
+def kendall_row(xs, ys) -> tuple:
+    """(tau-b, z, Less, Greater, TwoSided) by counting every pair, z = S / sqrt(var S), S = C - D."""
+    n = len(xs)
+    s = n0 = n1 = n2 = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx, dy = xs[i] - xs[j], ys[i] - ys[j]
+            n0 += 1
+            if dx == 0:
+                n1 += 1
+            if dy == 0:
+                n2 += 1
+            s += (dx * dy > 0) - (dx * dy < 0)
+
+    def groups(values):
+        return [values.count(v) for v in set(values)]
+
+    tx, ty = groups(xs), groups(ys)
+    v0 = n * (n - 1) * (2 * n + 5)
+    vt = sum(t * (t - 1) * (2 * t + 5) for t in tx)
+    vu = sum(t * (t - 1) * (2 * t + 5) for t in ty)
+    v1 = sum(t * (t - 1) for t in tx) * sum(t * (t - 1) for t in ty)
+    v2 = sum(t * (t - 1) * (t - 2) for t in tx) * sum(t * (t - 1) * (t - 2) for t in ty)
+    variance = Fraction(v0 - vt - vu, 18) + Fraction(v1, 2 * n * (n - 1)) + Fraction(v2, 9 * n * (n - 1) * (n - 2))
+    tau = Decimal(s) / (Decimal((n0 - n1) * (n0 - n2))).sqrt()
+    z = Decimal(s) / dec(variance).sqrt()
+    return (tau, z) + tails(normal_cdf(z), normal_sf(z))
+
+
+def section_correlation() -> None:
+    print("// python -I tests/reference/special.py correlation")
+    print("// each row: the correlation, the statistic (t on n - 2 degrees of freedom, or z for Kendall), then the")
+    print("// Less, Greater and TwoSided p-values")
+    print()
+    check_distribution_helpers()
+    emit("pearsonCases", [row_values(correlation_t_row, COR_X, COR_Y)])
+    emit("spearmanTiedCases", [row_values(spearman_row, COR_TIED_X, COR_TIED_Y)])
+    emit("kendallCases", [row_values(kendall_row, COR_X, COR_Y)])
+    emit("kendallTiedCases", [row_values(kendall_row, COR_TIED_X, COR_TIED_Y)])
+
+
 SECTIONS = {
     "gamma": section_gamma,
     "erf": section_erf,
@@ -2348,6 +2428,7 @@ SECTIONS = {
     "counts": section_counts,
     "ranks": section_ranks,
     "regression": section_regression,
+    "correlation": section_correlation,
 }
 
 if __name__ == "__main__":
