@@ -1055,6 +1055,17 @@ let tests =
                 let fit = Regression.curve line [| 1e-14 |] xs ys
                 expectClose 1e-8 0.0 slope fit.Parameters[0] "slope from 1e-14")
 
+            testCase "a start too far from the fitted magnitude shows as NaN standard errors" (fun () ->
+                // At p = 1e-34 a relative step of 1.5e-8 changes no residual (about 1e-23) in the doubles, so the
+                // Jacobian column is exactly 0: the fit stays at the start and no standard error exists.
+                let xs = [| 1.0 .. 8.0 |]
+                let shape = [| 0.3; -0.2; 0.5; -0.4; 0.1; 0.2; -0.3; 0.4 |]
+                let ys = Array.mapi (fun i x -> 1e-23 * (2.0 * x + shape[i])) xs
+                let fit = Regression.curve (fun p x -> p[0] * x) [| 1e-34 |] xs ys
+                Expect.equal fit.Parameters [| 1e-34 |] "the parameter stays at the start"
+                Expect.isTrue (isNaN fit.StandardErrors[0]) "standard error"
+                Expect.isTrue (isNaN (Matrix.get fit.Covariance 0 0)) "covariance")
+
             testCase "an exponential of amplitude 1.38e-23 is fitted" (fun () ->
                 let xs = Array.init 21 (fun i -> 0.25 * float i)
                 let ys = Array.map (fun x -> 1.38e-23 * exp (-1.3 * x)) xs

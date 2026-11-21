@@ -574,8 +574,11 @@ module Regression =
     /// the start, not absolute (tests "parameters of 1e-23 are fitted, not left at the start" and "an exponential of
     /// amplitude 1.38e-23 is fitted"). Where a fitted parameter's power of two differs from its start's by more than
     /// 2^20 the fit is restarted once from the fitted values scaled afresh, and <c>Iterations</c> counts both runs. A
-    /// start more than about 1e8 times the fitted magnitude can still read as flat to the forward difference, which
-    /// steps by a relative 1.5e-8 of the parameter (general knowledge): start within a few orders of magnitude.
+    /// start far below the fitted magnitude can still read as flat to the forward difference, which steps by a
+    /// relative 1.5e-8 of the parameter (general knowledge): then a Jacobian column is exactly 0 and the standard
+    /// errors are NaN, which is how such a start shows (test "a start too far from the fitted magnitude shows as NaN
+    /// standard errors": a slope of 2e-23 from a start of 1e-34 stays at the start, with <c>Converged</c> true).
+    /// Start within a few orders of magnitude of the fitted value.
     /// <c>Parameters</c> and <c>Converged</c> are kept where the parameters are not identified, but are meaningful
     /// only as the combination the data fix.
     /// NaN fields: the standard errors, covariance and residual standard error where n = p (no degrees of
@@ -749,7 +752,7 @@ module Regression =
 /// Every function raises <c>ArgumentException</c> unless the two arrays have one length. A NaN or infinite entry, a
 /// constant sample (the correlation is 0/0) and fewer than 2 pairs give NaN, or a <c>TestResult</c> of NaN fields, and
 /// raise nothing. <c>pearsonTest</c> and <c>spearmanTest</c>, which have n − 2 degrees of freedom, also give NaN
-/// fields below 3 pairs, where R's <c>cor.test</c> raises, and <c>kendallTest</c> below 4 (see there). Where
+/// fields below 3 pairs, where R's <c>cor.test</c> raises. Where
 /// |r| = 1 the t statistic is ±∞, a one-sided p-value is 0 or 1 and the two-sided one is 0.
 /// </remarks>
 module Correlation =
@@ -967,15 +970,17 @@ module Correlation =
     /// no continuity correction, and the p-value from the standard normal on the alternative's side. This is R's
     /// <c>cor.test(method = "kendall", exact = FALSE)</c>; R's default for n below 50 without ties is the exact
     /// distribution of S (from documentation: stats/R/cor.test.R, line 93), which this does not use. The normal
-    /// approximation is poor at a handful of pairs (for perfect agreement it gives a two-sided p of 0.317 at n = 2 and
-    /// 0.117 at n = 3, where the exact values are 1 and 1/3; general knowledge, by counting the permutations), and at
-    /// n = 2 R's variance is 0/0: the result has NaN fields below 4 pairs. The degrees of freedom are NaN. NaN fields
-    /// also for a constant sample and for a non-finite entry. Cost O(n log n).
+    /// approximation is poor at small n: for three pairs in perfect agreement it gives a two-sided p of 0.117 where
+    /// the exact value is 1/3 (general knowledge, by enumerating the 6 orderings; the approximation's value is pinned
+    /// by the test "tests on two and three points"). The statistic is undefined at 2 pairs, where R's variance of S is
+    /// 0/0, so the result has NaN fields below 3 pairs. The degrees of freedom are NaN. NaN fields also for a constant
+    /// sample and for a non-finite entry. Cost O(n log n).
     /// </summary>
     let kendallTest (alternative: Alternative) (xs: float[]) (ys: float[]) : TestResult =
         checkLengths "kendallTest" xs ys
 
-        if unusable xs ys || xs.Length < 4 then
+        // At 2 pairs R's variance of S is 0/0 and the statistic is undefined.
+        if unusable xs ys || xs.Length < 3 then
             TestSupport.nanResult
         else
             let struct (s, d1, d2, tx, ty) = kendallCounts xs ys

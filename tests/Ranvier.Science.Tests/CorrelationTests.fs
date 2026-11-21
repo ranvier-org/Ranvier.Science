@@ -181,7 +181,7 @@ let tests =
                         expectClose 1e-14 0.0 (s / sqrt (d1 * d2)) tau (sprintf "n = %d tau-b" n)
                         let k = Correlation.kendallTest TwoSided xs ys
 
-                        if n < 4 then
+                        if n < 3 then
                             allNaN (sprintf "n = %d test" n) k
                         else
                             expectClose 1e-12 0.0 (s / sqrt (varianceOfS xs ys)) k.Statistic (sprintf "n = %d z" n))
@@ -207,16 +207,20 @@ let tests =
                 Expect.equal (Correlation.spearmanTest TwoSided up line).Statistic infinity "Spearman t")
 
             testCase "tests on two and three points" (fun () ->
-                // Two points give r = ±1 but no degrees of freedom: the t tests are NaN. Kendall's normal approximation
-                // gives p = 0.317 at n = 2 and 0.117 at n = 3 for perfect agreement, where the exact values are 1 and
-                // 1/3 (all 2 and 6 orderings counted), so kendallTest is NaN below 4 pairs.
+                // Two points give r = 1 or -1 but no degrees of freedom: the t tests are NaN, and Kendall's variance of S
+                // is 0/0 (R's), so its test is NaN. At three points Kendall's normal approximation is kept: for perfect
+                // agreement S = 3 and var S = 3 * 2 * 11 / 18, so z = 3 / sqrt(11/3) and p = erfc(z / sqrt 2), which is
+                // 0.117 where the exact value is 1/3 (the 6 orderings counted).
                 expectClose 1e-15 0.0 1.0 (Correlation.pearson [| 1.0; 2.0 |] [| 5.0; 9.0 |]) "r"
                 allNaN "Pearson" (Correlation.pearsonTest TwoSided [| 1.0; 2.0 |] [| 5.0; 9.0 |])
                 allNaN "Spearman" (Correlation.spearmanTest TwoSided [| 1.0; 2.0 |] [| 5.0; 9.0 |])
                 allNaN "Kendall, 2 pairs" (Correlation.kendallTest TwoSided [| 1.0; 2.0 |] [| 5.0; 9.0 |])
                 expectClose 1e-15 0.0 1.0 (Correlation.kendall [| 1.0; 2.0 |] [| 5.0; 9.0 |]) "tau at 2 pairs"
-                allNaN "Kendall, 3 pairs" (Correlation.kendallTest TwoSided [| 1.0; 2.0; 3.0 |] [| 5.0; 9.0; 10.0 |])
-                // From 3 pairs the t tests exist (1 degree of freedom), and from 4 Kendall's.
+                let three = Correlation.kendallTest TwoSided [| 1.0; 2.0; 3.0 |] [| 5.0; 9.0; 10.0 |]
+                // python -I -c "import math; z = 3 / math.sqrt(11/3); print(z, math.erfc(z / math.sqrt(2)))"
+                expectClose 1e-12 0.0 1.5666989036012806 three.Statistic "z at 3 pairs"
+                expectClose 1e-12 0.0 0.11718508719813807 three.PValue "p at 3 pairs"
+                // From 3 pairs the t tests exist (1 degree of freedom).
                 Expect.equal (Correlation.pearsonTest TwoSided [| 1.0; 2.0; 3.0 |] [| 5.0; 9.0; 4.0 |]).DegreesOfFreedom 1.0 "3 pairs"
                 Expect.isFalse (isNaN (Correlation.kendallTest TwoSided [| 1.0; 2.0; 3.0; 4.0 |] [| 5.0; 9.0; 4.0; 6.0 |]).Statistic) "4 pairs")
 
