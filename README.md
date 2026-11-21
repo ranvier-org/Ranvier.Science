@@ -2,44 +2,62 @@
 
 Numerics, quantities and statistics libraries built on the Ranvier reactive graph.
 
-This slice was built to answer design questions. It builds on the published `Ranvier` 0.2.0 package and is not a
-finished product or a stable API.
+Packages of numerics, quantities and statistics built on the Ranvier reactive graph. Version 0.2.0 builds on the
+published `Ranvier` 0.2.1 package. The interfaces will change before 1.0.
 
 ## Packages
 
-Three packages, each at version 0.1.0:
+Three packages, each at version 0.2.0:
 
-- `Ranvier.Numerics`: compensated sums, moments, float policies and maintained aggregates, tolerances, and a
-  pseudo-random generator.
-- `Ranvier.Quantities`: units, quantities and models, a one-line formula notation over a model's quantities, and runs.
-  Depends on `Ranvier.Numerics`.
-- `Ranvier.Statistics`: the normal quantile, the confidence sequence and the fixed-sample interval over the moments of
+- `Ranvier.Numerics`: special functions (`Special`), root finding and minimisation (`Roots`, `Minimize`), least squares
+  (`LeastSquares`), quadrature and differentiation (`Integrate`, `Differentiate`), ODE integration (`Ode`),
+  interpolation (`Interpolate`), dense linear algebra (`Vector`, `Matrix`, `LuDecomposition`, `CholeskyDecomposition`,
+  `QrDecomposition`), the Fourier transform (`Fourier`), compensated sums (`Sum`), moments and their relatives
+  (`Moments`, `Comoments`, `HigherMoments`, `WeightedMoments`), streaming and windowed accumulators (`Window`,
+  `TimeWindow`, `DecayedMoments`, `Histogram`, `QuantileEstimate`), float policies and maintained aggregates
+  (`FloatPolicy`, `Aggregate`), tolerances (`Tolerance`), random variates (`Generator`) and values with an uncertainty
+  (`Uncertain`).
+- `Ranvier.Quantities`: an SI unit catalogue with prefixes, parsing and conversion (`Dimension`, `Prefix`, `UnitInfo`,
+  `Units`, `UnitCatalogue`), quantities and models with uncertainty (`Quantity`, `Model`), CODATA 2022 physical
+  constants (`Constants`), a one-line formula notation whose results are model entries (`Formula`), first-order and
+  Monte Carlo propagation of uncertainty, and runs, including one that advances an ODE with a clock (`Run`). Depends on
   `Ranvier.Numerics`.
+- `Ranvier.Statistics`: continuous and discrete distributions (`Continuous`, `Discrete`), descriptive statistics
+  (`Describe`), confidence intervals (`MeanInterval`, `ProportionInterval`, `VarianceInterval`,
+  `DifferenceInterval`), hypothesis tests (`HypothesisTest`), a sequential test with its confidence sequence
+  (`SequentialTest`, `ConfidenceSequence`, `FixedSample`), multiple-testing adjustments (`Adjust`), regression and curve
+  fitting (`Regression`), correlation (`Correlation`), the bootstrap (`Bootstrap`) and kernel density estimation
+  (`Density`). Depends on `Ranvier.Numerics`.
 
 ```
-dotnet add package Ranvier.Numerics --version 0.1.0
-dotnet add package Ranvier.Quantities --version 0.1.0
-dotnet add package Ranvier.Statistics --version 0.1.0
+dotnet add package Ranvier.Numerics --version 0.2.0
+dotnet add package Ranvier.Quantities --version 0.2.0
+dotnet add package Ranvier.Statistics --version 0.2.0
 ```
 
-`Ranvier.Numerics` depends on `Ranvier` 0.2.0; `Ranvier.Quantities` and `Ranvier.Statistics` depend on
-`Ranvier.Numerics` 0.1.0. Each package carries its F# sources under `fable/`, which the Fickl compiler builds to
+`Ranvier.Numerics` depends on `Ranvier` 0.2.1; `Ranvier.Quantities` and `Ranvier.Statistics` depend on
+`Ranvier.Numerics` 0.2.0. Each package carries its F# sources under `fable/`, which the Fickl compiler builds to
 JavaScript.
 
-The interfaces are a first slice and will change before 1.0. Section 3 of
+[The guide](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/GUIDE.md) walks through the tasks a
+scientist brings, each snippet the text of a test that runs on both targets. [The accuracy
+record](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/accuracy.md) lists each approximating
+kernel with the bound its tests pin and the reference that bound is checked against.
+
+Section 3 of
 [the findings](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md#3-interfaces-to-change-before-widening)
-lists the changes.
+lists the interface changes from 0.1.0 and what became of each.
 
 ## What it holds
 
-- `src/Ranvier.Numerics`: compensated sum, moments, float policy and maintained aggregates, tolerance, generator.
-- `src/Ranvier.Quantities`: units, quantities and models, runs.
-- `src/Ranvier.Statistics`: normal quantile, confidence sequence, fixed-sample interval.
+- `src/Ranvier.Numerics`: numerical kernels, accumulators, maintained aggregates, tolerance, generator.
+- `src/Ranvier.Quantities`: units, constants, quantities and models, formulas, runs.
+- `src/Ranvier.Statistics`: distributions, intervals, tests, regression, sequential test, resampling.
 - `tests/`: one test suite that compiles to two targets, .NET and, through the Fickl compiler, JavaScript.
 - `bench/Ranvier.Science.Benchmarks`: the benchmark project.
 - `examples/Monitor`: the sequential monitor, one page for a native window and a browser (below).
 - `examples/AstroTracked`: removed on 2026-11-20; see "AstroTracked" below.
-- `docs/`: the probe record and the measurements.
+- `docs/`: the guide, the probe record and the measurements.
 
 ## Tests
 
@@ -144,6 +162,10 @@ Run from the repository root, in Release.
 
 - [`docs/FINDINGS.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/FINDINGS.md): the findings of the slice: the answers to its five questions, the core
   proposals, the interfaces to change before widening, and what to widen first.
+- [`docs/GUIDE.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/GUIDE.md): the guide, twelve tasks each
+  with a snippet that is the text of a test running on both targets.
+- [`docs/measurements/accuracy.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/accuracy.md):
+  each approximating kernel with the bound its tests pin and the reference's source.
 - [`docs/PROBES.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/PROBES.md): what each probe ran and what it showed.
 - [`docs/measurements/node-cost.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/node-cost.md): the node-cost measurements.
 - [`docs/measurements/aggregates.md`](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/measurements/aggregates.md): the aggregate and key-scaling measurements.

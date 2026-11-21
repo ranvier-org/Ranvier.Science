@@ -2,8 +2,8 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
-        <Description>Numerics for the Ranvier reactive graph: compensated sums, moments, float policies and maintained aggregates, tolerances and a pseudo-random generator.</Description>
-        <PackageTags>numerics;compensated-summation;moments;aggregates;floating-point;ranvier;reactive;fsharp</PackageTags>
+        <Description>Numerics for the Ranvier reactive graph: special functions, root finding, minimisation and least squares, quadrature, ODE integration, interpolation, dense linear algebra, the Fourier transform, compensated sums, moments, streaming and windowed accumulators, maintained aggregates, tolerances and random variates.</Description>
+        <PackageTags>numerics;special-functions;linear-algebra;least-squares;root-finding;quadrature;ode;interpolation;fft;moments;aggregates;random;ranvier;reactive;fsharp</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
