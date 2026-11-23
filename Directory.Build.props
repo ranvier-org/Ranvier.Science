@@ -12,6 +12,8 @@
         <Copyright>Copyright (c) 2026 Shayan Habibi</Copyright>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <RanvierPackageSuffix Condition="'$(RanvierTrace)' == 'true'">.Traced</RanvierPackageSuffix>
+        <DefineConstants Condition="'$(RanvierTrace)' == 'true'">$(DefineConstants);RANVIER_TRACE</DefineConstants>
     </PropertyGroup>
 
 </Project>

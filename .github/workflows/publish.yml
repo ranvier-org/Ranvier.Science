@@ -89,8 +89,13 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           ls -l packages
+          all=(packages/*.nupkg)
+          if [ "${#all[@]}" -ne 6 ]; then
+            echo "::error::Expected 6 packages in artifact, found ${#all[@]}"
+            exit 1
+          fi
           new=false
-          for id in Ranvier.Numerics Ranvier.Quantities Ranvier.Statistics; do
+          for id in Ranvier.Numerics Ranvier.Numerics.Traced Ranvier.Quantities Ranvier.Quantities.Traced Ranvier.Statistics Ranvier.Statistics.Traced; do
             files=(packages/"$id".[0-9]*.nupkg)
             if [ "${#files[@]}" -ne 1 ]; then
               echo "::error::Expected one $id package, found ${#files[@]}"
@@ -134,14 +139,14 @@ jobs:
         id: login
         with:
           user: ${{ vars.NUGET_USER || 'shayan.habibi' }}
-      # Ranvier.Numerics first: the other two depend on it. A push also sends a .snupkg beside its .nupkg; the packages
-      # embed their PDBs, so CI packs none.
+      # Ranvier.Numerics and Ranvier.Numerics.Traced first: the other packages depend on them. A push also sends a .snupkg
+      # beside its .nupkg; the packages embed their PDBs, so CI packs none.
       - name: Publish in dependency order
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          for id in Ranvier.Numerics Ranvier.Quantities Ranvier.Statistics; do
+          for id in Ranvier.Numerics Ranvier.Numerics.Traced Ranvier.Quantities Ranvier.Quantities.Traced Ranvier.Statistics Ranvier.Statistics.Traced; do
             for package in packages/"$id".[0-9]*.nupkg; do
               dotnet nuget push "$package" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
             done

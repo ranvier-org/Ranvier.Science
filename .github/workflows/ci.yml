@@ -47,6 +47,21 @@ jobs:
           dotnet pack src/Ranvier.Numerics -c Release -o artifacts/packages
           dotnet pack src/Ranvier.Quantities -c Release -o artifacts/packages
           dotnet pack src/Ranvier.Statistics -c Release -o artifacts/packages
+      - name: Build (traced)
+        run: dotnet build -c Release -p:RanvierTrace=true
+      - name: .NET tests (traced)
+        run: dotnet run -c Release -p:RanvierTrace=true --project tests/Ranvier.Science.Tests
+      - name: Compile the JavaScript tests (traced)
+        env:
+          RanvierTrace: 'true'
+        run: dotnet fickl tests/Ranvier.Science.Tests.Fable -e .fs.js -o dist/tests-traced -c Release
+      - name: JavaScript tests (traced)
+        run: npx mocha dist/tests-traced/Main.fs.js
+      - name: Pack (traced)
+        run: |
+          dotnet pack src/Ranvier.Numerics -c Release -p:RanvierTrace=true -o artifacts/packages
+          dotnet pack src/Ranvier.Quantities -c Release -p:RanvierTrace=true -o artifacts/packages
+          dotnet pack src/Ranvier.Statistics -c Release -p:RanvierTrace=true -o artifacts/packages
       - uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
