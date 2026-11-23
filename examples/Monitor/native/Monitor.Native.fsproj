@@ -19,12 +19,12 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Ranvier" Version="0.2.1" />
-        <PackageReference Include="Ranvier.View" Version="0.2.0" />
-        <PackageReference Include="Ranvier.View.Dom" Version="0.2.0" />
-        <PackageReference Include="Ranvier.View.WebCore.Sdl" Version="0.2.1" />
-        <PackageReference Include="Ranvier.D5" Version="0.1.1" />
-        <PackageReference Include="Ranvier.D5.View" Version="0.1.1" />
+        <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="0.2.1" />
+        <PackageReference Include="Ranvier.View$(RanvierPackageSuffix)" Version="0.4.0" />
+        <PackageReference Include="Ranvier.View.Dom$(RanvierPackageSuffix)" Version="0.4.0" />
+        <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="0.2.3" />
+        <PackageReference Include="Ranvier.D5$(RanvierPackageSuffix)" Version="0.5.1" />
+        <PackageReference Include="Ranvier.D5.View$(RanvierPackageSuffix)" Version="0.5.1" />
     </ItemGroup>
 
     <ItemGroup>
@@ -33,7 +33,7 @@
 
     <!-- Hot reload runs under the JIT only, so it is a Debug-only reference, used by "dotnet run" with the dev argument. -->
     <ItemGroup Condition="'$(Configuration)' == 'Debug'">
-        <PackageReference Include="Ranvier.View.WebCore.Hmr" Version="0.1.3" />
+        <PackageReference Include="Ranvier.View.WebCore.Hmr$(RanvierPackageSuffix)" Version="0.1.5" />
     </ItemGroup>
 
 </Project>

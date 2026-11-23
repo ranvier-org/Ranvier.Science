@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!-- The sequential monitor in a browser: the shared sources in ../src, compiled to JavaScript with Fickl, with
-         Browser.fs as the entry point. Not in the solution. The Ranvier.D5 packages carry no Fable sources, so Fickl
-         compiles them from the clone beside this repository. -->
+         Browser.fs as the entry point. Not in the solution. -->
     <PropertyGroup>
         <OutputType>Library</OutputType>
         <TargetFramework>net10.0</TargetFramework>
@@ -19,14 +18,15 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Ranvier.View" Version="0.2.0" />
-        <PackageReference Include="Ranvier.View.Dom" Version="0.2.0" />
+        <PackageReference Include="Ranvier.View$(RanvierPackageSuffix)" Version="0.4.0" />
+        <PackageReference Include="Ranvier.View.Dom$(RanvierPackageSuffix)" Version="0.4.0" />
+        <PackageReference Include="Ranvier.D5$(RanvierPackageSuffix)" Version="0.5.1" />
+        <PackageReference Include="Ranvier.D5.View$(RanvierPackageSuffix)" Version="0.5.1" />
         <PackageReference Include="Fable.Core" Version="5.3.0" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="../model/Monitor.Model.fsproj" />
-        <ProjectReference Include="../../../../Ranvier.D5/src/Ranvier.D5.View/Ranvier.D5.View.fsproj" />
     </ItemGroup>
 
 </Project>

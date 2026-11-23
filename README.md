@@ -2,11 +2,11 @@
 
 Numerics, quantities and statistics libraries built on the Ranvier reactive graph.
 
-Version 0.2.0 builds on the published `Ranvier` 0.2.1 package. The interfaces will change before 1.0.
+Version 0.2.1 builds on the published `Ranvier` 0.2.1 package. The interfaces will change before 1.0.
 
 ## Packages
 
-Three packages, each at version 0.2.0:
+Three packages, each at version 0.2.1 (with `.Traced` twins `Ranvier.Numerics.Traced`, `Ranvier.Quantities.Traced` and `Ranvier.Statistics.Traced` built with `RANVIER_TRACE` on `Ranvier.Traced` 0.2.1):
 
 - `Ranvier.Numerics`: special functions (`Special`), root finding and minimisation (`Roots`, `Minimize`), least squares
   (`LeastSquares`), quadrature and differentiation (`Integrate`, `Differentiate`), ODE integration (`Ode`),
@@ -29,13 +29,13 @@ Three packages, each at version 0.2.0:
   (`Density`). Depends on `Ranvier.Numerics`.
 
 ```
-dotnet add package Ranvier.Numerics --version 0.2.0
-dotnet add package Ranvier.Quantities --version 0.2.0
-dotnet add package Ranvier.Statistics --version 0.2.0
+dotnet add package Ranvier.Numerics --version 0.2.1
+dotnet add package Ranvier.Quantities --version 0.2.1
+dotnet add package Ranvier.Statistics --version 0.2.1
 ```
 
 `Ranvier.Numerics` depends on `Ranvier` 0.2.1; `Ranvier.Quantities` and `Ranvier.Statistics` depend on
-`Ranvier.Numerics` 0.2.0. Each package carries its F# sources under `fable/`, which the Fickl compiler builds to
+`Ranvier.Numerics` 0.2.1 (and each `.Traced` twin depends on the `.Traced` twin of its dependency). Each package carries its F# sources under `fable/`, which the Fickl compiler builds to
 JavaScript.
 
 [The guide](https://github.com/ranvier-org/Ranvier.Science/blob/main/docs/GUIDE.md) walks through the tasks a
